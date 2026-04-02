@@ -41,7 +41,7 @@ COPY . .
 # Build shared packages first
 RUN pnpm --filter "@workspace/db" --if-present run build
 RUN pnpm --filter "@workspace/api-zod" --if-present run build
-RUN pnpm --filter "@workspace/ai-core" --if-present run build
+# ai-core exports raw .ts files — esbuild handles transpilation, no tsc build needed
 RUN pnpm --filter "@workspace/api-client-react" --if-present run build
 RUN pnpm --filter "@workspace/integrations-openai-ai-server" --if-present run build
 RUN pnpm --filter "@workspace/integrations-openai-ai-react" --if-present run build
