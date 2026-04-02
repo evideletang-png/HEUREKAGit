@@ -1,6 +1,7 @@
 import app from "./app";
 import { runMigrations } from "@workspace/db";
 import { seedDefaultPrompts } from "./services/promptLoader.js";
+import { seedAdminUser } from "./services/seedAdminUser.js";
 
 const rawPort = process.env["PORT"];
 
@@ -33,6 +34,11 @@ async function start() {
       console.log("[prompts] Default prompts seeded.");
     } catch (err) {
       console.warn("[prompts] Seeding skipped:", err);
+    }
+    try {
+      await seedAdminUser();
+    } catch (err) {
+      console.warn("[seed] Admin user seed skipped:", err);
     }
   });
 }
