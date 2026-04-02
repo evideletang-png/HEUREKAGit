@@ -36,6 +36,8 @@ RUN pnpm install --frozen-lockfile --config.autoInstallPeers=false
 FROM deps AS builder
 WORKDIR /app
 
+# Pass --build-arg CACHEBUST=$(date +%s) to bypass the layer cache when needed
+ARG CACHEBUST=1
 COPY . .
 
 # Build shared packages first
