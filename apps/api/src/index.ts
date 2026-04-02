@@ -1,4 +1,5 @@
 import app from "./app";
+import { runMigrations } from "@workspace/db";
 import { seedDefaultPrompts } from "./services/promptLoader.js";
 
 const rawPort = process.env["PORT"];
@@ -15,16 +16,29 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, "0.0.0.0", async () => {
-  console.log(`Server listening on port ${port}`);
+async function start() {
+  // Run DB migrations before accepting traffic
   try {
-    await seedDefaultPrompts();
-    console.log("[prompts] Default prompts seeded.");
+    await runMigrations();
+    console.log("[db] Migrations applied.");
   } catch (err) {
-    console.warn("[prompts] Seeding skipped:", err);
+    console.error("[db] Migration failed — aborting startup.", err);
+    process.exit(1);
   }
-});
+
+  app.listen(port, "0.0.0.0", async () => {
+    console.log(`Server listening on port ${port}`);
+    try {
+      await seedDefaultPrompts();
+      console.log("[prompts] Default prompts seeded.");
+    } catch (err) {
+      console.warn("[prompts] Seeding skipped:", err);
+    }
+  });
+}
 
 process.on("unhandledRejection", (reason) => {
   console.error("[process] Unhandled Promise Rejection", String(reason));
 });
+
+start();

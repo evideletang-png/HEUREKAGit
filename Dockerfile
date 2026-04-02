@@ -65,6 +65,8 @@ COPY --from=builder /app/apps/api/dist         ./apps/api/dist
 COPY --from=builder /app/apps/web/dist/public  ./apps/web/dist/public
 COPY --from=builder /app/node_modules          ./node_modules
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+# Migration files must be present at runtime for drizzle-orm/migrator
+COPY --from=builder /app/packages/db/drizzle   ./packages/db/drizzle
 
 EXPOSE 8080
 
