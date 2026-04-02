@@ -37,7 +37,7 @@ app.use("/api", router);
 const frontendDist = path.resolve(__dirname, "../../web/dist/public");
 app.use(express.static(frontendDist));
 // SPA fallback — serve index.html for all non-API routes
-app.get("*", (_req, res) => {
+app.use((_req, res) => {
   res.sendFile(path.join(frontendDist, "index.html"));
 });
 
