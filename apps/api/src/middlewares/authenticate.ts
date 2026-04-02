@@ -19,13 +19,11 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
     return;
   }
 
-  console.log(`[authenticate] Payload: ${JSON.stringify(payload)}`);
   req.user = payload;
   next();
 }
 
 export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
-  console.log(`[requireAdmin] User role: ${req.user?.role}`);
   if (req.user?.role !== "admin") {
     res.status(403).json({ error: "FORBIDDEN", message: "Admin access required" });
     return;
@@ -34,7 +32,6 @@ export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction
 }
 
 export function requireMairie(req: AuthRequest, res: Response, next: NextFunction): void {
-  console.log(`[requireMairie] User role: ${req.user?.role}`);
   if (req.user?.role !== "mairie" && req.user?.role !== "admin") {
     res.status(403).json({ error: "FORBIDDEN", message: "Accès réservé aux agents de mairie." });
     return;

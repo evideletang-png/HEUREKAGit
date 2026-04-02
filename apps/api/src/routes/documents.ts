@@ -24,6 +24,7 @@ import { getZoningByCoords } from "../services/planning.js";
 import { getParcelByCoords } from "../services/parcel.js";
 import { extractDocumentData, compareWithPLU, type ExtractedDocumentData, type ComparisonResult } from "../services/pluAnalysis.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
+import { logger } from "../utils/logger.js";
 
 const router: IRouter = Router();
 
@@ -75,15 +76,15 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
            extractedText += "\n\n--- DONNÉES DU FORMULAIRE CERFA ---\n" + formData;
         }
       } catch (formErr) {
-        console.error("[pdf-lib form extraction]", formErr);
+        logger.error("[pdf-lib form extraction]", formErr);
       }
 
       // If text is very sparse, it might be a scan. Fallback to Vision for the first pages.
       if (extractedText.trim().length < 200) {
         try {
-          console.log(`[Vision Fallback] PDF text too sparse (${extractedText.length} chars). Converting to image...`);
+          logger.debug("[Vision Fallback] PDF text too sparse (${extractedText.length} chars). Converting to image...`);
           let pdfImgConvert: any = null;
-          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { console.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
+          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { logger.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
           if (!pdfImgConvert) throw new Error("pdf-img-convert not available");
           const images = await pdfImgConvert.convert(filePath, { width: 1600, page_numbers: [1, 2] });
           
@@ -106,11 +107,11 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
             }
             if (visionText.trim().length > 50) {
                extractedText = visionText;
-               console.log("[Vision Fallback] Successfully extracted text via Vision.");
+               logger.debug("[Vision Fallback] Successfully extracted text via Vision.");
             }
           }
         } catch (vErr) {
-          console.error("[Vision Fallback Error]", vErr);
+          logger.error("[Vision Fallback Error]", vErr);
         }
       }
 
@@ -119,9 +120,9 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
       const isPlan = fileNameLower.includes("plan") || fileNameLower.includes("coupe") || fileNameLower.includes("façade") || fileNameLower.includes("facade");
       if (isPlan && !extractedText.includes("ANALYSE VISUELLE DU PLAN")) {
         try {
-          console.log(`[Vision] Converting PDF plan to image for: ${documentType}`);
+          logger.debug(`[Vision] Converting PDF plan to image for: ${documentType}`);
           let pdfImgConvert: any = null;
-          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { console.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
+          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { logger.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
           if (!pdfImgConvert) throw new Error("pdf-img-convert not available");
           const images = await pdfImgConvert.convert(filePath, { width: 2000, page_numbers: [1] }); // Page 1 usually has the most info
           
@@ -144,13 +145,13 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
             }
           }
         } catch (visionErr) {
-          console.error("[Vision PDF Error]", visionErr);
+          logger.error("[Vision PDF Error]", visionErr);
         }
       }
 
       return extractedText;
     } catch (e) {
-      console.error("[pdf-parse]", e);
+      logger.error("[pdf-parse]", e);
       return "[Impossible d'extraire le texte du PDF automatiquement]";
     }
   }
@@ -214,8 +215,8 @@ router.get("/", authenticate, async (req: AuthRequest, res) => {
 // POST /api/documents/upload — upload + analyse document(s)
 router.post("/upload", authenticate, upload.array("files", 50), async (req: AuthRequest, res) => {
   try {
-    console.log(`[Upload] Body:`, req.body);
-    console.log(`[Upload] User:`, req.user);
+    logger.debug("[Upload] Request received", { bodyKeys: Object.keys(req.body || {}) });
+    logger.debug("[Upload] User", { userId: req.user?.userId });
     const files = req.files as Express.Multer.File[];
 
     const { title, documentType = "permis_de_construire", analysisId, referenceDocumentId, commune, adresse, dossierId, pieceCode } = req.body as {
@@ -230,7 +231,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
     };
 
     if (!files || files.length === 0) {
-      console.warn(`[Upload] No files provided`);
+      logger.warn("[Upload] No files provided");
       return res.status(400).json({ error: "Au moins un fichier est requis (PDF, image, ou texte)." });
     }
 
@@ -249,7 +250,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
     const [existingDossier] = await db.select().from(dossiersTable).where(eq(dossiersTable.id, finalDossierId)).limit(1);
     
     if (!existingDossier) {
-      console.log(`[Upload] Creating phantom dossier ${finalDossierId} for user ${req.user!.userId}`);
+      logger.info("[Upload] Creating phantom dossier", { dossierId: finalDossierId, userId: req.user!.userId });
       await db.insert(dossiersTable).values({
         id: finalDossierId as any,
         userId: req.user!.userId,
@@ -292,7 +293,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
     // Process each document asynchronously
     docs.forEach((doc: any, index: number) => {
       const file = files[index];
-      setImmediate(async () => {
+      setImmediate(() => { (async () => {
         try {
           // Step 1: Extract text from THIS file
           const rawText = await extractTextFromFile(file.path, file.mimetype, doc.documentType as string);
@@ -342,7 +343,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
 
         // CONTEXT SHARING: If this doc has a project address but we don't have one globally yet, use it
         if (extractedData.project_address && !effectiveCommune) {
-           console.log(`[Context Sharing] Found city name in doc address: ${extractedData.project_address}`);
+           logger.debug("[Context Sharing] Found city name in doc address", { address: extractedData.project_address });
            // Try to extract city from address string (rough heuristic)
            const parts = extractedData.project_address.split(/,|\s+/);
            const possibleCity = parts[parts.length - 1]; // Assume last word is city-ish if no comma
@@ -361,7 +362,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
                                  data.site;
                                  
         if (!finalAdresse && potentialAddress) {
-          console.log(`[documents/process] Using extracted address for geocoding: ${potentialAddress}`);
+          logger.debug("[documents/process] Using extracted address for geocoding", { address: potentialAddress });
           finalAdresse = potentialAddress;
         }
 
@@ -372,25 +373,25 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
               const bestMatch = geoResults[0];
               if (!effectiveCommune) effectiveCommune = bestMatch.city || effectiveCommune;
               
-              console.log(`[documents/process] Geocoded "${finalAdresse}" to ${bestMatch.lat},${bestMatch.lng}`);
+              logger.debug("[documents/process] Geocoded address", { address: finalAdresse, lat: bestMatch.lat, lng: bestMatch.lng });
               
               // New: Precise Parcel Lookup
               try {
-                console.log(`[documents/process] Fetching precise parcel for ${bestMatch.lat}, ${bestMatch.lng}`);
+                logger.debug("[documents/process] Fetching parcel", { lat: bestMatch.lat, lng: bestMatch.lng });
                 parcel = await getParcelByCoords(bestMatch.lat, bestMatch.lng, bestMatch.banId || "", bestMatch.label);
                 if (parcel) {
                   const cadastralRef = `${parcel.cadastralSection}${parcel.parcelNumber}`;
-                  console.log(`[documents/process] Found parcel: ${cadastralRef}`);
+                  logger.debug("[documents/process] Found parcel", { cadastralRef });
                 }
               } catch (parcelErr) {
-                console.warn("[documents/process] Precise parcel lookup failed, falling back to point zoning", parcelErr);
+                logger.warn("[documents/process] Precise parcel lookup failed, falling back to point zoning");
               }
 
               const zoning = await getZoningByCoords(bestMatch.lat, bestMatch.lng);
               if (zoning) {
                 zoneCode = zoning.zoneCode;
                 zoneLabel = zoning.zoningLabel;
-                console.log(`[documents/process] Zoning found: ${zoneCode} (${zoneLabel})`);
+                logger.debug("[documents/process] Zoning found", { zoneCode, zoneLabel });
                 if (zoning.rawText) {
                   townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") +
                     "Règles extraites du Géoportail de l'Urbanisme pour cette adresse précise :\n" + zoning.rawText;
@@ -398,7 +399,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
               }
             }
           } catch (geoErr) {
-            console.error("[documents/process] Geocoding fallback failed", geoErr);
+            logger.error("[documents/process] Geocoding fallback failed", geoErr);
           }
         }
 
@@ -456,10 +457,10 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
               if (otherZone) {
                 articles = await db.select().from(ruleArticlesTable)
                   .where(eq(ruleArticlesTable.zoneAnalysisId, otherZone.id as any));
-                console.log(`[documents/process] Found ${articles.length} articles from another analysis for zone ${zoneCode} in ${effectiveCommune}`);
+                logger.debug("[documents/process] Found articles from another analysis", { count: articles.length, zoneCode, commune: effectiveCommune });
               }
             } catch (fetchErr) {
-              console.error("[documents/process] Error fetching articles from other analyses:", fetchErr);
+              logger.error("[documents/process] Error fetching articles from other analyses:", fetchErr);
             }
           }
         }
@@ -478,7 +479,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
           });
         }
 
-        console.log(`[documents/process] Saving results for doc ${doc.id}: address=${adresse}, zone=${zoneCode}, parcel=${parcel?.cadastralSection}${parcel?.parcelNumber}`);
+        logger.info("[documents/process] Saving results", { docId: doc.id, zoneCode });
         await db.update(documentReviewsTable)
           .set({
             comparisonResultJson: comparisonResult ? JSON.stringify(comparisonResult) : null,
@@ -494,7 +495,7 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
           .where(eq(documentReviewsTable.id, doc.id));
 
       } catch (err) {
-        console.error("[documents/process] CRITICAL FAILURE:", err);
+        logger.error("[documents/process] CRITICAL FAILURE:", err);
         const errorMsg = err instanceof Error ? `${err.message}\n${err.stack}` : "Erreur inconnue lors de l'analyse.";
         
         await db.update(documentReviewsTable)
@@ -508,11 +509,11 @@ router.post("/upload", authenticate, upload.array("files", 50), async (req: Auth
         // Cleanup THIS file
         try { fs.unlinkSync(file.path); } catch {}
       }
-    });
+    })().catch((err: any) => logger.error("[documents/process] Unhandled rejection", err)); });
   });
 
   } catch (err) {
-    console.error("[documents/upload]", err);
+    logger.error("[documents/upload]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -541,26 +542,26 @@ router.post("/:id/compare", authenticate, async (req: AuthRequest, res) => {
     .set({ analysisId: analysis.id as any, status: "processing", updatedAt: new Date() })
     .where(eq(documentReviewsTable.id, id as any));
 
-  console.log(`[Reprocess] Received request for doc ${id}`);
+  logger.info("[Reprocess] Received request", { docId: id });
   res.json({ message: "Comparaison PLU lancée." });
 
-  setImmediate(async () => {
+  setImmediate(() => { (async () => {
     try {
-      console.log(`[Reprocess] Starting background task for doc ${id}`);
+      logger.debug("[Reprocess] Starting background task", { docId: id });
       // Re-fetch doc to ensure latest status, especially if it was just updated
       const [doc] = await db.select().from(documentReviewsTable).where(eq(documentReviewsTable.id, id as any)).limit(1);
       if (!doc) { 
-        console.error(`[Reprocess] Document ${id} not found in DB`);
+        logger.error("[Reprocess] Document not found in DB", null, { docId: id });
         return; 
       }
-      console.log(`[Reprocess] Found doc ${doc.title}, status: ${doc.status}`);
+      logger.debug("[Reprocess] Found doc", { title: doc.title, status: doc.status });
 
       const rawExtracted = doc.extractedDataJson ? JSON.parse(doc.extractedDataJson) : null;
       const extractedData = rawExtracted?.data ?? rawExtracted;
 
       const { analysisId, referenceDocumentId, commune: reqCommune } = req.body as { analysisId?: string; referenceDocumentId?: string; commune?: string };
         const effectiveCommune = reqCommune || doc.commune;
-      console.log(`[Reprocess] Effective commune: ${effectiveCommune}`);
+      logger.debug("[Reprocess] Effective commune", { commune: effectiveCommune });
       
       let pluRules = "";
       let zoneCode = "";
@@ -618,13 +619,13 @@ router.post("/:id/compare", authenticate, async (req: AuthRequest, res) => {
 
       // Re-analyze full dossier for consistency
       const cityNameFallback = (currentAnalysis as any)?.city || effectiveCommune || doc.commune || "Nogent-sur-Marne";
-      console.log(`[Reprocess] Calling orchestrateDossierAnalysis for dossier ${doc.dossierId} with commune ${cityNameFallback}`);
+      logger.info("[Reprocess] Calling orchestrateDossierAnalysis", { dossierId: doc.dossierId, commune: cityNameFallback });
       const result = await orchestrateDossierAnalysis(doc.dossierId!, doc.userId, cityNameFallback);
-      console.log(`[Reprocess] Orchestration finished. Status: ${result.status}, GlobalScore: ${result.globalScore}`);
+      logger.info("[Reprocess] Orchestration finished", { status: result.status, globalScore: result.globalScore });
       
       // Use the global analysis result for this document (fallback to specific if available)
       const myAnalysis = result.analysisResult || result.results.find((r: any) => r.docId === doc.id && r.task === "analyze")?.result || {};
-      console.log(`[Reprocess] Result found for doc: ${!!myAnalysis}`);
+      logger.debug("[Reprocess] Result found", { found: !!myAnalysis });
 
       await db.update(documentReviewsTable)
         .set({
@@ -648,12 +649,12 @@ router.post("/:id/compare", authenticate, async (req: AuthRequest, res) => {
           .where(eq(dossiersTable.id, doc.dossierId));
       }
     } catch (err) {
-      console.error("[documents/compare]", err);
+      logger.error("[documents/compare]", err);
       await db.update(documentReviewsTable)
         .set({ status: "failed", updatedAt: new Date() })
         .where(eq(documentReviewsTable.id, id as any));
     }
-  });
+  })().catch((err: any) => logger.error("[documents/compare] Unhandled rejection", err)); });
 });
 
 // GET /api/documents/:id — get single document with full results
@@ -846,7 +847,7 @@ router.patch("/:id/submit", authenticate, async (req: AuthRequest, res) => {
 
     return res.json({ success: true, message: "Dossier soumis avec succès" });
   } catch (error) {
-    console.error("Error submitting dossier:", error);
+    logger.error("Error submitting dossier:", error);
     return res.status(500).json({ error: "Erreur lors de la soumission du dossier" });
   }
 });
@@ -872,14 +873,14 @@ router.post("/:id/reprocess", authenticate, async (req: any, res) => {
   res.json({ success: true, message: "Analyse orchestrée relancée." });
 
   // Background processing via Orchestrator
-  setImmediate(async () => {
+  setImmediate(() => { (async () => {
     try {
       const dossierId = doc.dossierId || doc.id;
       const commune = doc.commune || "Nogent-sur-Marne";
       
-      console.log(`[Reprocess] Starting orchestration for dossier ${dossierId} at ${commune}...`);
+      logger.info("[Reprocess] Starting orchestration", { dossierId, commune });
       const result = await orchestrateDossierAnalysis(dossierId, userId, commune);
-      console.log(`[Reprocess] Orchestration finished for dossier ${dossierId}. Status: ${result.status}`);
+      logger.info("[Reprocess] Orchestration finished", { dossierId, status: result.status });
 
       // Save ALL dynamic data to the document
       const dataToSave = {
@@ -898,18 +899,18 @@ router.post("/:id/reprocess", authenticate, async (req: any, res) => {
         })
         .where(eq(documentReviewsTable.id, id as any));
 
-      console.log(`[Reprocess] Successfully updated document ${id} with analysis results.`);
+      logger.info("[Reprocess] Successfully updated document", { docId: id });
     } catch (err) {
-      console.error("[documents/reprocess] Orchestration Error:", err);
+      logger.error("[documents/reprocess] Orchestration Error:", err);
       await db.update(documentReviewsTable)
-        .set({ 
-          status: "failed", 
+        .set({
+          status: "failed",
           failureReason: err instanceof Error ? err.message : "Échec de l'orchestration.",
-          updatedAt: new Date() 
+          updatedAt: new Date()
         })
         .where(eq(documentReviewsTable.id, id as any));
     }
-  });
+  })().catch((err: any) => logger.error("[documents/reprocess] Unhandled rejection", err)); });
 });
 
 export default router;

@@ -1,9 +1,6 @@
 import app from "./app";
 import { seedDefaultPrompts } from "./services/promptLoader.js";
 
-// Bypass SSL for GPU API (official government certificates issues with Node.js fetch)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
@@ -26,4 +23,8 @@ app.listen(port, "0.0.0.0", async () => {
   } catch (err) {
     console.warn("[prompts] Seeding skipped:", err);
   }
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] Unhandled Promise Rejection", String(reason));
 });

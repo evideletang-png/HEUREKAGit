@@ -18,6 +18,7 @@ import {
   zoneAnalysesTable
 } from "@workspace/db";
 import { createHash } from "crypto";
+import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
 import { generateGlobalSynthesis, type ExtractedDocumentData } from "../services/pluAnalysis.js";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
@@ -170,7 +171,7 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
 
     return res.json({ dossiers: enrichedDossiers });
   } catch (err) {
-    console.error("[mairie/dossiers]", err);
+    logger.error("[mairie/dossiers]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -265,7 +266,7 @@ router.get("/dossiers/:id", async (req: AuthRequest, res) => {
 
     return res.json({ ...dossier, documents: allDocuments, messages: allMessages });
   } catch (err) {
-    console.error("[mairie/dossiers/:id]", err);
+    logger.error("[mairie/dossiers/:id]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -408,7 +409,7 @@ router.patch("/dossiers/:id/metadata", async (req: AuthRequest, res) => {
     // For now, return OK and let frontend trigger refetch
     return res.json({ success: true, metadata: newMetadata });
   } catch (err) {
-    console.error("[mairie/dossiers/:id/metadata]", err);
+    logger.error("[mairie/dossiers/:id/metadata]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -442,7 +443,7 @@ router.post("/dossiers/:id/re-analyze", async (req: AuthRequest, res) => {
 
     return res.json({ success: true, result });
   } catch (err: any) {
-    console.error("[mairie/dossiers/:id/re-analyze]", err);
+    logger.error("[mairie/dossiers/:id/re-analyze]", err);
     return res.status(500).json({ error: "ORCHESTRATOR_FAILED", message: err.message });
   }
 });
@@ -529,7 +530,7 @@ router.get("/dossiers/:id/summary", async (req: AuthRequest, res) => {
 
     return res.json(synthesis);
   } catch (err) {
-    console.error("[mairie/dossiers/:id/summary]", err);
+    logger.error("[mairie/dossiers/:id/summary]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -554,7 +555,7 @@ router.get("/messages/:dossierId", async (req: AuthRequest, res) => {
 
     res.json({ messages });
   } catch (err) {
-    console.error("[mairie/messages/:dossierId]", err);
+    logger.error("[mairie/messages/:dossierId]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -635,7 +636,7 @@ router.post("/messages/:dossierId", async (req: AuthRequest, res) => {
 
     res.json({ message: inserted });
   } catch (err) {
-    console.error("[mairie/messages/:dossierId POST]", err);
+    logger.error("[mairie/messages/:dossierId POST]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -712,7 +713,7 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
       const result = await pdfParse(buffer);
       return result.text;
     } catch (e) {
-      console.error("[pdf-parse]", e);
+      logger.error("[pdf-parse]", e);
       return "[Impossible d'extraire le texte du PDF automatiquement]";
     }
   }
@@ -774,7 +775,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
     res.json({ batchId: batch.id, status: "processing", message: "Traitement par lot démarré." });
 
     // 2. Process Files Background
-    setImmediate(async () => {
+    setImmediate(() => { (async () => {
       try {
         const results = [];
         for (const file of files) {
@@ -831,9 +832,9 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  commune: targetCommune,
                  zone: req.body.zone || null
                });
-               console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
+               logger.debug("[mairie/batch] Successfully processed RAG", { docId: doc.id });
              } catch (ragErr) {
-               console.error(`[mairie/batch] RAG Processing failed for doc ${doc.id}:`, ragErr);
+               logger.error("[mairie/batch] RAG Processing failed", ragErr, { docId: doc.id });
                // We don't block the rest of the batch if RAG fails, but we should log it
                await db.update(baseIADocumentsTable).set({ status: "vectorization_failed" }).where(eq(baseIADocumentsTable.id, doc.id));
              }
@@ -844,16 +845,16 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
         }
 
         await db.update(baseIABatchesTable).set({ status: "completed" }).where(eq(baseIABatchesTable.id, batch.id));
-        console.log(`[mairie/batch] Completed batch ${batch.id}`);
+        logger.info("[mairie/batch] Completed batch", { batchId: batch.id });
       } catch (err) {
-        console.error(`[mairie/batch] Error in background process:`, err);
+        logger.error("[mairie/batch] Error in background process", err);
         await db.update(baseIABatchesTable).set({ status: "failed" }).where(eq(baseIABatchesTable.id, batch.id));
       }
-    });
+    })().catch((err: any) => logger.error("[mairie/batch] Unhandled rejection", err)); });
 
     return;
   } catch (err) {
-    console.error("[mairie/documents/batch POST]", err);
+    logger.error("[mairie/documents/batch POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -881,7 +882,7 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
     
     res.json({ status: "processing", message: "Document reçu, analyse en arrière-plan démarrée." });
 
-    setImmediate(async () => {
+    setImmediate(() => { (async () => {
       try {
         const rawText = await extractTextFromFile(file.path, file.mimetype);
         const suggestion = autoSuggestClassification(rawText, file.originalname);
@@ -918,9 +919,9 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
                 commune: targetCommune,
                 zone: req.body.zone || null
               });
-             console.log(`[mairie/upload] Successfully processed RAG for doc ${doc.id}`);
+             logger.debug("[mairie/upload] Successfully processed RAG", { docId: doc.id });
            } catch (ragErr) {
-             console.error(`[mairie/upload] RAG vectorization failed for doc ${doc.id}:`, ragErr);
+             logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: doc.id });
            }
         }
         
@@ -928,21 +929,21 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
         const persistentPath = path.join(process.cwd(), "uploads", `${doc.id}${path.extname(file.originalname)}`);
         try {
           fs.copyFileSync(file.path, persistentPath);
-          console.log(`[VisionStorage] File stored: ${persistentPath}`);
+          logger.debug("[VisionStorage] File stored", { path: persistentPath });
         } catch (copyErr) {
-          console.error(`[VisionStorage] Failed to store file:`, copyErr);
+          logger.error("[VisionStorage] Failed to store file", copyErr);
         }
 
-        console.log(`[mairie/upload] Successfully processed ${file.originalname}`);
+        logger.info("[mairie/upload] Successfully processed", { fileName: file.originalname });
         try { fs.unlinkSync(file.path); } catch {}
       } catch (err) {
-        console.error(`[mairie/upload] Background error:`, err);
+        logger.error("[mairie/upload] Background error", err);
       }
-    });
+    })().catch((err: any) => logger.error("[mairie/upload] Unhandled rejection", err)); });
 
     return;
   } catch(err) {
-    console.error("[mairie/documents POST]", err);
+    logger.error("[mairie/documents POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", details: err instanceof Error ? err.stack : String(err) });
   }
 });
@@ -963,7 +964,7 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     const commune = (req.query.commune as string || "").trim();
     if (!commune) return res.status(400).json({ error: "Commune requise" });
 
-    console.log(`[GPU] Starting sync for commune: '${commune}'`);
+    logger.info("[GPU] Starting sync", { commune });
 
     // A. Direct INSEE check (5 digits)
     if (/^\d{5}$/.test(commune)) {
@@ -990,11 +991,11 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
 
     // D. Dynamic Geocoding Resolution (FINAL FALLBACK)
     if (!insee) {
-      console.log(`[GPU] Dynamic resolution for: '${commune}'`);
+      logger.debug("[GPU] Dynamic resolution", { commune });
       const geocodeResults = await geocodeAddress(commune, "municipality");
       if (geocodeResults.length > 0) {
         insee = geocodeResults[0].inseeCode || null;
-        console.log(`[GPU] Geocoding resolved '${commune}' to INSEE ${insee} (${geocodeResults[0].label})`);
+        logger.debug("[GPU] Geocoding resolved", { commune, insee });
       }
     }
 
@@ -1005,14 +1006,14 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       });
     }
 
-    console.log(`[GPU] Final INSEE code resolved: ${insee}`);
+    logger.debug("[GPU] Final INSEE code resolved", { insee });
 
     // 1. Fetch all documents for this commune
     const allDocs = await GPUProviderService.getDocumentsByInsee(insee);
 
     // 2. Keep only the active document(s)
     const activeDocs = allDocs.filter(d => d.status === "document.production");
-    console.log(`[GPU] ${activeDocs.length} active document(s) (document.production) out of ${allDocs.length} total`);
+    logger.info("[GPU] Active documents", { active: activeDocs.length, total: allDocs.length });
 
     if (activeDocs.length === 0) {
       return res.json({ success: true, count: 0, documents: [], message: "Aucun document actif trouvé (document.production) pour cette commune." });
@@ -1024,15 +1025,15 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
     for (const gpuDoc of activeDocs) {
-      console.log(`[GPU] Processing doc ${gpuDoc.id} — ${gpuDoc.originalName}`);
+      logger.debug("[GPU] Processing doc", { docId: gpuDoc.id, name: gpuDoc.originalName });
 
       // 3. Fetch the file list for this document
       const allFiles = await GPUProviderService.getFilesByDocumentId(gpuDoc.id);
-      console.log(`[GPU]   Total files in document: ${allFiles.length}`);
+      logger.debug("[GPU] Total files in document", { count: allFiles.length });
 
       // 4. Filter to regulatory-relevant files
       const criticalFiles = GPUProviderService.filterCriticalFiles(allFiles);
-      console.log(`[GPU]   Critical files to ingest: ${criticalFiles.length}`);
+      logger.debug("[GPU] Critical files to ingest", { count: criticalFiles.length });
 
       for (const file of criticalFiles) {
         const note = await GPUProviderService.generateExplanatoryNote(file.name, file.title);
@@ -1045,12 +1046,12 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
           execSync(curlDownload, { timeout: 65000 });
           const size = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
           if (size > 5000) { // Increased threshold to avoid capturing tiny HTML redirect pages
-            console.log(`[GPU]   Downloaded: ${safeFilename} (${(size/1024).toFixed(1)} KB)`);
+            logger.debug("[GPU] Downloaded file", { file: safeFilename });
           } else {
-            console.warn(`[GPU]   Download suspicious (${size} bytes): ${safeFilename}`);
+            logger.warn("[GPU] Download suspicious", { bytes: size, file: safeFilename });
           }
         } catch (downloadErr: any) {
-          console.error(`[GPU]   Download failed for ${file.name}: ${downloadErr.message}`);
+          logger.error("[GPU] Download failed", downloadErr, { file: file.name });
           // Continue anyway — we still catalog the document
         }
 
@@ -1091,7 +1092,7 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
           .limit(1);
 
         if (existing.length > 0) {
-          console.log(`[GPU]   Already in DB for this user, skipping: ${safeFilename}`);
+          logger.debug("[GPU] Already in DB, skipping", { file: safeFilename });
           continue;
         }
 
@@ -1114,10 +1115,10 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       }
     }
 
-    console.log(`[GPU] Sync complete: ${count} document(s) ingested for ${commune}`);
+    logger.info("[GPU] Sync complete", { count, commune });
     return res.json({ success: true, count, documents: results });
   } catch (err) {
-    console.error("[mairie/gpu/sync]", err);
+    logger.error("[mairie/gpu/sync]", err);
     return res.status(500).json({ error: "GPU_SYNC_FAILED", message: err instanceof Error ? err.message : "Erreur de sync" });
   }
 });
@@ -1134,7 +1135,7 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
       .limit(1);
 
     if (!doc || !doc.fileName) {
-      console.warn(`[mairie/view] Document record or filename not found for ID: ${id}`);
+      logger.warn("[mairie/view] Document record or filename not found", { docId: id });
       return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
     }
 
@@ -1143,7 +1144,7 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
     const filePath = path.join(uploadDir, doc.fileName);
     
     if (!fs.existsSync(filePath)) {
-      console.error(`[mairie/view] Physical file missing in uploads/ for: ${doc.fileName}`);
+      logger.error("[mairie/view] Physical file missing", null, { fileName: doc.fileName });
       return res.status(404).json({ error: "FILE_NOT_FOUND_ON_DISK" });
     }
 
@@ -1151,7 +1152,7 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
     res.setHeader('Content-Disposition', 'inline');
     return fs.createReadStream(filePath).pipe(res);
   } catch (err) {
-    console.error(`[mairie/view] Critical error for ID ${req.params.id}:`, err);
+    logger.error("[mairie/view] Critical error", err, { docId: req.params.id });
     return res.status(500).json({ error: "VIEW_FAILED" });
   }
 });
@@ -1190,7 +1191,7 @@ router.get("/prompts/:commune", async (req: AuthRequest, res) => {
     
     res.json({ prompt: rows.length > 0 ? rows[0] : null });
   } catch(err) {
-    console.error("[mairie/prompts GET]", err);
+    logger.error("[mairie/prompts GET]", err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1231,7 +1232,7 @@ router.post("/prompts/:commune", async (req: AuthRequest, res) => {
     
     res.json({ prompt });
   } catch(err) {
-    console.error("[mairie/prompts POST]", err);
+    logger.error("[mairie/prompts POST]", err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1255,7 +1256,7 @@ router.get("/settings/:commune", async (req: AuthRequest, res) => {
     
     res.json({ settings: settings || null });
   } catch(err) {
-    console.error("[mairie/settings GET]", err);
+    logger.error("[mairie/settings GET]", err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1307,7 +1308,7 @@ router.post("/settings/:commune", async (req: AuthRequest, res) => {
     
     return res.json({ settings: result });
   } catch(err) {
-    console.error("[mairie/settings POST]", err);
+    logger.error("[mairie/settings POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1353,7 +1354,7 @@ router.delete("/dossiers/:id", async (req: AuthRequest, res) => {
 
     return res.json({ success: true, message: "Dossier supprimé avec succès" });
   } catch (err) {
-    console.error("[mairie/dossiers DELETE]", err);
+    logger.error("[mairie/dossiers DELETE]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1387,7 +1388,7 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
     const responseSent = res.json({ status: "processing", message: "L'analyse graphique par GPT-4o Vision a démarré." });
 
     // 4. Background processing
-    setImmediate(async () => {
+    setImmediate(() => { (async () => {
       try {
         const visualDescription = await VisionService.analyzePlan(filePath);
         
@@ -1401,10 +1402,10 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
           })
           .where(eq(documentReviewsTable.id, id as any));
         
-        console.log(`[Vision] Analysis completed for doc ${id}`);
+        logger.info("[Vision] Analysis completed", { docId: id });
         return;
       } catch (visionErr: any) {
-        console.error(`[Vision] Analysis failed for doc ${id}:`, visionErr);
+        logger.error("[Vision] Analysis failed", visionErr, { docId: id });
         await db.update(documentReviewsTable)
           .set({ 
             status: "failed", 
@@ -1413,11 +1414,11 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
           })
           .where(eq(documentReviewsTable.id, id as any));
       }
-    });
+    })().catch((err: any) => logger.error("[mairie/vision] Unhandled rejection", err)); });
 
     return responseSent;
   } catch (err) {
-    console.error("[mairie/vision POST]", err);
+    logger.error("[mairie/vision POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
