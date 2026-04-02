@@ -93,6 +93,8 @@ export const CERFA_INCOMPLETE: CerfaExtraction = {
     created_m2: null,
     taxable_m2: null
   },
+  requested_height_m: null,
+  requested_footprint_m2: null,
   confidence: {
     score: 0.1,
     level: "low",

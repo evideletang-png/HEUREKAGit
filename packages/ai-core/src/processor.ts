@@ -46,7 +46,8 @@ export class DocumentPipeline {
       score: 0.5,
       level: "medium",
       review_status: "review_recommended",
-      ambiguities: ["Pipeline scaffolded - results may be inconsistent"]
+      ambiguities: ["Pipeline scaffolded - results may be inconsistent"],
+      missing_critical_data: []
     };
   }
 }
