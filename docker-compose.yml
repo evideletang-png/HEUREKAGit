@@ -1,10 +1,9 @@
 version: '3.8'
 
 services:
-  # Base de données PostgreSQL
   db:
     image: postgres:15-alpine
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -15,13 +14,18 @@ services:
       - pgdata:/var/lib/postgresql/data
     networks:
       - heureka-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-heureka}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
-  # Backend & Frontend (Servis par l'API Server en production)
   app:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
-    restart: always
+    restart: unless-stopped
     environment:
       - NODE_ENV=production
       - PORT=8080
@@ -29,9 +33,10 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
-      - "80:8080" # Maps l'application sur le port standard HTTP (80)
+      - "8080:8080"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - heureka-network
 

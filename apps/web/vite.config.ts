@@ -20,6 +20,19 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("react-dom") || id.includes("/react/")) return "react-vendor";
+          if (id.includes("@tanstack")) return "query-vendor";
+          if (id.includes("leaflet") || id.includes("react-leaflet")) return "map-vendor";
+          if (id.includes("recharts") || id.includes("d3-")) return "chart-vendor";
+          if (id.includes("lucide-react")) return "icons-vendor";
+          return "vendor";
+        },
+      },
+    },
   },
   server: {
     port: 5173,
