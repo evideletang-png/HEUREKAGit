@@ -30,7 +30,7 @@ COPY packages/api-client-react/package.json                ./packages/api-client
 COPY packages/integrations-openai-ai-server/package.json   ./packages/integrations-openai-ai-server/
 COPY packages/integrations-openai-ai-react/package.json    ./packages/integrations-openai-ai-react/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --config.autoInstallPeers=false
 
 # ── Build ───────────────────────────────────────────────────────────────────
 FROM deps AS builder
