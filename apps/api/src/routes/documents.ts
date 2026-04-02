@@ -82,7 +82,9 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
       if (extractedText.trim().length < 200) {
         try {
           console.log(`[Vision Fallback] PDF text too sparse (${extractedText.length} chars). Converting to image...`);
-          const pdfImgConvert = await import("pdf-img-convert");
+          let pdfImgConvert: any = null;
+          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { console.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
+          if (!pdfImgConvert) throw new Error("pdf-img-convert not available");
           const images = await pdfImgConvert.convert(filePath, { width: 1600, page_numbers: [1, 2] });
           
           if (images && images.length > 0) {
@@ -118,7 +120,9 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
       if (isPlan && !extractedText.includes("ANALYSE VISUELLE DU PLAN")) {
         try {
           console.log(`[Vision] Converting PDF plan to image for: ${documentType}`);
-          const pdfImgConvert = await import("pdf-img-convert");
+          let pdfImgConvert: any = null;
+          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { console.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
+          if (!pdfImgConvert) throw new Error("pdf-img-convert not available");
           const images = await pdfImgConvert.convert(filePath, { width: 2000, page_numbers: [1] }); // Page 1 usually has the most info
           
           if (images && images.length > 0) {
