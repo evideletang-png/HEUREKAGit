@@ -82,7 +82,7 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
       // If text is very sparse, it might be a scan. Fallback to Vision for the first pages.
       if (extractedText.trim().length < 200) {
         try {
-          logger.debug("[Vision Fallback] PDF text too sparse (${extractedText.length} chars). Converting to image...`);
+          logger.debug(`[Vision Fallback] PDF text too sparse (${extractedText.length} chars). Converting to image...`);
           let pdfImgConvert: any = null;
           try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { logger.warn("[canvas] pdf-img-convert not available, skipping vision fallback."); }
           if (!pdfImgConvert) throw new Error("pdf-img-convert not available");
