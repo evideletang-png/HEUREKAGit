@@ -1,0 +1,728 @@
+import { computeBboxFromFeature } from "./src/geo/bbox.js";
+import * as turf from "@turf/turf";
+import express from "express";
+
+const app = express();
+app.use(express.json({ limit: "10mb" }));
+
+// ------------------ ROUTE ROOT ------------------
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    service: "parcel-selector-api",
+    endpoints: ["/health","/select-parcel","/compute-bbox","/filter-buildings-on-parcel","/analyse-parcelle","/classify-boundaries"]
+  });
+});
+
+// ------------------ HEALTHCHECK ------------------
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+// ------------------ HELPERS ------------------
+function toNumber(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v).replace(",", ".").trim();
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function bboxOfRing(ring) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of ring) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function bboxContainsPoint(b, p) {
+  return p[0] >= b.minX &&
+         p[0] <= b.maxX &&
+         p[1] >= b.minY &&
+         p[1] <= b.maxY;
+}
+
+function pointInRing(p, ring) {
+  let inside = false;
+  const x = p[0], y = p[1];
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+
+    const intersect =
+      ((yi > y) !== (yj > y)) &&
+      (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygon(p, polygonCoords) {
+  if (!polygonCoords || polygonCoords.length === 0) return false;
+
+  const outer = polygonCoords[0];
+  if (!pointInRing(p, outer)) return false;
+
+  for (let h = 1; h < polygonCoords.length; h++) {
+    if (pointInRing(p, polygonCoords[h])) return false;
+  }
+  return true;
+}
+
+function pointInMultiPolygon(p, mpCoords) {
+  for (const poly of mpCoords) {
+    if (pointInPolygon(p, poly)) return true;
+  }
+  return false;
+}
+
+function sqDist(a, b) {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  return dx * dx + dy * dy;
+}
+
+function pointToSegmentSqDist(p, a, b) {
+  const vx = b[0] - a[0];
+  const vy = b[1] - a[1];
+  const wx = p[0] - a[0];
+  const wy = p[1] - a[1];
+
+  const c1 = vx * wx + vy * wy;
+  if (c1 <= 0) return sqDist(p, a);
+
+  const c2 = vx * vx + vy * vy;
+  if (c2 <= c1) return sqDist(p, b);
+
+  const t = c1 / c2;
+  const proj = [a[0] + t * vx, a[1] + t * vy];
+
+  return sqDist(p, proj);
+}
+
+function minDistanceSqToGeometry(p, geom) {
+  if (!geom) return Infinity;
+
+  const { type, coordinates } = geom;
+  let min = Infinity;
+
+  function processRing(ring) {
+    for (let i = 1; i < ring.length; i++) {
+      const d = pointToSegmentSqDist(p, ring[i - 1], ring[i]);
+      if (d < min) min = d;
+    }
+  }
+
+  if (type === "Polygon") {
+    for (const ring of coordinates) processRing(ring);
+  } else if (type === "MultiPolygon") {
+    for (const poly of coordinates) {
+      for (const ring of poly) processRing(ring);
+    }
+  }
+
+  return min;
+}
+
+// ------------------ MAIN LOGIC ------------------
+function selectParcel({ lon, lat, cadastre_features }) {
+  const pt = [lon, lat];
+  const features = Array.isArray(cadastre_features) ? cadastre_features : [];
+
+  const inside = [];
+
+  for (const f of features) {
+    const geom = f?.geometry;
+    if (!geom) continue;
+
+    try {
+      if (geom.type === "Polygon") {
+        const b = bboxOfRing(geom.coordinates[0]);
+        if (!bboxContainsPoint(b, pt)) continue;
+        if (pointInPolygon(pt, geom.coordinates)) inside.push(f);
+      } else if (geom.type === "MultiPolygon") {
+        let maybe = false;
+        for (const poly of geom.coordinates) {
+          const b = bboxOfRing(poly[0]);
+          if (bboxContainsPoint(b, pt)) { maybe = true; break; }
+        }
+        if (!maybe) continue;
+        if (pointInMultiPolygon(pt, geom.coordinates)) inside.push(f);
+      }
+    } catch {}
+  }
+
+  let selected = null;
+  let method = "";
+  let confidence = 0;
+
+  if (inside.length === 1) {
+    selected = inside[0];
+    method = "point_in_polygon_unique";
+    confidence = 0.95;
+  } else if (inside.length > 1) {
+    method = "point_in_polygon_multiple_choose_nearest_boundary";
+    let best = Infinity;
+    for (const f of inside) {
+      const d = minDistanceSqToGeometry(pt, f.geometry);
+      if (d < best) { best = d; selected = f; }
+    }
+    confidence = 0.75;
+  } else {
+    method = "nearest_boundary_fallback";
+    let best = Infinity;
+    for (const f of features) {
+      const d = minDistanceSqToGeometry(pt, f?.geometry);
+      if (d < best) { best = d; selected = f; }
+    }
+    confidence = selected ? 0.55 : 0.0;
+  }
+
+  const props = selected?.properties || {};
+
+  return {
+    ok: !!selected,
+    method,
+    confidence,
+    candidates_count: features.length,
+    inside_count: inside.length,
+    selected_idu: props.idu || null,
+    selected_section: props.section || null,
+    selected_numero: props.numero || null,
+    selected_code_insee: props.code_insee || null,
+    selected_contenance_m2: props.contenance || null,
+    selected_feature: selected || null
+  };
+}
+
+// ------------------ API ROUTE ------------------
+app.post("/select-parcel", (req, res) => {
+  const lon = toNumber(req.body?.lon);
+  const lat = toNumber(req.body?.lat);
+  const cadastre_features = req.body?.cadastre_features;
+
+  if (lon === null || lat === null) {
+    return res.status(400).json({ ok: false, error: "Invalid lon/lat" });
+  }
+
+  if (!Array.isArray(cadastre_features) || cadastre_features.length === 0) {
+    return res.status(400).json({
+      ok: false,
+      error: "cadastre_features must be a non-empty array"
+    });
+  }
+
+  const result = selectParcel({ lon, lat, cadastre_features });
+  res.json(result);
+});
+// ------------------ BBOX FROM PARCEL FEATURE ------------------
+app.post("/compute-bbox", (req, res) => {
+  try {
+    const { selected_feature, buffer } = req.body;
+
+    if (!selected_feature) {
+      return res.status(400).json({
+        ok: false,
+        error: "selected_feature is required"
+      });
+    }
+
+    const result = computeBboxFromFeature(
+      selected_feature,
+      typeof buffer === "number" ? buffer : 0.0002
+    );
+
+    return res.json({
+      ok: true,
+      ...result
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+
+// ------------------ FILTER BUILDINGS ON PARCEL ------------------
+app.post("/filter-buildings-on-parcel", (req, res) => {
+  try {
+    let { parcel_feature, building_features } = req.body;
+
+    if (typeof parcel_feature === "string") {
+      parcel_feature = JSON.parse(parcel_feature);
+    }
+
+    if (typeof building_features === "string") {
+      building_features = JSON.parse(building_features);
+    }
+
+    if (!parcel_feature || !parcel_feature.geometry) {
+      return res.status(400).json({
+        ok: false,
+        error: "parcel_feature is required"
+      });
+    }
+
+    if (!Array.isArray(building_features)) {
+      return res.status(400).json({
+        ok: false,
+        error: "building_features must be an array"
+      });
+    }
+
+    // ------------------ DROP Z (TURF préfère 2D) ------------------
+
+    function dropZ(coords) {
+      if (!Array.isArray(coords)) return coords;
+
+      if (typeof coords[0] === "number") {
+        return [coords[0], coords[1]];
+      }
+
+      return coords.map(dropZ);
+    }
+
+    function to2D(feature) {
+      return {
+        ...feature,
+        geometry: {
+          ...feature.geometry,
+          coordinates: dropZ(feature.geometry.coordinates)
+        }
+      };
+    }
+
+    const parcel2D = to2D(parcel_feature);
+
+    const kept = [];
+    let totalFootprintM2 = 0;
+
+    for (const building of building_features) {
+      if (!building?.geometry) continue;
+
+      try {
+        const building2D = to2D(building);
+
+        // 1️⃣ test rapide : bbox intersect
+        const bboxParcel = turf.bbox(parcel2D);
+        const bboxBuilding = turf.bbox(building2D);
+
+        const bboxIntersects =
+          bboxParcel[0] <= bboxBuilding[2] &&
+          bboxParcel[2] >= bboxBuilding[0] &&
+          bboxParcel[1] <= bboxBuilding[3] &&
+          bboxParcel[3] >= bboxBuilding[1];
+
+        if (!bboxIntersects) continue;
+
+        // 2️⃣ test géométrique
+        const intersects = turf.booleanIntersects(parcel2D, building2D);
+
+        if (!intersects) continue;
+
+        kept.push(building);
+
+        // 3️⃣ surface exacte
+        const intersection = turf.intersect(parcel2D, building2D);
+
+        if (intersection) {
+          totalFootprintM2 += turf.area(intersection);
+        }
+
+      } catch (e) {
+        console.log("Intersection error", e.message);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      buildings_found: building_features.length,
+      buildings_on_parcel_count: kept.length,
+      buildings_on_parcel: kept,
+      footprint_on_parcel_m2: Number(totalFootprintM2.toFixed(2))
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+// ------------------ PARCEL ANALYSIS ------------------
+app.post("/analyse-parcelle", (req, res) => {
+  try {
+
+    const { lon, lat, cadastre_features, building_features } = req.body;
+
+    if (!Array.isArray(cadastre_features)) {
+      return res.status(400).json({
+        ok: false,
+        error: "cadastre_features missing"
+      });
+    }
+
+    if (!Array.isArray(building_features)) {
+      return res.status(400).json({
+        ok: false,
+        error: "building_features missing"
+      });
+    }
+
+    // sélection parcelle
+    const parcelResult = selectParcel({
+      lon,
+      lat,
+      cadastre_features
+    });
+
+    if (!parcelResult.selected_feature) {
+      return res.json({
+        ok: false,
+        error: "parcel not found"
+      });
+    }
+
+    const parcel = parcelResult.selected_feature;
+
+    // ------------------ DROP Z ------------------
+    function dropZ(coords) {
+      if (!Array.isArray(coords)) return coords;
+
+      if (typeof coords[0] === "number") {
+        return [coords[0], coords[1]];
+      }
+
+      return coords.map(dropZ);
+    }
+
+    function to2D(feature) {
+
+      if (!feature?.geometry) return null;
+
+      return {
+        ...feature,
+        geometry: {
+          ...feature.geometry,
+          coordinates: dropZ(feature.geometry.coordinates)
+        }
+      };
+    }
+
+    const parcel2D = to2D(parcel);
+
+    if (!parcel2D) {
+      return res.status(500).json({
+        ok: false,
+        error: "parcel geometry invalid"
+      });
+    }
+
+    const buildingsOnParcel = [];
+    let footprint = 0;
+
+    for (const b of building_features) {
+
+      if (!b?.geometry) continue;
+
+      try {
+
+        const b2D = to2D(b);
+
+        if (!b2D) continue;
+
+        // test intersection rapide
+        const intersects = turf.booleanIntersects(parcel2D, b2D);
+
+        if (!intersects) continue;
+
+        buildingsOnParcel.push(b);
+
+        // intersection réelle
+        const fc = turf.featureCollection([parcel2D, b2D]);
+
+        const inter = turf.intersect(fc);
+
+        if (inter) {
+          footprint += turf.area(inter);
+        }
+
+      } catch (e) {
+        console.log("Intersection error:", e.message);
+      }
+
+    }
+
+    // ------------------ METRICS ------------------
+
+    const heights = buildingsOnParcel
+      .map(b => b.properties?.hauteur)
+      .filter(v => typeof v === "number");
+
+    const floors = buildingsOnParcel
+      .map(b => b.properties?.nombre_d_etages)
+      .filter(v => typeof v === "number");
+
+    const avgHeight =
+      heights.length
+        ? heights.reduce((a, b) => a + b, 0) / heights.length
+        : null;
+
+    const avgFloors =
+      floors.length
+        ? floors.reduce((a, b) => a + b, 0) / floors.length
+        : null;
+
+    const parcelSurface = parcel.properties?.contenance ?? null;
+
+    const floorArea =
+      footprint && avgFloors
+        ? footprint * avgFloors
+        : null;
+
+    return res.json({
+
+      ok: true,
+
+      parcel_id: parcel.properties?.idu ?? null,
+
+      parcel_surface_m2: parcelSurface,
+
+      buildings_count: buildingsOnParcel.length,
+
+      footprint_m2: Number(footprint.toFixed(2)),
+
+      estimated_floor_area_m2:
+        floorArea ? Number(floorArea.toFixed(2)) : null,
+
+      avg_height_m:
+        avgHeight ? Number(avgHeight.toFixed(2)) : null,
+
+      avg_floors:
+        avgFloors ? Number(avgFloors.toFixed(2)) : null,
+
+      buildings: buildingsOnParcel
+
+    });
+
+  } catch (err) {
+
+    console.log("analyse-parcelle error:", err);
+
+    return res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+
+  }
+});
+// ------------------ CLASSIFY BOUNDARIES ------------------
+app.post("/classify-boundaries", (req, res) => {
+  try {
+    let { parcel_feature, road_features } = req.body;
+
+    if (typeof parcel_feature === "string") {
+      parcel_feature = JSON.parse(parcel_feature);
+    }
+
+    if (typeof road_features === "string") {
+      road_features = JSON.parse(road_features);
+    }
+
+    if (!parcel_feature || !parcel_feature.geometry) {
+      return res.status(400).json({
+        ok: false,
+        error: "parcel_feature is required"
+      });
+    }
+
+    if (!Array.isArray(road_features)) {
+      return res.status(400).json({
+        ok: false,
+        error: "road_features must be an array"
+      });
+    }
+
+    function cleanCoordinates(coords) {
+      if (!Array.isArray(coords)) return coords;
+
+      if (typeof coords[0] === "number" || typeof coords[0] === "string") {
+        return [Number(coords[0]), Number(coords[1])];
+      }
+
+      return coords.map(cleanCoordinates);
+    }
+
+    function cleanFeature(feature) {
+      if (!feature || !feature.geometry) return null;
+
+      const geom = feature.geometry;
+      if (!geom.coordinates) return null;
+
+      return {
+        ...feature,
+        geometry: {
+          ...geom,
+          coordinates: cleanCoordinates(geom.coordinates)
+        }
+      };
+    }
+
+    const parcel2D = cleanFeature(parcel_feature);
+
+    if (!parcel2D) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid parcel geometry"
+      });
+    }
+
+    let ring = null;
+
+    if (parcel2D.geometry.type === "Polygon") {
+      ring = parcel2D.geometry.coordinates[0];
+    } else if (parcel2D.geometry.type === "MultiPolygon") {
+      ring = parcel2D.geometry.coordinates[0][0];
+    } else {
+      return res.status(400).json({
+        ok: false,
+        error: "Parcel geometry must be Polygon or MultiPolygon"
+      });
+    }
+
+    if (!Array.isArray(ring) || ring.length < 2) {
+      return res.status(400).json({
+        ok: false,
+        error: "Parcel ring invalid"
+      });
+    }
+
+    // Polygon de parcelle pour filtrer les routes proches
+    let parcelPolygon = null;
+    try {
+      if (parcel2D.geometry.type === "Polygon") {
+        parcelPolygon = turf.polygon(parcel2D.geometry.coordinates);
+      } else {
+        parcelPolygon = turf.multiPolygon(parcel2D.geometry.coordinates);
+      }
+    } catch (e) {
+      return res.status(400).json({
+        ok: false,
+        error: "Parcel polygon invalid"
+      });
+    }
+
+    // Nettoyage routes + filtrage LineString valides
+    const cleanedRoads = road_features
+      .map(cleanFeature)
+      .filter(f =>
+        f &&
+        f.geometry &&
+        f.geometry.type === "LineString" &&
+        Array.isArray(f.geometry.coordinates) &&
+        f.geometry.coordinates.length >= 2
+      );
+
+    // On ne garde que les routes raisonnablement proches de la parcelle
+    const nearbyRoads = cleanedRoads.filter(f => {
+      try {
+        const buffered = turf.buffer(f, 40, { units: "meters" });
+        return turf.booleanIntersects(buffered, parcelPolygon);
+      } catch {
+        return false;
+      }
+    });
+
+    const roadBoundarySegments = [];
+    const sideBoundarySegments = [];
+
+    let roadBoundaryLengthM = 0;
+    let sideBoundaryLengthM = 0;
+
+    const roadThresholdM = 12;
+
+    for (let i = 1; i < ring.length; i++) {
+      const a = [Number(ring[i - 1][0]), Number(ring[i - 1][1])];
+      const b = [Number(ring[i][0]), Number(ring[i][1])];
+
+      const segment = turf.lineString([a, b]);
+      const length = turf.length(segment, { units: "meters" });
+
+      // milieu du segment
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const midPoint = turf.point(mid);
+
+      let minDistanceM = Infinity;
+      let closestRoadName = null;
+
+      for (const road of nearbyRoads) {
+        try {
+          const d = turf.pointToLineDistance(midPoint, road, { units: "meters" });
+          if (d < minDistanceM) {
+            minDistanceM = d;
+            closestRoadName =
+              road?.properties?.nom_voie_ban_gauche ||
+              road?.properties?.nom_collaboratif_gauche ||
+              road?.properties?.nom_voie_ban_droite ||
+              road?.properties?.nom_collaboratif_droite ||
+              null;
+          }
+        } catch {}
+      }
+
+      const touchesRoad = minDistanceM <= roadThresholdM;
+
+      const feature = {
+        type: "Feature",
+        geometry: segment.geometry,
+        properties: {
+          boundary_type: touchesRoad ? "road" : "side",
+          length_m: Number(length.toFixed(2)),
+          min_distance_to_road_m:
+            Number.isFinite(minDistanceM) ? Number(minDistanceM.toFixed(2)) : null,
+          closest_road_name: closestRoadName
+        }
+      };
+
+      if (touchesRoad) {
+        roadBoundarySegments.push(feature);
+        roadBoundaryLengthM += length;
+      } else {
+        sideBoundarySegments.push(feature);
+        sideBoundaryLengthM += length;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      parcel_segments_count: ring.length - 1,
+      nearby_roads_count: nearbyRoads.length,
+      road_threshold_m: roadThresholdM,
+      road_boundary_segments_count: roadBoundarySegments.length,
+      side_boundary_segments_count: sideBoundarySegments.length,
+      road_boundary_length_m: Number(roadBoundaryLengthM.toFixed(2)),
+      side_boundary_length_m: Number(sideBoundaryLengthM.toFixed(2)),
+      road_boundary_segments: roadBoundarySegments,
+      side_boundary_segments: sideBoundarySegments
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+// ------------------ SERVER ------------------
+const port = Number(process.env.PORT) || 8080;
+
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Server listening on ${port}`);
+});

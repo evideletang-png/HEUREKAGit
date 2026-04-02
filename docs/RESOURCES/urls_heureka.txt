@@ -1,0 +1,35 @@
+================================================================================
+HEUREKA - LISTE DES URLS PAR RÔLE
+================================================================================
+
+1. ACCÈS PUBLICS (Tous les utilisateurs)
+--------------------------------------------------------------------------------
+- Landing Page (Accueil) : http://localhost:5173/
+- Connexion            : http://localhost:5173/login
+- Inscription          : http://localhost:5173/register
+
+
+2. ESPACE CITOYEN (Administrés)
+--------------------------------------------------------------------------------
+- Tableau de bord      : http://localhost:5173/citoyen
+- Nouveau dossier      : http://localhost:5173/citoyen/nouveau
+- Détail d'un dossier   : http://localhost:5173/citoyen/dossier/[ID_DU_DOSSIER]
+
+
+3. ESPACE MAIRIE (Agents municipaux)
+--------------------------------------------------------------------------------
+- Portail Mairie       : http://localhost:5173/portail-mairie
+  (Liste des dossiers, groupement par administré, commentaires, base PLU)
+- Espace Conformité    : http://localhost:5173/conformite
+  (Analyse technique détaillée d'un CERFA par rapport au PLU)
+
+
+4. ESPACE ADMINISTRATION (Superadmin)
+--------------------------------------------------------------------------------
+- Dashboard Admin      : http://localhost:5173/admin
+  (Gestion des utilisateurs, assignation des communes aux mairies)
+- Mon Compte           : http://localhost:5173/account
+
+================================================================================
+Note : Les accès sont restreints en fonction du rôle défini en base de données.
+================================================================================

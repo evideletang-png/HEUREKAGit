@@ -1,0 +1,30 @@
+# Implementation Plan - Messagerie Administrés & Timeline (Option A) [COMPLETED]
+
+L'**Option A (Portail Citoyen Complet)** avec une **Timeline de Suivi** est désormais entièrement opérationnelle.
+
+## Architecture Implémentée
+
+### 1. Base de données
+- **Utilisateurs** : Supporte les rôles `user`, `mairie`, and [admin](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/lib/api-client-react/src/generated/api.ts#2385-2393).
+- **Table `document_reviews`** : Colonne `timeline_step` ajoutée (étapes: `depot`, `analyse`, `instruction`, `pieces`, `decision`).
+- **Table `dossier_messages`** : Table créée pour les échanges sécurisés.
+
+### 2. Backend (API)
+- **Authentification** : `POST /api/auth/register` (unifié pour tous les rôles).
+- **Gestion des Dossiers** : 
+  - `GET /api/documents` (Filtré par RBAC : Citoyen voit les siens, Mairie voit sa commune).
+  - `GET /api/documents/:id` (Détail sécurisé).
+  - `POST /api/documents/upload` (Upload multi-fichiers avec commune cible).
+- **Messagerie & Timeline** :
+  - `GET /api/documents/:id/messages` (Thread de discussion).
+  - `POST /api/documents/:id/messages` (Envoi de message).
+  - `PATCH /api/documents/:id/timeline` (Mise à jour de l'étape par la Mairie).
+
+### 3. Frontend Citoyen (`/citoyen`)
+- **Dashboard** : Liste des dossiers avec badges de statut et type.
+- **Dépôt** : Nouveau formulaire avec recherche d'adresse (API Gouv) et upload multi-PDF.
+- **Suivi Détail** : Timeline visuelle interactive et interface de chat temps-réel.
+
+### 4. Frontend Mairie (Espace Conformité)
+- **Pilotage** : Frise Timeline permettant aux agents municipaux d'avancer les dossiers.
+- **Communication** : Section messagerie intégrée pour répondre aux citoyens directement sur le dossier.

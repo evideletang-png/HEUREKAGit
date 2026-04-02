@@ -1,0 +1,287 @@
+Parfait — on va structurer ça proprement pour que tu puisses plugger directement dans Replit et construire ton backend SaaS.
+
+L’objectif : avoir un schéma unique standardisé = ton GeoContext
+→ réutilisable partout (API, IA, UI, PDF, etc.)
+
+⸻
+
+🧠 STRUCTURE GLOBALE — geo_context
+
+Voici le JSON complet que ton outil doit générer :
+
+{
+  "parcel": {},
+  "parcel_metrics": {},
+  "parcel_boundaries": {},
+  "buildings_on_parcel": {},
+  "neighbour_context": {},
+  "roads": {},
+  "plu": {},
+  "constraints": {},
+  "topography": {},
+  "buildable": {},
+  "project": {}
+}
+
+
+⸻
+
+1️⃣ PARCELLE
+
+{
+  "parcel": {
+    "id": "37208000BS0252",
+    "section": "BS",
+    "number": "0252",
+    "insee_code": "37208",
+    "surface_m2": 1518,
+    "geometry": { "type": "MultiPolygon", "coordinates": [...] },
+    "centroid": [0.7341, 47.3509],
+    "bbox": [minX, minY, maxX, maxY]
+  }
+}
+
+
+⸻
+
+2️⃣ MÉTRIQUES PARCELLE
+
+{
+  "parcel_metrics": {
+    "area_m2": 1518,
+    "perimeter_m": 196.73,
+    "frontage_length_m": 19.62,
+    "depth_m": 40,
+    "shape_ratio": 0.48,
+    "is_corner_plot": false
+  }
+}
+
+
+⸻
+
+3️⃣ LIMITES PARCELLE
+
+{
+  "parcel_boundaries": {
+    "segments": [...],
+    "road_segments": [...],
+    "side_segments": [...],
+    "road_length_m": 19.62,
+    "side_length_m": 177.11,
+    "front_road_name": "Rue de Cormery"
+  }
+}
+
+
+⸻
+
+4️⃣ BÂTIMENTS SUR PARCELLE
+
+{
+  "buildings_on_parcel": {
+    "count": 1,
+    "features": [...],
+    "footprint_m2": 120,
+    "coverage_ratio": 0.08,
+    "avg_height_m": 5.5,
+    "avg_floors": 1,
+    "estimated_floor_area_m2": 120
+  }
+}
+
+
+⸻
+
+5️⃣ CONTEXTE VOISINAGE
+
+{
+  "neighbour_context": {
+    "buildings": [...],
+    "parcels": [...],
+    "avg_neighbour_height_m": 6.2,
+    "avg_neighbour_density": 0.25,
+    "urban_typology": "pavillonnaire",
+    "dominant_alignment": "aligned_to_road"
+  }
+}
+
+
+⸻
+
+6️⃣ ROUTES
+
+{
+  "roads": {
+    "features": [...],
+    "nearest_road_name": "Rue de Cormery",
+    "distance_to_road_m": 5.14,
+    "road_width_m": 5.5,
+    "access_possible": true
+  }
+}
+
+
+⸻
+
+7️⃣ PLU
+
+{
+  "plu": {
+    "zone": "UB",
+    "subzone": null,
+    "rules": {
+      "CES_max": 0.4,
+      "height_max_m": 9,
+      "setback_road_m": 5,
+      "setback_side_min_m": 3,
+      "min_plot_size_m2": null,
+      "division_allowed": true,
+      "parking_requirements": "2 places/logement"
+    }
+  }
+}
+
+
+⸻
+
+8️⃣ CONTRAINTES
+
+{
+  "constraints": {
+    "flood_risk": false,
+    "abf_zone": false,
+    "protected_elements": [],
+    "easements": [],
+    "alignment_constraints": null,
+    "environmental_constraints": []
+  }
+}
+
+
+⸻
+
+9️⃣ TOPOGRAPHIE
+
+{
+  "topography": {
+    "slope_percent": 2.5,
+    "elevation_min": 82,
+    "elevation_max": 86,
+    "is_flat": true
+  }
+}
+
+
+⸻
+
+🔟 ENVELOPPE CONSTRUCTIBLE
+
+{
+  "buildable": {
+    "buildable_area_m2": 450,
+    "remaining_footprint_m2": 330,
+    "max_footprint_allowed_m2": 607,
+    "envelope_geometry": { "type": "Polygon", "coordinates": [...] },
+    "max_height_m": 9,
+    "floors_possible": 2,
+    "volume_potential_m3": 4050
+  }
+}
+
+
+⸻
+
+1️⃣1️⃣ PROJET (optionnel mais clé)
+
+{
+  "project": {
+    "type": "house_extension",
+    "footprint_m2": 80,
+    "height_m": 6,
+    "floors": 2,
+    "distance_to_road_m": 6,
+    "distance_to_boundary_m": 3,
+    "compliance": {
+      "plu_compliant": true,
+      "blocking_issues": [],
+      "warnings": []
+    }
+  }
+}
+
+
+⸻
+
+🧩 FORMAT FINAL POUR REPLIT
+
+Tu peux exposer ça en endpoint :
+
+app.post("/analyze-parcel", async (req, res) => {
+  const geoContext = {
+    parcel: {...},
+    parcel_metrics: {...},
+    parcel_boundaries: {...},
+    buildings_on_parcel: {...},
+    neighbour_context: {...},
+    roads: {...},
+    plu: {...},
+    constraints: {...},
+    topography: {...},
+    buildable: {...},
+    project: {...}
+  };
+
+  res.json(geoContext);
+});
+
+
+⸻
+
+🔥 CE QUE TU VIENS DE CONSTRUIRE (très important)
+
+Avec ce format, tu peux :
+
+1. Brancher OpenAI
+
+→ analyse automatique
+
+2. Générer un PDF
+
+→ dossier urbanisme
+
+3. Afficher une carte
+
+→ Mapbox / Leaflet
+
+4. Simuler un projet
+
+→ extension / division
+
+5. Créer un SaaS
+
+→ proptech ultra scalable
+
+⸻
+
+🚀 PROCHAINE ÉTAPE (fortement recommandée)
+
+Maintenant que tu as le data model complet, je te conseille :
+
+👉 créer un endpoint :
+
+/generate-plan-image
+
+qui génère :
+	•	plan masse
+	•	enveloppe
+	•	bâtiments
+	•	routes
+
+C’est ça qui va rendre ton produit incroyablement différenciant.
+
+⸻
+
+Si tu veux, je peux maintenant te donner :
+
+👉 le prompt OpenAI ultra optimisé pour analyser automatiquement un projet (DP / PC / division) à partir de ce JSON.

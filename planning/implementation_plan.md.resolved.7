@@ -1,0 +1,35 @@
+# Implementation Plan - Fix Empty AI Analysis Results
+
+The user reports that AI analysis of uploaded documents (specifically for Étretat) is marked as complete but yields no data. This is primarily because the "Espace Conformité" (Conformity Space) upload form does not allow users to select a property analysis to compare against, leading to the `analysisId` being sent as `null`. The backend correctly skips comparison when no analysis is linked.
+
+## Proposed Changes
+
+### Backend Improvements
+
+#### [MODIFY] [pluAnalysis.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/pluAnalysis.ts)
+- Upgrade the AI model from `gpt-4o-mini` to `gpt-4o` to ensure better extraction accuracy for complex PLU documents (like Étretat).
+
+#### [MODIFY] [documents.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/documents.ts)
+- Add logging to track why comparison might be skipped or fail.
+- Ensure that if `analysisId` is provided, the comparison is triggered.
+
+### Frontend - Espace Conformité
+
+#### [MODIFY] [mairie.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/mairie.tsx)
+- Add a selection dropdown in the "Déposer un document" (Upload) form to allow users to link the document to an existing property analysis.
+- Use the [useAdminListAnalyses](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/lib/api-client-react/src/generated/api.ts#1738-1760) or similar hook to fetch available analyses.
+- Update [handleUpload](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/mairie.tsx#104-132) to include the selected `analysisId` in the `FormData`.
+- Improve the UI for documents that have no linked analysis, allowing users to link them after the fact using the existing `compareMutation`.
+
+## Verification Plan
+
+### Automated Tests
+- Upload a sample CERFA document via the "Espace Conformité" and verify that the `analysisId` is correctly sent in the request.
+- Check the database for the `document_reviews` table to ensure `comparison_result_json` is populated after upload.
+
+### Manual Verification
+1. Login as a Mairie/Admin user.
+2. Go to "Espace Conformité" (via the Navbar or `/conformite`).
+3. Select an existing analysis (e.g., Étretat).
+4. Upload a CU or Permis document.
+5. Verify that the "Analysé" badge appears and the comparison results (Conformités/Irrégularités) are displayed.

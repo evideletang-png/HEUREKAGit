@@ -1,0 +1,67 @@
+# HEUREKA UI Recreation Plan
+
+## Goal Description
+Recreate the HEUREKA landing page and authentication paths based on the provided Replit site. The app is a modern real estate SaaS and needs a very clean, dynamic user interface crafted with Vanilla HTML, CSS, and JavaScript. We will use plain HTML files and vanilla CSS to avoid reliance on Node.js/build tools. The app will include three main pages: [index.html](file:///Users/evideletang/Desktop/HEUREKA/index.html), [login.html](file:///Users/evideletang/Desktop/HEUREKA/login.html), and [register.html](file:///Users/evideletang/Desktop/HEUREKA/register.html).
+
+## Proposed Changes
+### Project Setup
+- Create base HTML structure and styling folder.
+- Establish shared [styles.css](file:///Users/evideletang/Desktop/HEUREKA/styles.css).
+
+### Base Files
+#### [NEW] [styles.css](file:///Users/evideletang/Desktop/HEUREKA/styles.css)
+Contains root color variables, reset, font imports, layout classes, button utilities, and form styles.
+- Primary color: Navy Blue (`#0a192f`).
+- Typography: Inter font imported from Google Fonts.
+
+### Pages
+#### [NEW] [index.html](file:///Users/evideletang/Desktop/HEUREKA/index.html)
+The main landing page featuring:
+- Hero section with badge and CTAs
+- Responsive navigation bar
+- Features grid
+
+#### [NEW] [login.html](file:///Users/evideletang/Desktop/HEUREKA/login.html)
+Authentication page featuring a split-screen design.
+
+#### [NEW] [register.html](file:///Users/evideletang/Desktop/HEUREKA/register.html)
+Registration page maintaining layout parity with login.
+
+## Verification Plan
+### Manual Verification
+- Open HTML pages sequentially in the browser.
+- Review aesthetics across the Home, Login, and Register pages.
+- Verify micro-interactions: Hover states on buttons, smooth scrolling if applicable.
+
+---
+
+# Phase 2: Town Hall RAG & Conformity
+## Goal Description
+Enable municipalities to upload their official PLU documents (Knowledge Base), and force the Conformity AI to use these specific uploaded documents as the source of truth when analyzing citizens' CERFA requests.
+
+## Proposed Architecture
+### 1. Database (`db/src/schema/`)
+#### [NEW] `townHallDocuments.ts`
+- Create `townHallDocumentsTable` to store metadata and raw text of uploaded PLU documents for a specific municipality.
+- Fields: `id`, `municipalityId`, `title`, `fileName`, `rawText`, `createdAt`.
+
+### 2. Backend API ([api-server/src/routes/mairie.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts) & [pluAnalysis.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/pluAnalysis.ts))
+#### [MODIFY] [mairie.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts)
+- Add `POST /api/mairie/documents` to accept PDF uploads (using `multer` + `pdf-parse`).
+- Add `GET /api/mairie/documents` to list uploaded PLU files.
+- Add `DELETE /api/mairie/documents/:id` to manage the knowledge base.
+
+#### [MODIFY] AI Conformity Engine
+- Update the CERFA analysis pipeline: instead of relying on the general Geoportail API or general knowledge, the system will inject the concatenated `rawText` of all uploaded `townHallDocuments` into the `gpt-4o-mini` prompt as the absolute source of truth for checking conformity.
+
+### 3. Frontend UI ([heureka/src/pages/portail-mairie.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/portail-mairie.tsx))
+#### [MODIFY] [portail-mairie.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/portail-mairie.tsx)
+- Add a tabs architecture: "Dossiers CERFA" (current view) vs "Base de Connaissance PLU" (new view).
+- In the "Base de Connaissance" tab, build a drag-and-drop file uploader.
+- Display a list/table of active PLU documents currently defining the AI's knowledge base.
+
+## Verification Plan
+1. Log in as a `mairie` user.
+2. Upload 2 mock PLU PDFs to the Knowledge Base.
+3. Submit a dummy CERFA document via the user portal.
+4. Verify the backend logs to ensure the AI uses the uploaded PDFs text to grade the CERFA conformity.

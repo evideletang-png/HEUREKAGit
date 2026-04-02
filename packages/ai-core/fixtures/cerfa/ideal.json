@@ -1,0 +1,23 @@
+{
+  "document_type": "PCMI",
+  "project_address": "10 Rue de la Paix, 27000 EVREUX",
+  "cadastre": [
+    { "section": "A", "parcel_number": "123" }
+  ],
+  "surfaces": {
+    "existing_m2": 0,
+    "created_m2": 120,
+    "taxable_m2": 120
+  },
+  "requested_height_m": 6.5,
+  "requested_footprint_m2": 80,
+  "confidence": {
+    "score": 0.98,
+    "level": "high",
+    "reason": "Extraction parfaite des champs obligatoires via le formulaire Cerfa 13406*11.",
+    "ambiguities": [],
+    "missing_critical_data": [],
+    "review_status": "auto_ok"
+  },
+  "sources": []
+}

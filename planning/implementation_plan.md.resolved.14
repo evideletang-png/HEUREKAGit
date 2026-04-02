@@ -1,0 +1,45 @@
+# Implementation Plan - Phase 11: Per-Document Analysis & Localized Comments
+
+L'objectif est de permettre à la mairie de consulter chaque document d'un dossier individuellement, d'avoir une analyse (conformité/vigilance) séparée par document, et de pouvoir lier des commentaires à un document spécifique.
+
+## User Review Required
+
+> [!IMPORTANT]
+> Cette modification change la structure des dépôts : chaque fichier envoyé par un citoyen créera désormais son propre enregistrement d'analyse. Un "Dossier" deviendra un regroupement de ces analyses.
+
+## Proposed Changes
+
+### 1. Base de données
+- **Table `document_reviews`** :
+  - Ajouter `dossier_id` (UUID) pour grouper les documents d'un même dépôt.
+  - S'assurer que chaque document a son propre `extracted_data_json` et `comparison_result_json`.
+- **Table `dossier_messages`** :
+  - Ajouter `document_id` (UUID, optionnel) pour lier un message à un document spécifique.
+
+### 2. Backend (API)
+- **`POST /api/documents/upload`** : 
+  - Modifier pour créer un enregistrement `document_review` DISTINCT par fichier.
+  - Générer un `dossier_id` unique pour l'ensemble du lot.
+  - Lancer l'analyse IA de façon asynchrone pour chaque document.
+- **`GET /api/mairie/dossiers`** :
+  - Grouper les résultats par `dossier_id` pour conserver une vue "Dossier" dans la liste principale.
+- **`GET /api/documents/:id`** :
+  - Retourner les informations du document spécifique ainsi que la liste des autres documents du même `dossier_id`.
+
+### 3. Frontend Mairie (`/portail-mairie`)
+- **Dossier Detail** :
+  - Ajouter une barre latérale ou un onglet pour naviguer entre les documents du dossier (PC, Plan de masse, etc.).
+  - Afficher l'analyse (Points de conformité/vigilance) filtrée pour le document sélectionné.
+- **Messagerie** :
+  - Permettre de filtrer les messages par document ou d'envoyer un message lié au document actif.
+
+## Verification Plan
+
+### Automated Tests
+- Script de test d'upload multi-fichiers vérifiant la création de multiples records avec le même `dossier_id`.
+- Vérification API des messages liés à un `document_id`.
+
+### Manual Verification
+- Déposer un dossier avec 3 fichiers (CERFA + 2 plans) en tant que citoyen.
+- Côté Mairie, naviguer entre les 3 documents et voir les analyses changer en fonction du document actif.
+- Ajouter un commentaire sur le "Plan de masse".

@@ -1,0 +1,75 @@
+{
+  "scenarios": [
+    {
+      "name": "Exact Article Targeting (Article 10)",
+      "query": "Hauteur maximale en zone UA",
+      "filters": {
+        "zoneCode": "UA",
+        "articleId": "10"
+      },
+      "expected_match": "Article 10: La hauteur maximale est de 12 mètres.",
+      "failure_case": "Article 11: Les couleurs des façades doivent être sobres."
+    },
+    {
+      "name": "Authority Weighting (PLU vs Notice)",
+      "query": "Recul par rapport à la voie",
+      "filters": {
+        "zoneCode": "UA"
+      },
+      "competitors": [
+        {
+          "content": "Notice Descriptive: Le projet prévoit un recul de 5 mètres pour les voitures.",
+          "source_authority": 4,
+          "similarity": 0.95
+        },
+        {
+          "content": "Article 7 PLU: Le recul obligatoire est de 3 mètres minimum.",
+          "source_authority": 9,
+          "similarity": 0.85
+        }
+      ],
+      "expected_winner": "Article 7 PLU"
+    }
+  ],
+  "mock_db": [
+    {
+      "id": "chunk-1",
+      "content": "Article 10: La hauteur maximale est de 12 mètres.",
+      "metadata": {
+        "document_type": "plu_reglement",
+        "zone": "UA",
+        "article_id": "10",
+        "source_authority": 9
+      }
+    },
+    {
+      "id": "chunk-2",
+      "content": "Article 11: Les couleurs des façades doivent être sobres.",
+      "metadata": {
+        "document_type": "plu_reglement",
+        "zone": "UA",
+        "article_id": "11",
+        "source_authority": 9
+      }
+    },
+    {
+      "id": "chunk-3",
+      "content": "Notice Descriptive: Le projet prévoit un recul de 5 mètres pour les voitures.",
+      "metadata": {
+        "document_type": "note_descriptive",
+        "zone": "UA",
+        "source_authority": 4
+      }
+    },
+    {
+      "id": "chunk-4",
+      "content": "Article 7 PLU: Le recul obligatoire est de 3 mètres minimum.",
+      "metadata": {
+        "document_type": "plu_reglement",
+        "zone": "UA",
+        "article_id": "7",
+        "source_authority": 9
+      }
+    }
+  ]
+}

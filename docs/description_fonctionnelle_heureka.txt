@@ -1,0 +1,41 @@
+HEUREKA - DESCRIPTION FONCTIONNELLE DU PRODUIT
+
+1. PRÉSENTATION GÉNÉRALE
+Heureka est une plateforme SAAS intelligente dédiée à l'analyse de conformité des dossiers d'urbanisme (Permis de Construire, Déclaration Préalable) par rapport aux règlements locaux (PLU, PLUi, Code de l'Urbanisme). L'outil agit comme un assistant expert pour les professionnels de l'immobilier et les services instructeurs des mairies.
+
+2. MODULE D'EXTRACTION (PARSER CERFA & PLANS)
+- Lecture automatisée des formulaires Cerfa et des documents graphiques.
+- Extraction structurée des données projet :
+  * Surfaces (Plancher, Emprise au sol).
+  * Hauteurs (Distinction automatique entre hauteur absolue et altitude NGF).
+  * Implantation (Reculs par rapport à la voirie, aux limites latérales et au fond de parcelle).
+  * Destination des constructions et stationnement.
+- Analyse des cotes graphiques directement sur les plans PDF.
+
+3. BASE DE CONNAISSANCE RÉGLEMENTAIRE (PLU INTELLIGENT)
+- Ingestion massive de documents d'urbanisme (Règlements de zone PDF).
+- Indexation intelligente par commune et par zone (ex: Zone UA, UC, N).
+- Capacité pour les mairies de configurer des "Directives Locales" (Prompts spécifiques) pour affiner l'interprétation de l'IA selon les particularités du territoire.
+
+4. MOTEUR D'ANALYSE MODULAIRE (ENGINE)
+Le cœur du système repose sur un pipeline de traitement en 4 étapes déterministes :
+- PARSE : Extraction des données brutes du projet.
+- EXTRACT : Identification des articles et règles du PLU applicables à la zone.
+- ANALYZE : Comparaison automatisée Projet vs Règlement (Points de conformité, non-conformités, risques).
+- VALIDATE : Vérification de la complétude du dossier (PCMI1 à PCMI8) et détection des incohérences trans-documents.
+
+5. PORTAIL MAIRIE & GESTION DES DOSSIERS
+- Dashboard de suivi des dossiers déposés sur le territoire.
+- Messagerie intégrée pour échanger avec les administrés sur des points précis de conformité.
+- Gestion de l'avancement (Timeline) : Dépôt, Analyse, Instruction, Compléments, Décision.
+- Notes d'expertise : Possibilité pour l'IA ou l'instructeur d'ajouter des notes techniques (ex: "Mesure prise à l'égout du toit").
+
+6. CONTEXTE GÉOSPATIAL & CADASTRE
+- Identification automatique de la parcelle et de sa section cadastrale.
+- Détermination de la zone de règlement applicable via géolocalisation.
+- Accès aux informations de constructibilité et servitudes environnementales.
+
+7. VALEUR AJOUTÉE
+- Réduction drastique du temps de pré-instruction.
+- Fiabilisation des dossiers avant dépôt officiel.
+- Interface moderne et premium (React/Next.js) offrant une expérience fluide aux agents et aux citoyens.

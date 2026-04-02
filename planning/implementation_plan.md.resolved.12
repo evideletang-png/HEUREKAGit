@@ -1,0 +1,29 @@
+# Implementation Plan - Messagerie Administrés & Timeline (Option A)
+
+Suite à la validation, nous implémentons l'**Option A (Portail Citoyen Complet)** avec une **Timeline de Suivi**.
+
+## Architecture Fonctionnelle
+
+### 1. Base de données
+- **Utilisateurs** : Le rôle par défaut `user` sera utilisé pour les "Citoyens".
+- **Table `document_reviews`** : Ajout d'une colonne `timeline_step` (défaut: `depot`) pour modéliser les 5 étapes d'un dossier (Dépôt, Analyse IA, Instruction Mairie, Attente de pièces, Décision rendue).
+- **Table `dossier_messages`** : Utilisation de la table existante (`fromUserId`, `fromRole`, `content`) pour les échanges.
+
+### 2. Backend (API)
+- **Authentification** : `POST /api/auth/register-citoyen` pour la création de compte public.
+- **Portail Citoyen** : 
+  - `GET /api/citoyen/dossiers` (Liste les dossiers de l'administré).
+  - `POST /api/citoyen/dossiers/upload` (Upload avec sélection de la commune cible).
+- **Messagerie & Timeline** :
+  - `GET /api/dossiers/:id/messages` (Sécurisé : l'id doit appartenir à la mairie ou au citoyen).
+  - `POST /api/dossiers/:id/messages` (Envoi de chat).
+  - `PATCH /api/dossiers/:id/timeline` (Mairie avance la timeline).
+
+### 3. Frontend Citoyen (`/citoyen`)
+- Tableau de bord listant ses demandes.
+- Formulaire natif de dépôt de dossier (Sélection de Mairie, Drag&Drop multiple).
+- Vue Détail : Affichage d'une Timeline horizontale/verticale + Fenêtre de Chat.
+
+### 4. Frontend Mairie (`/mairie`)
+- Vue Détail : Ajout d'une frise Timeline cliquable pour modifier l'état d'avancement du dossier.
+- Ajout d'un panneau "Messagerie Citoyen" intégré à côté ou en dessous des résultats de conformité IA.

@@ -1,0 +1,33 @@
+{
+  "zone_code": "UA",
+  "zone_label": "Centre urbain historique",
+  "articles": [
+    {
+      "article": "10",
+      "title": "Hauteur des constructions",
+      "operational_rule": "La hauteur au faîtage est limitée à 12 mètres pour les constructions à l'alignement.",
+      "source_text": "Article 10.1: La hauteur maximale des constructions, mesurée depuis le terrain naturel jusqu'au sommet du bâtiment (acrotère ou faîtage), ne doit pas excéder 12 mètres.",
+      "constraints": [
+        { "category": "Height", "operator": "<=", "value": 12 }
+      ],
+      "exceptions": []
+    }
+  ],
+  "confidence": {
+    "score": 0.95,
+    "level": "high",
+    "reason": "Texte explicite et valeur numérique claire.",
+    "ambiguities": [],
+    "missing_critical_data": [],
+    "review_status": "auto_ok"
+  },
+  "sources": [
+    {
+      "document_id": "550e8400-e29b-41d4-a716-446655440000",
+      "file_name": "PLU_Ville_Centre.pdf",
+      "page_number": 42,
+      "raw_snippet": "La hauteur maximale des constructions [...] ne doit pas excéder 12 mètres.",
+      "relevance_score": 0.95
+    }
+  ]
+}

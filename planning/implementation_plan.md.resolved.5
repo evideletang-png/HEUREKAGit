@@ -1,0 +1,29 @@
+# Superadmin & Mairie Portal Refinement
+
+Implement a superadmin interface for user management and jurisdictional assignment, and fix UI issues in the Mairie portal.
+
+## User Review Required
+
+> [!IMPORTANT]
+> The superadmin feature will involve significant changes to user management. I will define a new `AdminUsersPage` for this purpose.
+
+## Proposed Changes
+
+### Database & Backend
+#### [MODIFY] [admin.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/admin.ts)
+- Ensure all commune updates use a consistent JSON format (currently correct in code, but needs verification against existing data).
+
+### Frontend
+#### [MODIFY] [portail-mairie.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/portail-mairie.tsx)
+- Fix [parseCommunes](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts#20-25) logic to handle JSON arrays (as saved by the Admin portal) instead of simple comma-separated strings.
+- Implementation: if `user.role === 'admin'`, fetch all available communes from the system instead of just the user's assigned list.
+- Move the `Commune Selector` logic to be robust across all tabs.
+
+#### [MODIFY] [admin.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/admin.tsx)
+- No changes needed for user creation/role management as it is already implemented, but verify the [CommunesEditor](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/admin.tsx#44-142) saved format.
+
+
+## Verification Plan
+- Manual test: Log in as superadmin, assign "Étretat" to a new mairie user.
+- Manual test: Log in as that mairie user, verify only "Étretat" is visible.
+- UI test: Verify commune selector works in all tabs of the Mairie portal.

@@ -1,0 +1,748 @@
+Je veux que tu m’aides à construire un SaaS web complet nommé HEUREKA.
+
+HEUREKA est un outil d’analyse immobilière et urbanistique destiné aux marchands de biens, lotisseurs, investisseurs, aménageurs, architectes, bureaux d’étude et professionnels de la promotion immobilière.
+
+L’objectif du SaaS est de permettre, à partir d’une adresse ou d’une parcelle cadastrale en France, de :
+1. récupérer les données de parcelle,
+2. récupérer les bâtiments existants et leur emprise,
+3. récupérer les routes et limites environnantes,
+4. récupérer les documents d’urbanisme (PLU / PLUi / règlement / zonage / SUP / OAP si disponibles),
+5. analyser automatiquement la zone réglementaire concernée,
+6. extraire et résumer les règles d’urbanisme par article,
+7. calculer un potentiel constructible théorique,
+8. générer un dossier de synthèse professionnel exploitable commercialement,
+9. permettre plus tard des projections de division parcellaire, implantation bâtiment, simulation 3D, génération de scénarios de travaux / DP / PC / PD.
+
+Je veux un produit SaaS propre, modulaire, scalable, avec une base solide pour itérer ensuite.
+
+==================================================
+1. VISION PRODUIT
+==================================================
+
+Le SaaS doit devenir un “copilote d’étude de faisabilité immobilière”.
+
+Positionnement :
+- outil d’aide à la décision rapide,
+- destiné à préqualifier des opportunités foncières,
+- spécialisé France,
+- orienté lecture automatique du PLU / PLUi et analyse parcellaire.
+
+Promesse :
+“A partir d’une adresse, obtenir en quelques minutes une synthèse exploitable des règles du PLU, de la parcelle, des contraintes et du potentiel du terrain.”
+
+Le produit doit être pensé comme un mix entre :
+- moteur de données géographiques,
+- moteur d’analyse réglementaire,
+- moteur d’IA documentaire,
+- générateur de rapport d’opportunité immobilière.
+
+==================================================
+2. UTILISATEURS CIBLES
+==================================================
+
+Cibles principales :
+- marchands de biens,
+- investisseurs immobiliers,
+- lotisseurs,
+- promoteurs,
+- architectes,
+- maîtres d’œuvre,
+- bureaux d’étude,
+- agents immobiliers spécialisés foncier.
+
+Le ton du produit doit être professionnel, sobre, efficace, orienté productivité.
+
+==================================================
+3. MVP À CONSTRUIRE
+==================================================
+
+Je veux d’abord un MVP fonctionnel avec ces modules :
+
+A. Authentification / comptes
+- inscription,
+- connexion,
+- mot de passe oublié,
+- gestion de compte,
+- abonnement futur compatible Stripe,
+- rôles utilisateur simples : admin / user.
+
+B. Tableau de bord
+- liste des analyses créées,
+- statut des analyses,
+- date,
+- adresse,
+- parcelle,
+- commune,
+- zone PLU,
+- score d’opportunité simple,
+- accès au rapport détaillé.
+
+C. Création d’une analyse
+Entrée utilisateur :
+- adresse,
+- ou référence cadastrale,
+- ou sélection carte.
+
+Le moteur doit :
+1. géocoder l’adresse,
+2. retrouver la parcelle,
+3. afficher la géométrie,
+4. lancer la récupération des données.
+
+D. Fiche parcelle
+Afficher :
+- adresse,
+- section cadastrale,
+- numéro de parcelle,
+- surface de parcelle,
+- coordonnées,
+- commune,
+- zonage PLU,
+- emprise bâtie existante,
+- nombre de bâtiments,
+- surface de plancher estimée si possible,
+- hauteur moyenne / nombre d’étages si disponible,
+- longueur de façade sur voie,
+- limites séparatives,
+- voies proches,
+- contraintes éventuelles.
+
+E. Lecture des documents d’urbanisme
+Le système doit pouvoir associer à la parcelle :
+- document d’urbanisme,
+- zone réglementaire,
+- règlement PDF / texte,
+- OAP / annexes / servitudes si disponibles.
+
+F. Analyse automatique du règlement de zone
+Pour chaque zone, je veux une synthèse structurée selon les articles suivants :
+- Article 1 – Occupations ou utilisations du sol interdites
+- Article 2 – Occupations ou utilisations du sol soumises à des conditions particulières
+- Article 3 – Desserte des terrains par les voies - Accès aux voies ouvertes au public
+- Article 4 – Desserte des terrains par les réseaux
+- Article 5 – Sans objet
+- Article 6 – Implantation des constructions par rapport aux voies et emprises publiques
+- Article 7 – Implantation des constructions par rapport aux limites séparatives
+- Article 8 – Implantation des constructions les unes par rapport aux autres sur une même propriété
+- Article 9 – Emprise au sol des constructions
+- Article 10 – Hauteur maximale des constructions
+- Article 11 – Aspect extérieur des constructions et aménagement des abords
+- Article 12 – Aires de stationnement
+- Article 13 – Espaces libres et plantations
+- Article 14 – Sans objet
+
+Pour chaque article, je veux :
+- texte source extrait,
+- résumé en langage clair,
+- champ “impact projet”,
+- champ “points de vigilance”,
+- champ structuré exploitable dans le calcul (si possible).
+
+G. Calcul de potentiel constructible théorique
+Le moteur doit produire une première estimation de :
+- emprise au sol maximale théorique,
+- emprise restante constructible,
+- hauteur max,
+- retrait sur voie,
+- retrait sur limites séparatives,
+- obligations de stationnement,
+- taux d’espaces verts / pleine terre si identifié,
+- faisabilité simplifiée.
+
+Cette partie doit être conçue comme un moteur de règles, même si au départ certaines valeurs sont extraites via IA puis validées par logique métier.
+
+H. Rapport d’analyse
+Je veux une page rapport propre avec sections :
+1. Résumé exécutif
+2. Données cadastrales
+3. Données bâties existantes
+4. Zonage et urbanisme
+5. Synthèse des articles PLU
+6. Contraintes identifiées
+7. Potentiel constructible théorique
+8. Points de vigilance
+9. Réserves / limites de l’analyse
+10. Export PDF
+
+I. Cartographie interactive
+Une carte doit afficher :
+- contour de parcelle,
+- bâtiments existants,
+- routes proches,
+- limites,
+- parcelles voisines si possible,
+- superposition urbanisme si disponible.
+
+==================================================
+4. FONCTIONNALITÉS FUTURES À ANTICIPER
+==================================================
+
+Le code doit être pensé pour accueillir ensuite :
+- division parcellaire assistée,
+- dessin de lots,
+- calcul d’accès / façade / desserte,
+- simulation d’implantation de maison ou immeuble,
+- simulation DP / PC / PD,
+- génération de scénarios travaux,
+- projection 3D,
+- catalogue matériaux / fournisseurs,
+- génération automatique de documents administratifs,
+- scoring de rentabilité,
+- CRM d’opérations foncières,
+- collaboration équipe,
+- commentaires / validations,
+- historique des versions d’analyse.
+
+==================================================
+5. STACK TECHNIQUE SOUHAITÉE
+==================================================
+
+Je veux une stack moderne, robuste, simple à maintenir, compatible Replit.
+
+Recommandation souhaitée :
+- Frontend : Next.js + TypeScript + Tailwind + shadcn/ui
+- Backend : Next.js API routes ou serveur Node/TypeScript structuré
+- Base de données : PostgreSQL
+- ORM : Prisma
+- Auth : NextAuth ou solution simple sécurisée
+- Stockage fichiers : compatible S3
+- PDF generation : HTML vers PDF
+- Cartographie : Mapbox ou Leaflet
+- Queue / jobs : architecture prévue pour traitements asynchrones
+- AI : architecture compatible OpenAI API
+- Parsing documents : pipeline modulaire
+- Hébergement : Replit deployment compatible
+
+Si tu penses qu’une autre stack est meilleure pour Replit, propose-la mais reste moderne et maintenable.
+
+==================================================
+6. SOURCES DE DONNÉES ET INTÉGRATIONS À PRÉVOIR
+==================================================
+
+Le système doit être conçu pour brancher ou consommer :
+- API adresse (BAN)
+- données cadastrales / parcelles
+- Géoportail de l’Urbanisme / GPU
+- documents PDF de PLU / PLUi
+- couches géographiques parcelles / bâtiments / routes
+- données complémentaires urbanisme si accessibles
+
+Prévois une architecture de connecteurs séparés :
+- geocoding service
+- parcel service
+- building footprint service
+- roads service
+- zoning service
+- document retrieval service
+- document parsing service
+- AI extraction service
+- rules engine service
+- report generation service
+
+Même si certaines APIs seront mockées au début, je veux le code organisé comme s’il devait être branché en production.
+
+==================================================
+7. LOGIQUE MÉTIER ATTENDUE
+==================================================
+
+Créer un pipeline clair :
+
+Étape 1 :
+L’utilisateur saisit une adresse ou référence cadastrale.
+
+Étape 2 :
+On géocode et on récupère la parcelle cible.
+
+Étape 3 :
+On récupère :
+- surface parcelle,
+- géométrie,
+- bâtiments existants,
+- emprise bâtie,
+- routes proches,
+- segments sur voie,
+- limites séparatives,
+- longueurs utiles.
+
+Étape 4 :
+On récupère les informations d’urbanisme :
+- document,
+- zone,
+- règlement,
+- annexes / servitudes pertinentes si disponibles.
+
+Étape 5 :
+On parse le règlement.
+
+Étape 6 :
+On isole la section correspondant à la zone concernée.
+
+Étape 7 :
+On extrait les articles 1 à 14.
+
+Étape 8 :
+On produit :
+- résumé texte,
+- structure de données normalisée,
+- variables calculables.
+
+Étape 9 :
+On exécute un moteur de calcul pour le potentiel.
+
+Étape 10 :
+On génère une restitution visuelle + rapport PDF.
+
+==================================================
+8. MOTEUR D’ANALYSE PLU
+==================================================
+
+Le cœur du produit est l’analyse des règlements PLU / PLUi.
+
+Je veux une architecture hybride :
+- extraction documentaire,
+- segmentation par zone,
+- extraction article par article,
+- résumé assisté par IA,
+- structuration en JSON,
+- validation par règles déterministes quand possible.
+
+Crée un format JSON standard pour stocker le résultat d’analyse d’une zone, par exemple :
+
+{
+  "zone_code": "UB",
+  "zone_label": "Zone urbaine UB",
+  "articles": {
+    "1": {
+      "title": "Occupations ou utilisations du sol interdites",
+      "source_text": "...",
+      "summary": "...",
+      "structured_rules": [],
+      "project_impact": "...",
+      "vigilance_points": "..."
+    },
+    ...
+    "13": {...}
+  },
+  "global_constraints": [],
+  "calculation_variables": {
+    "max_footprint_ratio": null,
+    "max_height_m": null,
+    "min_setback_from_road_m": null,
+    "min_setback_from_boundaries_m": null,
+    "parking_rules": null,
+    "green_space_ratio": null
+  }
+}
+
+Je veux que tu prépares les prompts internes qui permettront à l’IA :
+- d’extraire les articles,
+- de résumer sans halluciner,
+- de citer le texte source,
+- de laisser null quand une donnée n’est pas certaine,
+- de distinguer clairement extraction, interprétation et hypothèse.
+
+==================================================
+9. MOTEUR DE CALCUL CONSTRUCTIBILITÉ
+==================================================
+
+Je veux un premier moteur de calcul modulaire.
+
+Variables d’entrée possibles :
+- surface parcelle,
+- emprise existante,
+- emprise max,
+- CES ou règle équivalente,
+- retrait voie,
+- retrait limites,
+- façade sur voie,
+- profondeur constructible,
+- hauteur max,
+- contraintes diverses.
+
+Sorties souhaitées :
+- surface d’emprise maximale théorique,
+- surface d’emprise restante théorique,
+- zone libre potentielle,
+- constructibilité théorique simple,
+- niveau de confiance du calcul,
+- liste des hypothèses retenues.
+
+Le moteur doit être transparent :
+- expliquer ce qui vient du règlement,
+- expliquer ce qui est déduit,
+- signaler les incertitudes.
+
+==================================================
+10. UX / UI
+==================================================
+
+Je veux une interface premium sobre, type proptech / legaltech / cartographie.
+
+Style :
+- fond clair ou légèrement cassé,
+- composants propres,
+- cartes lisibles,
+- tableaux élégants,
+- hiérarchie visuelle forte,
+- navigation simple.
+
+Pages minimales :
+- landing page
+- login/signup
+- dashboard
+- create analysis
+- analysis detail
+- report view
+- account/settings
+- admin panel simple
+
+Sur la page détail d’analyse, je veux des blocs :
+- résumé du site
+- carte
+- parcelle et géométrie
+- bâtiments existants
+- urbanisme
+- synthèse articles
+- calcul
+- alertes
+- export
+
+Je veux aussi des badges du type :
+- donnée récupérée,
+- donnée estimée,
+- donnée non trouvée,
+- confiance élevée / moyenne / faible.
+
+==================================================
+11. BASE DE DONNÉES
+==================================================
+
+Propose un schéma Prisma propre avec au minimum les tables suivantes :
+
+User
+- id
+- email
+- passwordHash
+- name
+- role
+- createdAt
+- updatedAt
+
+Project / Analysis
+- id
+- userId
+- title
+- address
+- city
+- postalCode
+- parcelRef
+- zoneCode
+- zoningLabel
+- status
+- summary
+- confidenceScore
+- createdAt
+- updatedAt
+
+Parcel
+- id
+- analysisId
+- cadastralSection
+- parcelNumber
+- parcelSurfaceM2
+- geometryJson
+- centroidLat
+- centroidLng
+- roadFrontageLengthM
+- sideBoundaryLengthM
+- metadataJson
+
+Building
+- id
+- analysisId
+- footprintM2
+- estimatedFloorAreaM2
+- avgHeightM
+- avgFloors
+- geometryJson
+- metadataJson
+
+PlanningDocument
+- id
+- analysisId
+- documentType
+- title
+- sourceUrl
+- filePath
+- rawText
+- parsedJson
+- createdAt
+
+ZoneAnalysis
+- id
+- analysisId
+- zoneCode
+- zoneLabel
+- sourceExcerpt
+- structuredJson
+- createdAt
+- updatedAt
+
+RuleArticle
+- id
+- zoneAnalysisId
+- articleNumber
+- title
+- sourceText
+- summary
+- structuredJson
+- impactText
+- vigilanceText
+
+Constraint
+- id
+- analysisId
+- category
+- title
+- description
+- severity
+- source
+
+BuildabilityResult
+- id
+- analysisId
+- maxFootprintM2
+- remainingFootprintM2
+- maxHeightM
+- setbackRoadM
+- setbackBoundaryM
+- parkingRequirement
+- greenSpaceRequirement
+- assumptionsJson
+- confidenceScore
+- resultSummary
+
+GeneratedReport
+- id
+- analysisId
+- htmlContent
+- pdfPath
+- version
+- createdAt
+
+EventLog
+- id
+- analysisId
+- step
+- status
+- payloadJson
+- createdAt
+
+==================================================
+12. ARCHITECTURE LOGICIELLE
+==================================================
+
+Je veux du code proprement organisé par domaines :
+
+/app
+/components
+/lib
+/services
+  /geocoding
+  /parcel
+  /buildings
+  /roads
+  /planning
+  /documents
+  /ai
+  /rules
+  /reports
+/prisma
+/types
+/prompts
+/utils
+
+Je veux :
+- séparation claire des responsabilités,
+- fonctions typées,
+- gestion d’erreurs propre,
+- logs,
+- code commenté intelligemment,
+- fichiers lisibles.
+
+==================================================
+13. API ET BACKEND
+==================================================
+
+Crée une API interne avec endpoints ou actions pour :
+- créer une analyse,
+- lancer pipeline,
+- récupérer détails d’analyse,
+- récupérer carte / géométrie,
+- parser document,
+- lancer extraction IA,
+- lancer calcul constructibilité,
+- générer PDF,
+- lister analyses utilisateur.
+
+Prévois statuts de traitement :
+- draft
+- collecting_data
+- parsing_documents
+- extracting_rules
+- calculating
+- completed
+- failed
+
+==================================================
+14. IA / PROMPTS INTERNES
+==================================================
+
+Je veux que tu me crées aussi les prompts internes du SaaS pour :
+1. extraire le texte de la zone réglementaire concernée,
+2. extraire les articles 1 à 14,
+3. résumer chaque article en langage clair,
+4. produire une structure JSON robuste,
+5. identifier les variables de calcul,
+6. générer un résumé exécutif professionnel.
+
+Contraintes d’IA :
+- ne jamais inventer une règle absente,
+- citer le texte source quand possible,
+- marquer “non identifié” si l’info n’est pas certaine,
+- distinguer extraction / interprétation / hypothèse,
+- langage professionnel, concis, exploitable par un investisseur immobilier.
+
+==================================================
+15. GÉNÉRATION DE RAPPORT PDF
+==================================================
+
+Je veux un export PDF premium avec :
+- logo HEUREKA,
+- page de garde,
+- informations parcelle,
+- carte,
+- tableaux de synthèse,
+- articles résumés,
+- points de vigilance,
+- constructibilité théorique,
+- hypothèses,
+- avertissement juridique.
+
+Le PDF doit être lisible, propre, avec mise en page professionnelle.
+
+==================================================
+16. LANDING PAGE
+==================================================
+
+Crée une landing page claire avec :
+- proposition de valeur,
+- explication simple du workflow,
+- exemples de cas d’usage,
+- captures ou placeholders,
+- CTA d’inscription,
+- section “pour qui”,
+- section “ce que l’outil analyse”,
+- section “rapport généré”.
+
+Ton :
+- premium,
+- crédible,
+- orienté foncier / faisabilité,
+- sans marketing excessif.
+
+==================================================
+17. ADMIN / DEBUG
+==================================================
+
+Créer un petit espace admin permettant de :
+- voir les analyses,
+- voir les logs,
+- voir les documents bruts,
+- voir les sorties JSON,
+- relancer une étape,
+- diagnostiquer les erreurs.
+
+==================================================
+18. SÉCURITÉ ET QUALITÉ
+==================================================
+
+Je veux :
+- validation des inputs,
+- auth sécurisée,
+- protection des routes,
+- sanitation des données,
+- gestion propre des secrets,
+- architecture prête pour multi-tenant simple,
+- bonnes pratiques TypeScript,
+- gestion des erreurs côté front et back.
+
+==================================================
+19. MODE DE TRAVAIL ATTENDU
+==================================================
+
+Je veux que tu procèdes en plusieurs étapes très concrètes :
+
+Étape A :
+Définis l’architecture complète du projet.
+
+Étape B :
+Crée la structure de fichiers.
+
+Étape C :
+Crée la base Next.js + Tailwind + Prisma + Auth.
+
+Étape D :
+Crée le schéma de base de données.
+
+Étape E :
+Crée les pages principales et composants UI.
+
+Étape F :
+Crée le flux de création d’analyse.
+
+Étape G :
+Crée des services mockés pour les sources externes.
+
+Étape H :
+Crée le moteur de parsing / analyse de zone.
+
+Étape I :
+Crée le moteur de calcul constructibilité.
+
+Étape J :
+Crée la génération de rapport HTML + PDF.
+
+Étape K :
+Ajoute données d’exemple et démonstration end-to-end.
+
+À chaque étape :
+- code réellement,
+- explique brièvement ce que tu fais,
+- propose les prochains fichiers à créer,
+- garde une cohérence d’ensemble,
+- ne repars pas de zéro.
+
+==================================================
+20. CONTRAINTES IMPORTANTES
+==================================================
+
+- Le code doit être prêt à exécuter dans Replit.
+- Je veux un MVP fonctionnel, pas juste une maquette.
+- Prévois des mocks si une API réelle n’est pas branchée.
+- Utilise des données d’exemple réalistes.
+- Les composants doivent être beaux et utilisables.
+- La logique métier doit être modulaire pour itérations futures.
+- Le projet doit pouvoir devenir un vrai SaaS commercial.
+
+==================================================
+21. PREMIÈRE ACTION À FAIRE MAINTENANT
+==================================================
+
+Commence par :
+1. me proposer l’architecture globale du projet,
+2. me proposer l’arborescence complète,
+3. me proposer le schéma Prisma,
+4. puis générer les premiers fichiers du projet.
+
+Quand tu codes, sois concret, structuré, et produis directement les fichiers.

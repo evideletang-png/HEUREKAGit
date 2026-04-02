@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: heureka
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - heureka-network
+
+  # Backend & Frontend (Servis par l'API Server en production)
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DATABASE_URL=postgresql://postgres:password123@db:5432/heureka
+      # N'oubliez pas de configurer votre vraie clé OpenAI sur votre serveur !
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "80:8080" # Maps l'application sur le port standard HTTP (80)
+    depends_on:
+      - db
+    networks:
+      - heureka-network
+
+volumes:
+  pgdata:
+
+networks:
+  heureka-network:

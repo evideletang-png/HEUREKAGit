@@ -1,0 +1,28 @@
+packages:
+  "framer-motion": "For premium page transitions and micro-interactions"
+  "recharts": "Data visualization for buildability statistics and charts"
+  "react-leaflet": "Interactive maps for parcel geometry and buildings"
+  "leaflet": "Core map library required by react-leaflet"
+  "@types/leaflet": "TypeScript definitions for Leaflet"
+  "date-fns": "For formatting creation and update dates professionally"
+  "react-hook-form": "For robust form state management"
+  "@hookform/resolvers": "To integrate Zod validation with react-hook-form"
+  "zod": "For client-side form validation schemas"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility to merge tailwind classes without style conflicts"
+
+images:
+  - path: "artifacts/heureka/public/images/hero-bg.png"
+    description: "Abstract architectural blueprint lines blending seamlessly into a modern 3D building render, professional deep navy and light stone color palette, premium proptech aesthetic, high-end real estate vibe, soft studio lighting"
+    aspect_ratio: "16:9"
+  - path: "artifacts/heureka/public/images/auth-bg.png"
+    description: "Minimalist modern interior architecture with strong geometric sunlight shadows, soft neutral tones, high-end real estate, elegant and clean composition"
+    aspect_ratio: "9:16"
+  - path: "artifacts/heureka/public/images/empty-analyses.png"
+    description: "Clean abstract line-art illustration of a map pin and a document folder, soft navy blue and subtle gold accents, minimalist corporate style"
+    aspect_ratio: "1:1"
+
+notes:
+  - The API client is pre-generated in @workspace/api-client-react and handles base URL and fetch logic.
+  - Replit Auth relies on session cookies managed by the server (no local token storage needed).
+  - All Leaflet maps require 'leaflet/dist/leaflet.css' to render correctly.

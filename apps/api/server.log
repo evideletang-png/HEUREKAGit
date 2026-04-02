@@ -1,0 +1,643 @@
+
+> @workspace/api-server@0.0.0 dev /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server
+> NODE_ENV=development tsx ./src/index.ts
+
+[admin.ts] Router initialized
+Server listening on port 8080
+[prompts] Default prompts seeded.
+ ELIFECYCLE  Command failed with exit code 137.
+
+> @workspace/api-server@0.0.0 dev /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server
+> NODE_ENV=development tsx ./src/index.ts
+
+[admin.ts] Router initialized
+Server listening on port 8080
+[prompts] Default prompts seeded.
+[API Server] 2026-03-31T15:37:14.459Z GET /api/auth/me
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[API Server] 2026-03-31T15:37:18.778Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:37:19.832Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:37:20.582Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:37:21.609Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:37:26.599Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:37:27.634Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:37:30.065Z GET /api/admin/users
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:37:30.066Z GET /api/admin/prompts
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:37:30.067Z GET /api/admin/analyses?limit=100
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:37:38.292Z GET /api/admin/users
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:37:38.293Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:38:03.883Z GET /api/admin/stats
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:38:21.449Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:22.492Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:39.496Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:40.529Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:44.344Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[API Server] 2026-03-31T15:38:44.346Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:45.390Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:48.500Z GET /api/mairie/dossiers?commune=Rochecorbon
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:49.523Z GET /api/mairie/dossiers?commune=Rochecorbon
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[mairie/dossiers] DrizzleQueryError: Failed query: select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc
+params: 
+    at NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+  query: 'select "dossiers"."id", "dossiers"."title", "dossiers"."type_procedure", "dossiers"."status", "dossiers"."created_at", "dossiers"."updated_at", "dossiers"."commune", "dossiers"."address", "dossiers"."dossier_number", "dossiers"."metadata", "dossiers"."assigned_metropole_id", "dossiers"."assigned_abf_id", "dossiers"."is_abf_concerned", "users"."name", "users"."email" from "dossiers" inner join "users" on "dossiers"."user_id" = "users"."id" order by "dossiers"."created_at" desc',
+  params: [],
+  cause: error: column dossiers.assigned_metropole_id does not exist
+      at /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/pg-pool@3.13.0_pg@8.20.0/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/node_modules/.pnpm/drizzle-orm@0.45.1_@types+pg@8.18.0_pg@8.20.0/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts:70:22) {
+    length: 129,
+    severity: 'ERROR',
+    code: '42703',
+    detail: undefined,
+    hint: undefined,
+    position: '241',
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: undefined,
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'parse_relation.c',
+    line: '3675',
+    routine: 'errorMissingColumn'
+  }
+}
+[API Server] 2026-03-31T15:38:51.842Z GET /api/mairie/documents?commune=Rochecorbon
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[API Server] 2026-03-31T15:38:54.101Z POST /api/mairie/gpu/sync?commune=Rochecorbon
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[GPU] Starting sync for commune: 'Rochecorbon'
+[GPU] INSEE code resolved: 37203
+[GPU] Fetching documents for INSEE 37203...
+[GPU] Found 3 total documents for INSEE 37203
+[GPU] 1 active document(s) (document.production) out of 3 total
+[GPU] Processing doc e774d207a2e85f89f2ec594de78ebe1b — 37203_PLU_20250507
+[GPU] Fetching file list for document e774d207a2e85f89f2ec594de78ebe1b...
+[GPU]   Total files in document: 20
+[GPU] Including all 20 files as requested.
+[GPU]   Critical files to ingest: 20
+[GPU]   Downloaded: 37203_procedure_20250507.pdf (2321.1 KB)
+[GPU]   Downloaded: 37203_rapport_20191125.pdf (18360.1 KB)
+[GPU]   Downloaded: 37203_padd_20191125.pdf (4676.1 KB)
+[GPU]   Downloaded: 37203_reglement_20191125.pdf (631.7 KB)
+[GPU]   Downloaded: 37203_reglement_graphique_20191125.pdf (8697.6 KB)
+[GPU]   Downloaded: 37203_annexes_sanitaires_20191125.pdf (2034.2 KB)
+[GPU]   Downloaded: 37203_info_lin_19_01_plan_aep_20191125.pdf (1923.7 KB)
+[GPU]   Downloaded: 37203_info_lin_19_01_plan_ep_20191125.pdf (1093.9 KB)
+[GPU]   Downloaded: 37203_info_lin_19_01_plan_eu_20191125.pdf (8518.0 KB)
+[GPU]   Downloaded: 37203_info_surf_04_00_dpu_20191217.pdf (1103.7 KB)
+[GPU]   Downloaded: 37203_info_surf_14_00_20250507.pdf (4530.7 KB)
+[GPU]   Downloaded: 37203_info_surf_20_00_20220831.pdf (20884.9 KB)
+[GPU]   Downloaded: 37203_info_surf_27_00_PEB_20191125.pdf (4792.0 KB)
+[GPU]   Downloaded: 37203_info_surf_30_00_pup_20191125.pdf (4319.4 KB)
+[GPU]   Downloaded: 37203_info_surf_99_00_PER_Mvt_terrain_20191125.pdf (1256.3 KB)
+[GPU]   Downloaded: 37203_info_surf_99_00_ppri_20191125.pdf (625.4 KB)
+[GPU]   Downloaded: 37203_info_surf_99_00_unesco_20200113.pdf (2233.0 KB)
+[GPU]   Downloaded: 37203_liste_sup_20200113.pdf (460.4 KB)
+[GPU]   Downloaded: 37203_plan_sup_20200113.pdf (8906.3 KB)
+[GPU]   Downloaded: 37203_orientations_amenagement_20191125.pdf (5558.5 KB)
+[GPU] Sync complete: 20 document(s) ingested for Rochecorbon
+[API Server] 2026-03-31T15:39:42.381Z GET /api/mairie/documents?commune=Rochecorbon
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireMairie] User role: admin
+[API Server] 2026-03-31T15:41:00.041Z GET /api/admin/prompts
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:41:00.051Z GET /api/admin/users
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:41:00.058Z GET /api/admin/analyses?limit=100
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:41:02.067Z GET /api/admin/users
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:41:02.068Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:48:02.364Z GET /api/auth/me
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[API Server] 2026-03-31T15:48:02.386Z GET /api/admin/users
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:48:02.389Z GET /api/admin/prompts
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:48:02.391Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:48:02.393Z GET /api/admin/analyses?limit=100
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:49:01.888Z GET /api/admin/users
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:49:01.891Z GET /api/auth/me
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[API Server] 2026-03-31T15:49:01.891Z GET /api/admin/analyses?limit=100
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:49:01.896Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:49:01.896Z GET /api/admin/prompts
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[API Server] 2026-03-31T15:49:42.794Z PATCH /api/admin/users/66a05c03-5274-435d-8b05-f38bd1727a2a
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1774963939,"exp":1775568739}
+[requireAdmin] User role: admin
+[admin.ts] Unmatched route: PATCH /api/admin/users/66a05c03-5274-435d-8b05-f38bd1727a2a

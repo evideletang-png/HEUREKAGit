@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>S'inscrire - HEUREKA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] }, colors: { primary: '#0a192f', accent: '#3b82f6', lightbg: '#f8fafc' } } } }
+  </script>
+</head>
+<body class="font-sans text-gray-900 h-screen bg-lightbg overflow-hidden flex flex-col lg:flex-row">
+  
+  <!-- Left Side: Image with Quote -->
+  <div class="hidden lg:flex w-1/2 relative bg-gray-900 border-r border-gray-200 h-full">
+    <img src="https://images.unsplash.com/photo-1628624747186-a941c476b7ef?ixlib=rb-1.2.1&auto=format&fit=crop&w=1200&q=80" alt="Architecture Layout" class="absolute inset-0 w-full h-full object-cover opacity-80 mix-blend-overlay">
+    <div class="absolute inset-0 bg-gradient-to-t from-gray-900/90 via-gray-900/40 to-transparent"></div>
+    <div class="relative w-full p-16 flex flex-col justify-start pt-32 text-left">
+       <a href="index.html" class="w-12 h-12 bg-white/20 backdrop-blur-md rounded-xl flex items-center justify-center mb-12 border border-white/30 hover:bg-white/30 transition-all">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1v1H9V7zm5 0h1v1h-1V7zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1z"></path></svg>
+      </a>
+      <h2 class="text-4xl font-bold text-white mb-6 leading-tight">
+        Découvrez le potentiel de<br/>chaque parcelle.
+      </h2>
+      <p class="text-xl text-gray-300">
+        Créez votre compte pour lancer votre première analyse urbanistique automatisée.
+      </p>
+    </div>
+  </div>
+
+  <!-- Right Side: Form -->
+  <div class="w-full lg:w-1/2 flex flex-col justify-center items-center p-8 bg-lightbg h-full overflow-y-auto">
+    <div class="w-full max-w-md">
+      
+      <!-- Show logo on mobile only -->
+      <a href="index.html" class="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mx-auto mb-8 hover:bg-accent transition-colors lg:hidden">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1v1H9V7zm5 0h1v1h-1V7zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1z"></path></svg>
+      </a>
+
+      <div class="text-left md:text-center mb-8">
+        <h1 class="text-3xl font-bold text-primary mb-2">Créer un compte</h1>
+        <p class="text-gray-500 text-sm">Rejoignez les professionnels qui utilisent HEUREKA</p>
+      </div>
+
+      <div class="bg-white rounded-2xl p-8 shadow-sm border border-gray-100">
+        <form class="space-y-6" onsubmit="event.preventDefault(); window.location.href='index.html';">
+          <div>
+            <label class="block text-sm font-medium text-primary mb-2">Nom complet</label>
+            <input type="text" placeholder="Jean Dupont" class="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all bg-gray-50 focus:bg-white" required>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-primary mb-2">Email professionnel</label>
+            <input type="email" placeholder="nom@entreprise.fr" class="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all bg-gray-50 focus:bg-white" required>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-primary mb-2">Mot de passe</label>
+            <input type="password" class="w-full px-4 py-3 rounded-lg border border-gray-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all bg-gray-50 focus:bg-white" required>
+            <p class="mt-2 text-xs text-gray-500">8 caractères minimum.</p>
+          </div>
+          <button type="submit" class="w-full bg-primary text-white py-3.5 rounded-lg font-medium hover-lift transition-all mt-2">S'inscrire</button>
+        </form>
+      </div>
+      
+      <p class="mt-8 text-center text-gray-500 text-sm">
+        Déjà un compte ? <a href="login.html" class="font-bold text-primary hover:text-accent">Se connecter</a>
+      </p>
+    </div>
+  </div>
+
+</body>
+</html>

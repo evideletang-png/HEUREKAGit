@@ -1,0 +1,21 @@
+{
+  "document_type": "PCMI",
+  "cadastre": [],
+  "surfaces": {
+    "created_m2": 40
+  },
+  "confidence": {
+    "score": 0.45,
+    "level": "low",
+    "reason": "Référence cadastrale illisible et incertitude sur la surface totale de plancher.",
+    "ambiguities": [
+      "Incohérence entre la description ('environ') et l'emprise au sol."
+    ],
+    "missing_critical_data": [
+      "section_cadastrale",
+      "numero_parcelle"
+    ],
+    "review_status": "manual_required"
+  },
+  "sources": []
+}

@@ -1,0 +1,57 @@
+# HEUREKA UI Recreation Plan
+
+## Goal Description
+Recreate the HEUREKA landing page and authentication paths based on the provided Replit site. The app is a modern real estate SaaS and needs a very clean, dynamic user interface crafted with React and Tailwind CSS. The app will include three main pages: the Home Landing Page, the Login Page, and the Registration Page.
+
+## Proposed Changes
+### Project Initialization
+- Create a new project structure using Vite (React + TypeScript).
+- Configure Tailwind CSS.
+- Set up React Router for navigation between the 3 main pages.
+
+### Base UI Components
+#### [NEW] `src/index.css`
+Setup specific color variables and Tailwind utilities to match the design.
+- Primary colors: Navy Blue (`#0B1B3D`) and soft accents.
+- Inter or similar sans-serif font family.
+
+#### [NEW] `src/components/ui/Button.tsx`
+Reusable button components considering the solid and outline variations seen in the UI.
+
+#### [NEW] `src/components/ui/Input.tsx`
+Reusable input components with label and appropriate focus states (`ring-primary`).
+
+### Routing and Layouts
+#### [NEW] `src/App.tsx`
+React Router configuration mapping `/`, `/login`, and `/register`.
+
+#### [NEW] `src/components/layout/Navbar.tsx`
+Top navigation component with Brand Logo and quick auth links.
+
+#### [NEW] `src/components/layout/Footer.tsx`
+Simple bottom footer text as described on the Replit site.
+
+#### [NEW] `src/components/layout/AuthLayout.tsx`
+A split-screen layout wrapper for the Authentication screens (half image/call-to-action, half form).
+
+### Pages
+#### [NEW] `src/pages/Home.tsx`
+The main landing page with:
+- Background graphic with architectural grid lines.
+- Hero section with the 'Nouveau...' badge and primary CTAs.
+- Features section grid.
+
+#### [NEW] `src/pages/Login.tsx`
+Authentication page that fits within `AuthLayout`. Includes logic for standard form UI.
+
+#### [NEW] `src/pages/Register.tsx`
+Registration page that fits within `AuthLayout`. Includes standard registration fields.
+
+## Verification Plan
+### Automated Tests
+- Run `npm run build` to ensure the project bundles perfectly without TypeScript errors.
+- Run `npm run dev` and execute browser checks for visual alignment and responsiveness.
+
+### Manual Verification
+- Review aesthetics across the Home, Login, and Register routes.
+- Verify micro-interactions: Hover states on buttons, input focus rings, smooth route transitions if any.

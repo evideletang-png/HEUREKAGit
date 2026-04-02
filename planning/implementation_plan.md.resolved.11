@@ -1,0 +1,24 @@
+# Implementation Plan - Messagerie & Timeline (Lien Magique)
+
+Suite à la validation, nous partons sur l'approche **"Lien Magique de Suivi" (Option B)**, enrichie d'une **Timeline d'avancement**.
+
+## Architecture Fonctionnelle
+
+### 1. Backend (API & DB)
+- **Table `dossier_messages`** : Déjà présente. Nous allons l'exposer via de nouvelles routes.
+- **Routes Publiques (Non-authentifiées, sécurisées par UUID)** :
+  - `GET /api/public/suivi/:id` : Récupère l'état du dossier (statut, titre) de manière sécurisée sans exposer l'analyse brute PLU.
+  - `GET /api/public/suivi/:id/messages` : Récupère l'historique de chat.
+  - `POST /api/public/suivi/:id/messages` : Le citoyen envoie un message.
+- **Routes Mairie (Authentifiées)** :
+  - `GET /api/documents/:id/messages` et `POST /api/documents/:id/messages`.
+  - Mise à jour du statut du dossier via une nouvelle action (ex: "Demande de pièces", "Dossier validé").
+
+### 2. Frontend Citoyen (Page Publique `/suivi/:id`)
+- **Timeline de complétion** : Affichage visuel des étapes (Dépôt -> Analyse -> Pièces -> Décision).
+- **Interface de Chat** : Boîte de dialogue simple pour échanger avec la Mairie.
+
+### 3. Frontend Mairie (Back-Office)
+- Ajout d'un bouton "Copier le lien citoyen" sur la fiche d'un dossier.
+- Ajout d'un encart "Messagerie" sous l'analyse de conformité pour voir et répondre aux messages du citoyen.
+- Boutons d'action pour faire avancer la Timeline (ex: "Valider le dossier", "Refuser").

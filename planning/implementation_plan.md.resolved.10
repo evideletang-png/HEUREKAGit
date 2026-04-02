@@ -1,0 +1,30 @@
+# Implementation Plan - Système de Messagerie Administrés
+
+Le besoin est de permettre un échange fluide et tracé entre la Mairie (agents) et les administrés concernant les dossiers d'urbanisme.
+
+## Options Architecturales Proposées
+
+Pour atteindre cet objectif, deux grandes stratégies logicielles sont possibles. Je vous propose de lire ces options et de m'indiquer celle qui correspond le mieux à votre vision du produit.
+
+### Option A : Le "Portail Citoyen" complet (Recommandé pour un SaaS)
+Création d'un Espace Public où les administrés se créent un compte sur Heureka.
+- **Dépôt natif** : Le citoyen se connecte, remplit un formulaire, et upload son CERFA + Plans lui-même.
+- **Messagerie** : Le citoyen a un tableau de bord avec ses dossiers en cours et un véritable "Chat" intégré (type WhatsApp) pour discuter avec l'instructeur.
+- **Avantage** : Heureka devient le point d'entrée unique de la Mairie. L'agent ne saisit plus les dossiers à la main, tout arrive déjà dans l'Espace Conformité.
+
+### Option B : Le "Lien Magique" de Suivi (Plus léger, sans compte)
+L'agent de mairie continue de créer les dossiers lui-même dans Heureka (comme actuellement).
+- **Partage** : Heureka génère un "Lien de suivi public" unique et sécurisé (ex: `heureka.fr/suivi/abc-123`).
+- **Messagerie** : La Mairie envoie ce lien par email au citoyen. Le citoyen clique, atterrit sur une page web Heureka sécurisée (sans mot de passe) où il voit l'état d'avancement de son dossier et une boîte de dialogue pour échanger des messages/fichiers avec la Mairie.
+- **Avantage** : Aucune friction pour le citoyen (pas de mot de passe à créer), très rapide à mettre en place.
+
+## Évolutions Techniques Communes (Base de données)
+Peu importe l'option choisie, les fondations techniques suivantes seront créées :
+1. **Nouvelle Table `dossierMessagesTable`** :
+   - [id](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/admin.ts#94-95), `dossierId`, `senderRole` ("mairie" ou "citoyen"), `messageText`, `createdAt`.
+2. **Stockage de Documents** :
+   - Mise à jour pour permettre aux administrés d'envoyer des "Pièces complémentaires" directement dans le chat (Promises manquantes, nouveaux plans).
+
+## User Review Required
+> [!IMPORTANT]
+> **Choix Stratégique Requis :** Préfèrez-vous l'Option A (Portail Citoyen complet avec création de compte et dépôt initial par le citoyen) ou l'Option B (Lien de suivi magique sans compte, où la mairie garde le contrôle de la création du dossier) ?

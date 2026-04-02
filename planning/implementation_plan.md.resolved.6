@@ -1,0 +1,33 @@
+# Dynamic Commune Search Implementation
+
+The goal is to replace the manual commune input in the Admin panel with a dynamic search that suggests cities and zip codes using the IGN Geocoding API.
+
+## Proposed Changes
+
+### [Component Name] Backend
+
+#### [MODIFY] [geocoding.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/geocoding.ts)
+- Update [geocodeAddress(query: string, type?: string)](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/geocoding.ts#19-66) to support optional type filtering.
+
+#### [MODIFY] [geocode.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/geocode.ts)
+- Pass `req.query.type` to the geocoding service.
+
+### [Component Name] Frontend
+
+#### [MODIFY] [api.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/lib/api-client-react/src/generated/api.ts)
+- Update `GeocodeAddressParams` to include `type: string`.
+
+#### [MODIFY] [admin.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/admin.tsx)
+- Implement `CommuneSearch` autocomplete component.
+- Integrate it into [CommunesEditor](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/admin.tsx#44-142).
+
+## Verification Plan
+
+### Automated Tests
+- `curl "/api/geocode?q=Paris&type=municipality"` to verify filtering.
+- `curl "/api/geocode?q=75001&type=municipality"` to verify zip code results.
+
+### Manual Verification
+- Open Admin panel, go to Users, click "Configurer" on a Mairie agent.
+- Type in the new search box and verify that only communes/cities are suggested.
+- Select a suggestion and verify it is added to the list.

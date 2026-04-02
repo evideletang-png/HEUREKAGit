@@ -1,0 +1,2165 @@
+DISPOSITIONS GENERALES 4 
+DISPOSITIONS APPLICABLES A LA ZONE UA 9 
+DISPOSITIONS APPLICABLES À LA ZONE UB 39 
+DISPOSITIONS APPLICABLES À LA ZONE UC 72 
+DISPOSITIONS APPLICABLES A LA ZONE UP 98 
+DISPOSITIONS APPLICABLES A LA ZONE UX 121 
+DISPOSITIONS APPLICABLES A LA ZONE 1AU 144 
+DISPOSITIONS APPLICABLES A LA ZONE 1AUX 173 
+DISPOSITIONS APPLICABLES A LA ZONE N 196 
+ 
+ 
+ 
+
+ 
+2 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE  
+PLU 
+
+ 
+3 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE 3 
+PLU 
+ 
+PREAMBULE 
+ 
+Structure générale du règlement  
+Le règlement d'urbanisme fixe en cohérence avec le projet d'aménagement et de développement durables (PADD) 
+et les orientations d'aménagement et de programmation, les règles générales et les servitudes d'utilisation 
+des sols. 
+ 
+Le titre I fixe les dispositions générales applicables aux différentes zones composant le règlement.  
+Le titre II détermine les dispositions applicables aux zones urbaines. 
+Le titre III détermine les dispositions applicables aux zones à urbaniser. 
+Le titre IV détermine les dispositions applicables aux zones naturelles.  
+ 
+Pour chaque zone du PLU, le règlement est organisé sur le modèle suivant : 
+Article 1 – Occupations ou utilisations du sol interdites 
+Article 2 – Occupations ou utilisations du sol soumises à des conditions particulières 
+Article 3 – Desserte des terrains par les voies - Accès aux voies ouvertes au public 
+Article 4 – Desserte des terrains par les réseaux 
+Article 5 – Sans objet (abrogé par la loi ALUR du 24 mars 2014 art 157). 
+Article 6 – Implantation des constructions par rapport aux voies et emprises publiques 
+Article 7 – Implantation des constructions par rapport aux limites séparatives 
+Article 8 – Implantation des constructions les unes par rapport aux autres sur une même propriété 
+Article 9 – Emprise au sol des constructions 
+Article 10 – Hauteur maximale des constructions 
+Article 11 – Aspect extérieur des constructions et aménagement des abords 
+Article 12 – Aires de stationnement 
+Article 13 – Espaces libres et plantations 
+Article 14 – Sans objet (abrogé par la loi ALUR du 24 mars 2014 art 157). 
+ 
+Toutes les règles contenues dans les articles sont cumulatives.  
+Les prescriptions du PLU s’appliquent, non pas à la parcelle, numérotée au cadastre, mais au regard de 
+l’unité  foncière.  Compte  tenu  de  ses  caractéristiques  telles  qu’elles  ressortent  des  pièces  du  dossier 
+d’instruction, un projet doit respecter les règles édictées par le code de l’urbanisme et le PLU, même s’il 
+n’a pour objet ou pour effet, à ce stade où il n’existe pas encore de projet concret de construction, que de 
+permettre le détachement d’un lot d’une unité foncière.  
+Dans le cas d’un lotissement ou dans celui de la construction, sur un même terrain, de plusieurs bâtiments 
+dont le terrain d’assiette doit faire l’objet d’une division en propriété ou en jouissance, les règles édictées 
+par le PLU sont appréciées à la parcelle.  
+
+ 
+4 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE 4 
+PLU 
+TITRE I DISPOSITIONS GENERALES 
+ 
+1.
+ CHAMP D’APPLICATION TERRITORIAL DU PLAN 
+Le présent règlement s’applique sur la totalité du territoire de la commune de Saint-Cyr-sur-Loire.  
+ 
+2. PORTEE  DU  REGLEMENT  A  L’EGARD  D’AUTRES  LEGISLATIONS  RELATIVES  A 
+L’OCCUPATION DES SOLS 
+Indépendamment des règles du PLU qui s’appliquent en matière d’autorisations d’occupation et d’utilisation des 
+sols, s’ajoutent les prescriptions prises au titre de législations et de réglementations spécifiques, notamment en 
+matière : de code civil, de code de l’environnement, d’installations classées pour la protection de la nature et de 
+l'environnement, de protection du patrimoine historique et esthétique, de lotissements dont les règles d'urbanisme 
+spécifiques  sont  en  vigueur  ou  ont  été  maintenues, de  code  de  la  santé  publique  et  du  règlement  sanitaire 
+départemental, de publicité, d’enseignes et de pré-enseignes, de servitudes d'utilité publique affectant l'occupation 
+ou l'utilisation du sol,... 
+ 
+Seules les servitudes existantes à la dernière date inscrite sur les documents du PLU y sont reportées, mais de 
+nouvelles servitudes peuvent être créées ultérieurement dans le cadre de la législation et de la réglementation en 
+vigueur en la matière et sont applicables. 
+ 
+Les règles du PLU se substituent au Règlement National d’Urbanisme (RNU) ou le complètent à l’exception des 
+articles d’ordre public suivants qui demeurent applicables dans les communes dotées d’un PLU :   
+- Le projet peut être refusé ou n'être accepté que sous réserve de l'observation de prescriptions spéciales 
+s'il est de nature à porter atteinte à la salubrité ou à la sécurité publique du fait de sa situation, de ses 
+caractéristiques, de son importance ou de son implantation à proximité d'autres installations. 
+- Le projet peut être refusé ou n'être accepté que sous réserve de l'observation de prescriptions spéciales 
+s'il est de nature, par sa localisation et ses caractéristiques, à compromettre la conservation ou la mise 
+en valeur d'un site ou de vestiges archéologiques. 
+- Le  permis  ou  la  décision  prise  sur  la  déclaration  préalable  doit  respecter  les  préoccupations 
+d'environnement définies aux articles L110-1 et L110-2 du code de l'environnement. Le projet peut n'être 
+accepté que sous réserve de l'observation de prescriptions spéciales si, par son importance, sa situation 
+ou sa destination, il est de nature à avoir des conséquences dommageables pour l'environnement. Ces 
+prescriptions spéciales tiennent compte, le cas échéant, des mesures mentionnées à l'article R. 181-43 
+du code de l'environnement. 
+- Le projet peut être refusé ou n'être accepté que sous réserve de l'observation de prescriptions spéciales 
+si  les  constructions,  par  leur  situation,  leur  architecture,  leurs  dimensions  ou  l'aspect  extérieur  des 
+bâtiments ou ouvrages à édifier ou à modifier, sont de nature à porter atteinte au caractère ou à l'intérêt 
+des  lieux  avoisinants,  aux  sites,  aux  paysages  naturels  ou  urbains  ainsi  qu'à  la  conservation  des 
+perspectives monumentales. 
+ 
+Des dispositions particulières mentionnées sur les documents graphiques affectent certaines parties du territoire. 
+Il s'agit : 
+- Des  emplacements  réservés aux  voies  et  ouvrages  publics,  aux  installations  d’intérêt  général,  aux 
+espaces verts, aux espaces nécessaires aux continuités écologiques. Ils figurent au document graphique, 
+répertoriés par des numéros de référence.  
+- Des périmètres d’étude repérés au document graphique. Dans ces secteurs, l’autorité compétente peut 
+surseoir à statuer lorsque des travaux, des constructions ou des installations sont susceptibles de rendre 
+plus onéreuse l’exécution de travaux publics mis à l’étude.  
+
+ 
+5 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE 5 
+PLU 
+- Des espaces boisés classés au titre des articles L113-1 et suivants du code de l’urbanisme et des 
+éléments de patrimoine à protéger au titre des articles L151-19 et L151-23 du code de l'urbanisme. Les 
+espaces boisés classés à conserver et les espaces boisés à créer apparaissent par un aplat de  cercles 
+inscrits sur le document graphique.  
+- Des orientations d’aménagement et de programmation repérées au document graphique par un aplat 
+hachuré orange. La réalisation de chaque programme d’aménagement à l’intérieur du périmètre de l’OAP 
+(à l’exception de l’OAP n°6 La Gruette qui sera une opération d’aménagement d’ensemble) doit se faire 
+au  fur  et  à  mesure  de  la  réalisation  des  équipements  internes  à  l’OAP,  doit  être  cohérente  avec 
+l’environnement  et  ne  pas  compromettre  l’aménagement  de  la  future  OAP.  Chaque  programme 
+d’aménagement de par son ampleur, sa taille et son positionnement participera au maillage interne de 
+l’OAP. 
+Certaines  parties  du  territoire  peuvent  être  concernées  par  le Plan  de  Prévention  des  Risques  naturels 
+prévisibles d’Inondation (PPRI) ou être incluses dans le Périmètre de Protection des Monuments Historiques. 
+Pour ces raisons, une autorisation d’urbanisme peut être accordée ou refusée sous conditions.  
+ 
+Le PLU protège également certains éléments patrimoniaux (bâtis, arbres, organisations végétales, quartiers ou 
+rues) remarquables identifiés. Ils doivent être préservés. 
+ 
+Un sursis à statuer peut être opposé aux demandes d’autorisation d’urbanisme dans les conditions fixées aux 
+articles L.102-13, L.424-1, R.424-5 du code de l’urbanisme.  
+ 
+3. DIVISION DU TERRITOIRE EN ZONES 
+Le PLU divise le territoire de la commune et délimite trois zones sur le territoire de la commune :  
+- les zones urbaines (UA, UB, UC, UP, UX),  
+- les zones à urbaniser (1AU, 1AUX), 
+- les zones naturelles et forestières (N). 
+Le règlement fixe les règles applicables à l'intérieur de chacune de ces zones. 
+ 
+4.
+ DEROGATIONS, ADAPTATIONS MINEURES ET AUTRES DISPOSITIONS 
+ADAPTATIONS MINEURES  
+Les règles et servitudes définies par un PLU peuvent faire l’objet d’adaptations mineures rendues nécessaires par 
+la  nature  du  sol  (topographie,  contraintes  techniques,...),  la  configuration  des  parcelles  ou  le  caractère  des 
+constructions avoisinantes.  
+ 
+DEROGATIONS 
+L'exécution par toute personne publique ou privée de tous travaux, constructions, aménagements, plantations, 
+affouillements  ou  exhaussements  des  sols,  et  ouverture  d'installations  classées  appartenant  aux  catégories 
+déterminées dans le plan doivent être conformes au règlement et à ses documents graphiques. 
+Ces  travaux  ou  opérations  doivent,  en  outre,  être  compatibles,  lorsqu'elles  existent,  avec  les  orientations 
+d'aménagement et de programmation. 
+ 
+Toutefois, l'autorité compétente pour délivrer l’autorisation d’urbanisme peut, par décision motivée, accorder des 
+dérogations à une ou plusieurs règles du PLU pour permettre notamment la reconstruction de bâtiments détruits 
+ou endommagés à la suite d'une catastrophe naturelle survenue depuis moins de dix ans, lorsque les prescriptions 
+imposées aux constructeurs en vue d'assurer la sécurité des biens et des personnes sont contraires à ces règles 
+
+ 
+6 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE 6 
+PLU 
+; la restauration ou la reconstruction d'immeubles protégés au titre de la législation sur les monuments historiques, 
+lorsque  les  contraintes  architecturales  propres  à  ces  immeubles  sont  contraires  à  ces  règles  ;  des  travaux 
+nécessaires à l'accessibilité des personnes handicapées à un logement existant. 
+ 
+RECONSTRUCTION A L’IDENTIQUE 
+Conformément au code de l’urbanisme, la reconstruction à l’identique d’un bâtiment détruit ou démoli depuis moins 
+de dix ans est autorisée, dès lors qu’il a été régulièrement édifié. L’emprise au sol devra être identique à celle des 
+bâtiments initiaux, et l’implantation pourra être adaptée en fonction des constructions avoisinantes. 
+Cependant, la reconstruction devra au maximum tendre à respecter les articles 6, 7, 8, 9 et 10 du nouveau PLU, 
+afin de permettre de rendre le projet plus conforme aux dispositions réglementaires méconnues. Si le respect 
+desdits articles est impossible, la construction devra malgré tout être en lien avec le caractère ou l’intérêt des lieux 
+avoisinants,  et  notamment  tenir  compte  de  l’implantation  des  constructions  existantes  ou  projetées  dans  les 
+parcellaires voisins.
+  
+ 
+AUTRES DISPOSITIONS 
+IMPOSSIBILITE DE REALISER LES AIRES DE STATIONNEMENT 
+Lorsque le bénéficiaire du permis ou de la décision de non-opposition à une déclaration préalable ne peut pas 
+satisfaire  aux  obligations  imposées  par  le  PLU  en  matière  d’aires  de  stationnement  à  réaliser,  sur  le terrain 
+d’assiette ou dans son environnement immédiat (rayon de 300m) de manière à assurer le stationnement des 
+véhicules en dehors des voies publiques, il peut être tenu quitte de ces obligations en justifiant, pour les places 
+qu'il ne peut réaliser lui-même : 
+- soit de l'obtention d'une concession à long terme dans un parc public de stationnement existant ou en 
+cours de réalisation et situé à proximité de l'opération,  
+- soit de l'acquisition ou de la concession de places dans un parc privé de stationnement répondant aux 
+mêmes conditions.  
+ 
+DISPOSITIONS PARTICULIERES POUR LE PASSAGE DES VEHICULES DE SECURITE 
+Les accès et voiries, ainsi que l’implantation des constructions doivent répondre aux normes minimales en vigueur 
+concernant l’approche des moyens de défense contre l’incendie et de protection civile ainsi que la circulation des 
+véhicules des services publics.   
+L’établissement des accès doit tenir compte également des règles de visibilité en fonction de la réglementation en 
+vigueur 
+ 
+DISPOSITIONS PARTICULIERES EN MATIERE DE NUISANCES 
+Les appareils pour la climatisation et le traitement de l’air, les pompes à chaleur, les compresseurs, les ventilations, 
+les  antennes  paraboliques,  les  machineries  d’ascenseur,  les  désenfumages  et  toutes  les  ventilations  et  les 
+équipements  techniques  ne  doivent  pas  être  visibles  du  domaine  public,  ou  doivent  se  fondre  dans  leur 
+environnement immédiat. Il est demandé que toutes les précautions en matière de bruit vis-à-vis de l’environnement 
+extérieur soient prises. Le bruit généré ne doit pas être supérieur aux normes en vigueur.  
+ 
+ILLUSTRATION DU REGLEMENT 
+Les  illustrations  du  présent  règlement  ont  une  fonction  pédagogique  et  explicative.  En  cas  de  doute  sur 
+l’interprétation d’une disposition, le texte prévaut sur l’illustration.  
+ 
+
+ 
+7 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE 7 
+PLU 
+CONSTRUCTION A CHEVAL SUR DEUX ZONES DU PLU 
+Le projet doit être conforme au règlement de la zone dans laquelle il doit être implanté. Lorsqu’une construction 
+porte sur plusieurs zones, la règlementation doit être respectée dans chacune des zones.  
+Le pourcentage d’emprise des constructions est calculé par zone et ne doit pas dépasser dans chaque zone 
+l’emprise maximale qui y est autorisée. Il est donc impossible de regrouper l’ensemble des constructions sur une 
+des zones dépassant l’emprise autorisée sur cette zone même si le total de la surface construite prévue est inférieur 
+au total des possibilités des zones réunies.  
+ 
+AVERTISSEMENTS LIES AUX RISQUES 
+Dans  les  secteurs  concernés  par  le  risque  d'inondation,  toutes  les  occupations  et  utilisations  du  sol doivent 
+respecter les dispositions édictées par le Plan de Prévention des Risques d'inondation faisant partie des annexes 
+du PLU. Dans tous les cas, ce sont les dispositions les plus contraignantes qui s'appliquent. 
+Dans les zones à risques de retrait et de gonflement des argiles, des précautions particulières devront être prises 
+concernant notamment les fondations et la structure des constructions. Les constructions d’ouvrages se doivent 
+de respecter des obligations et des normes de construction dans les zones susceptibles d’être affectées par ces 
+risques, afin d’en limiter les conséquences. 
+Dans les zones de présence de cavités souterraines, le risque de mouvements de terrain doit être pris en compte 
+pour toute construction ou installation le requérant. 
+Dans les sites identifiés comme potentiellement pollués (pollution des sols) une étude du sol devra être réalisée 
+avant tout projet pour juger de la compatibilité du site avec l'usage projeté. 
+ 
+REGLES GENERALES EN MATIERE D’ASSAINISSEMENT 
+Les capacités d’infiltration des sols sont systématiquement étudiées, et ce pour tous types d’opération, sans limite 
+de surface. 
+Dans le cas des sous-sols, chaque construction peut se voir imposer un dispositif d’évacuation d’eaux pluviales de 
+type pompe de relevage. 
+ 
+COLLECTE DES DECHETS POUR LES PROJETS DE PLUS DE TROIS LOGEMENTS ET LES ZONES ECONOMIQUES 
+Les  lieux  destinés  au  stockage  des  déchets  sont  situés  et  dimensionnés  pour  assurer  la  bonne  gestion  des 
+conteneurs. Ils doivent être facilement accessibles depuis la voie ou l'emprise publique mais peuvent être situés 
+au droit de l'accès. Les locaux indépendants de stockage des déchets doivent être traités de façon à réduire leur 
+impact visuel par un dispositif en harmonie avec les constructions principales (muret, panneau à claire-voie, haie 
+compacte...). 
+La réalisation des lieux destinés au stockage des déchets est fonction de la présence de points d’apport volontaire 
+à proximité du projet.  
+ 
+RESEAU DE TRANSPORT D’ELECTRICITE 
+Pour les lignes HTB 
+- Les règles de prospect et d’implantation ne sont pas applicables aux ouvrages de transport d’électricité 
+HTB (tension > 50 kV), faisant l’objet d’un report dans les documents graphiques et mentionnés dans la 
+liste des servitudes ;  
+- La construction d’ouvrages électriques à Haute et très Haute tension est autorisée afin que le gestionnaire 
+du réseau puisse réaliser les travaux de maintenance et de modification ou la surélévation de ses lignes 
+pour des exigences fonctionnelles et/ou techniques ; 
+- Les  constructions  et  installations  nécessaires  aux services  publics  ou  d’intérêt  collectif  ne  sont  pas 
+soumises à l’article 10 du règlement de chaque zone.   
+
+ 
+8 
+REGLEMENT 
+ 
+VILLE DE SAINT-CYR-SUR-LOIRE 8 
+PLU 
+ 
+Pour les postes de transformation 
+Les aménagements futurs tels que la construction de bâtiments techniques, équipements et mise en conformité 
+des clôtures du poste sont autorisés. 
+ 
+REGLES GENERALES EN MATIERE D’ARCHEOLOGIE 
+Le projet peut être refusé ou n’être accepté que sous réserve de l’observation de prescriptions spéciales s’il est de 
+nature, par sa localisation et ses caractéristiques, à compromettre la conservation ou la mise en valeur d’un site 
+ou de vestiges archéologiques.  
+ 
+
+ 
+9 
+REGLEMENT 
+ZONE UA 
+VILLE DE SAINT-CYR-SUR-LOIRE 9 
+PLU 
+DISPOSITIONS APPLICABLES A LA ZONE UA 
+CARACTERE DE LA ZONE (RAPPEL DU RAPPORT DE PRESENTATION) 
+La zone UA est une zone urbaine dense, où la population dispose des principales activités commerciales, de 
+services, bureaux, des équipements d’intérêt collectif et services publics qui lui sont nécessaires.  
+Elle comprend 3 secteurs :  
+ UA : il possède les caractéristiques « optimum » souhaitées pour les secteurs urbains denses de Saint-Cyr-sur-
+Loire : un équilibre entre l’importance de la population, la hauteur du bâti et les espaces verts.  
+ UAa : ce secteur doit évoluer vers un espace urbain à caractère central affirmé avec un bâti qui devra favoriser 
+une  cohérence  morphologique.  En  conséquence,  l’urbanisation  pourra  se  faire  principalement  sous  forme de 
+collectifs.  
+ UAb : il s’agit du boulevard Charles de Gaulle, qui doit poursuivre sa transformation en boulevard urbain avec 
+des aménagements paysagers spécifiques. 
+ UAc : il s’agit du quartier Mailloux dans le cadre de sa revalorisation et sa réhabilitation en tant que quartier 
+d’habitat collectif à vocation sociale. L’objectif est d’une part l’amélioration des conditions de vie des habitants et 
+d’autre part la mise en conformité des logements via un projet de démolition puis de construction de collectifs 
+comprenant des logements sociaux.
+  
+ 
+Une partie de la zone UA est soumise à une orientation d'aménagement et de programmation (voir pièces 4 du 
+dossier de PLU). Celle-ci concerne le site République-Jean Moulin. 
+ 
+Du fait de l’existence constatée de termites dans une petite partie de cette zone, il y a lieu de se reporter aux 
+prescriptions de l’arrêté préfectoral en vigueur. 
+ 
+Pour tout projet de logements de 10 logements et plus, il doit être respecté le quota de logements sociaux, avec 
+un minimum de 25% de logements sociaux. La répartition de ces logements se fait globalement au sein de 
+chaque programme, ou ensemble de programmes sur un même site, si cet ensemble entraîne la création de 10 
+logements et plus, en respectant au maximum la mixité sociale. 
+Ce quota est ramené à 20% minimum concernant l’ensemble de l’OAP République-Jean Moulin.  
+ 
+Avertissements liés aux risques : dans les secteurs concernés par le risque d'inondation, toutes les occupations et 
+utilisations du sol doivent respecter les dispositions édictées par le Plan de Prévention des Risques faisant partie 
+des annexes du PLU. 
+UA-ARTICLE 1 : OCCUPATIONS OU UTILISATIONS DU SOL INTERDITES 
+Sont interdites toutes les occupations ou utilisations des sols non compatibles avec les caractères propres à la 
+zone : 
+• Les établissements, installations ou utilisations du sol qui, par leur destination, leur nature, leur importance ou 
+leur aspect sont incompatibles avec la salubrité, la tranquillité, la sécurité ou l’environnement d’un quartier 
+d’habitation, et qui peuvent entraîner des nuisances graves vis-à-vis du voisinage, 
+• L’ouverture et l’exploitation de carrières, les affouillements et les exhaussements de sol sauf nécessaires à la 
+réalisation des occupations et utilisations du sol autorisées, 
+• Les constructions destinées à l’exploitation agricole ou forestière, 
+• Les stockages extérieurs, même temporaires, visibles depuis le domaine public : les dépôts de ferrailles, de 
+matériaux  (matériaux  de  démolition,...),  de  déchets  de  toute  nature,  tels  que  pneus,  chiffons,  ordures, 
+véhicules désaffectés ou à l’état d’épave,... 
+• Les constructions, leurs extensions et leurs annexes, à destination industrielle, 
+
+ 
+10 
+REGLEMENT 
+ZONE UA 
+VILLE DE SAINT-CYR-SUR-LOIRE 10 
+PLU 
+• Les constructions, leurs extensions et leurs annexes, à destination d’entrepôt, 
+• Les terrains aménagés, permanents ou saisonniers, pour l'accueil des campeurs et les aires naturelles de 
+camping, autre que l’aire d’accueil des gens du voyage,  
+• Les installations établies pour plus de trois mois susceptibles de servir d’habitation et constituées : 
+- soit par d’anciens véhicules désaffectés, 
+- soit par des roulottes, caravanes, camping-cars, bungalows (sauf installations de chantier), tiny house, 
+mobile-home. 
+UA-ARTICLE  2  :  OCCUPATIONS  OU  UTILISATIONS  DU  SOL  SOUMISES  A  CONDITIONS 
+PARTICULIERES 
+A l'exception de celles interdites à l'article UA1, et sous réserve : 
+- que des précautions soient prises pour réduire les nuisances particulières ou les risques soit pour la commodité 
+du voisinage, soit pour la santé, la sécurité, la salubrité publique, soit pour la protection de l’environnement et 
+du paysage, 
+- d'être compatibles avec les équipements publics existants ou prévus. 
+Sont admises toutes les occupations et utilisations du sol suivantes, sous conditions particulières :  
+• Les extensions mineures d’installations existantes et les installations liées à l’activité urbaine pour permettre 
+les évolutions techniques nécessaires et l’adaptation aux règles de sécurité. 
+Elles obéiront à des dispositions particulières prises pour limiter les risques et les nuisances à un niveau 
+compatible avec le voisinage et seront adaptées aux infrastructures et réseaux existants. 
+• Les nouvelles installations classées soumises à déclaration ou à enregistrement qui, par leur destination, leur 
+nature,  leur  importance  ou  leur  aspect,  sont  compatibles  avec  la  salubrité,  la  tranquillité,  la  sécurité  ou 
+l’environnement d’un quartier d’habitation. 
+• Les  constructions,  leurs  extensions  et  leurs  annexes  (dans  la  limite  de  deux  hors  piscine),  à  destination 
+d’habitation, excepté en secteur UAc.  
+• Il est précisé que les piscines sont autorisées dès lors que leur implantation ne génère pas de nuisances 
+définies par la réglementation existante. 
+• La  reconstruction  de  l’existant  après  sinistre  ou  démolition,  dans  le  cas  où  ces  bâtiments  ne  sont  plus 
+conformes au présent 
+
+--- DISCONTINUITÉ ---
+
+ de  mesures  compensatoires 
+restitutives. 
+ 
+Arbre remarquable isolé : l’abattage d’un arbre remarquable est interdit sauf en cas de risque sanitaire ou pour 
+assurer la sécurité des biens et des personnes. Un périmètre perméable suffisant autour de l’arbre est à respecter 
+afin d’assurer sa pérennité et son développement. 
+L’implantation des constructions doit être étudiée de manière à préserver au maximum les plantations existantes.  
+Quelle  que  soit  leur  grandeur  ou  leur  situation,  ces  éléments  sont  constitutifs  du  paysage  et  participent  à  la 
+biodiversité. Leur maintien et éventuellement leur réhabilitation devront être recherchés, en particulier pour les 
+parcs et jardins attenants aux constructions anciennes.  
+UA-ARTICLE 14 : POSSIBILITES MAXIMALES D’OCCUPATION DU SOL 
+Sans objet (abrogé par la loi ALUR du 24 mars 2014 art 157). 
+
+ 
+39 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 39 
+PLU 
+DISPOSITIONS APPLICABLES À LA ZONE UB 
+CARACTERE DE LA ZONE (RAPPEL DU RAPPORT DE PRESENTATION) 
+La zone UB recouvre des secteurs d’urbanisation de densité moyenne voire faible. 
+Les  morphologies  sont  très  diverses :  tissus  ou  habitats  anciens,  petits  collectifs,  lotissements,  installations 
+sportives et culturelles. 
+Elle comprend cinq secteurs : UB strict, UBa, UBb, UBc et UBd. 
+ UB strict : il a un rôle urbain structurant. Il peut être considéré comme intermédiaire entre le zonage UA et les 
+autres secteurs UB. Il peut accueillir de petits collectifs et de l’habitat individuel. 
+ UBa : il est à vocation d’habitat sans collectif. Il comprend des terrains relativement ordonnés mais de taille 
+moindre que le secteur UBb.  
+ UBb : il est à vocation d’habitat sans collectif. Il comprend des terrains relativement grands et ordonnés.   
+ UBc : il est à vocation d’habitat sans collectif. La construction y est moins structurée que le secteur UBb. Il est 
+le plus éloigné du Cœur de Ville. Du fait de sa proximité avec la Vallée de la Choisille, il doit conserver une 
+urbanisation assez aérée.
+ 
+ UBd : il est à vocation d’habitat. Il peut accueillir des petits collectifs. La construction y est structurée. Il comprend 
+le quartier sud de Central Parc. 
+ 
+Certaines parties de la zone UB sont soumises à des orientations d'aménagement et de programmation (voir 
+pièce 4 du dossier de PLU).  
+Celles-ci concernent les sites :  
+-Façade de Loire : patrimoine mondial de l’UNESCO, 
+-Site des ZAC Central Parc-Bois Ribert, 
+-Site des Epinettes, 
+-Site de la Chanterie, 
+-Site du pôle médical Aristide Briand (CPU), 
+-Site du Vau Ardau, 
+-Site du pôle Santé Mentale Confluence, 
+-Site de la ZAC Charles de Gaulle. 
+ 
+Du fait de l’existence constatée de termites dans une petite partie de cette zone, il y a lieu de se reporter aux 
+prescriptions de l’arrêté préfectoral en vigueur. 
+Pour tout projet de logements de 10 logements et plus, il doit être respecté le quota de logements sociaux, avec 
+un minimum de 25% de logements sociaux. La répartition de ces logements se fait globalement au sein de 
+chaque programme, ou ensemble de programmes sur un même site, si cet ensemble entraîne la création de 10 
+logements et plus, en respectant au maximum la mixité sociale. 
+Concernant le secteur UBd, les 25% minimum de logements sociaux sont calculés au regard de l’ensemble du 
+site Central Parc et non par projet de logements. Ainsi, la répartition de ces logements se fait globalement au regard 
+de l’ensemble du site. 
+Avertissements liés aux risques : dans les secteurs concernés par le risque d'inondation, toutes les occupations et 
+utilisations du sol doivent respecter les dispositions édictées par le Plan de Prévention des Risques faisant partie 
+des annexes du PLU. 
+
+ 
+40 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 40 
+PLU 
+UB-ARTICLE 1 : OCCUPATIONS OU UTILISATIONS DU SOL INTERDITES 
+Sont interdites toutes les occupations ou utilisations des sols non compatibles avec les caractères propres à la 
+zone : 
+• Les établissements, installations ou utilisations du sol qui, par leur destination, leur nature, leur importance ou 
+leur aspect sont incompatibles avec la salubrité, la tranquillité, la sécurité ou l’environnement d’un quartier 
+d’habitation, et qui peuvent entraîner des nuisances graves vis-à-vis du voisinage, 
+• L’ouverture et l’exploitation de carrières, les affouillements et les exhaussements de sol sauf nécessaires à la 
+réalisation des occupations et utilisations du sol autorisées, 
+• Les constructions destinées à l’exploitation agricole ou forestière, 
+• Les stockages extérieurs, même temporaires, visibles depuis le domaine public : les dépôts de ferrailles, de 
+matériaux  (matériaux  de  démolition,...),  de  déchets  de  toute  nature,  tels  que  pneus,  chiffons,  ordures, 
+véhicules désaffectés ou à l’état d’épave,... 
+• Les constructions, leurs extensions et leurs annexes, à destination industrielle, 
+• Les constructions, leurs extensions et leurs annexes, à destination d’entrepôt, 
+• Les terrains aménagés, permanents ou saisonniers, pour l'accueil des campeurs et les aires naturelles de 
+camping, autre que l’aire d’accueil des gens du voyage,  
+• Les installations établies pour plus de trois mois susceptibles de servir d’habitation et constituées : 
+- soit par d’anciens véhicules désaffectés, 
+- soit par des roulottes, caravanes, camping-cars, bungalows (sauf installations de chantier), tiny house, 
+mobile-home. 
+ 
+De plus, en secteur UBd, la cours anglaise (petite cour étroite aménagée au droit d’une façade, en contrebas de 
+la voie publique ou du niveau du sol extérieur) est interdite. 
+UB-ARTICLE  2  :  OCCUPATIONS  OU  UTILISATIONS  DU  SOL  SOUMISES  A  CONDITIONS 
+PARTICULIERES 
+A l'exception de celles interdites à l'article UB1, et sous réserve : 
+- que des précautions soient prises pour réduire les nuisances particulières ou les risques soit pour la commodité 
+du voisinage, soit pour la santé, la sécurité, la salubrité publique, soit pour la protection de l’environnement et 
+du paysage, 
+- d'être compatibles avec les équipements publics existants ou prévus. 
+Sont admises toutes les occupations et utilisations du sol suivantes, sous conditions particulières :  
+• Les extensions mineures d’installations existantes et les installations liées à l’activité urbaine pour permettre 
+les évolutions techniques nécessaires et l’adaptation aux règles de sécurité. 
+Elles  obéiront  à  des  dispositions  particulières  prises  pour limiter  les  risques  et  les  nuisances  à  un niveau 
+compatible avec le voisinage et seront adaptées aux infrastructures et réseaux existants. 
+• Les nouvelles installations classées soumises à déclaration ou à enregistrement qui, par leur destination, leur 
+nature,  leur  importance  ou  leur  aspect,  sont  compatibles  avec  la  salubrité,  la  tranquillité,  la  sécurité  ou 
+l’environnement d’un quartier d’habitation. 
+• Les  constructions,  leurs  extensions  et  leurs  annexes  (dans  la  limite  de  deux  hors  piscine),  à  destination 
+d’habitation.  
+• Il est précisé que les piscines sont autorisées dès lors que leur implantation ne génère pas de nuisances 
+définies par la réglementation existante. 
+
+ 
+41 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 41 
+PLU 
+• La  reconstruction  de  l’existant  après  sinistre  ou  démolition,  dans  le  cas  où  ces  bâtiments  ne  sont  plus 
+conformes au présent règlement, dans la limite des droits à construire de l’existant sinistré ou démoli. 
+• L’extension des constructions à destination d’habitation existantes et leurs annexes (dans la limite de deux 
+hors piscine). 
+• Pour tout projet de logements de 10 logements et plus, il doit être respecté le quota de logements sociaux, 
+avec un minimum de 25% de logements sociaux. La répartition de ces logements se fait globalement au 
+sein de chaque programme, ou ensemble de programmes sur un même site, si cet ensemble entraîne la 
+création de 10 logements et plus, en respectant au maximum la mixité sociale. 
+Concernant le secteur UBd, les 25% minimum de logements sociaux sont calculés au regard de l’ensemble 
+du site Central Parc et non par projet de logements. Ainsi, la répartition de ces logements se fait globalement 
+au regard de l’ensemble du site. 
+• Les  installations  de  production  d’électricité  utilisant  l’énergie  mécanique  du  vent  ou  l'énergie  solaire  dont 
+l’usage est lié aux besoins de la construction et s’intégrant à l’environnement existant.  
+• Les constructions et installations nécessaires aux services publics ou d’intérêt collectif sont autorisées dans 
+l’ensemble  de  la  zone,  sous-secteurs  compris.  Les  travaux  de  maintenance  ou  de  modification  de  ces 
+ouvrages sont également autorisés pour des exigences fonctionnelles et/ou techniques.  
+• Concernant les bâtiments identifiés au titre de l'article L.151-19 du code de l'urbanisme, repérés aux 
+documents graphiques du PLU et inventoriés dans les annexes du PLU : la démolition des bâtiments identifiés 
+est interdite du fait de leur grand intérêt architectural et historique ; toutefois la démolition des annexes et des 
+extensions ne correspondant pas à l’architecture du bâtiment principal peut être autorisée lorsque leur état de 
+vétusté ou la nécessité d’évolution du bâti le justifie et/ou lorsque le projet de remplacement s’intègre dans la 
+séquence. 
+UB-ARTICLE 3 : ACCES ET VOIRIE 
+Pour être constructible, un terrain doit avoir accès à une voie carrossable publique ou privée, soit directement, soit 
+par l’intermédiaire d’une servitude de passage conformément à l’article 682 du code civil.  
+Le projet peut être refusé sur des terrains qui ne seraient pas desservis par des voies publiques ou privées dans 
+des  conditions  (dimensions,  formes,  caractéristiques  techniques,  sécurité  des  usagers,...)  répondant  à  son 
+importance  ou  à  la  destination  des  constructions  ou  des  aménagements  envisagés,  et  notamment  si  les 
+caractéristiques de ces voies rendent difficile la circulation ou l'utilisation des engins de lutte contre l'incendie et de 
+protection civile ainsi que la circulation des véhicules des services publics.  
+Les emprises des voies doivent tenir compte du caractère des lieux (environnement urbain,...), des exigences 
+techniques ou réglementaires liées aux différents types de transports (transports en commun, bandes ou pistes 
+cyclables,...)  et  des  composantes  paysagères  et  naturelles  environnantes.  L’emprise  d’une  voie  concerne 
+l’ensemble de la chaussée et ses accessoires (espaces verts, trottoirs, pistes cyclables, stationnement,...). 
+Les accès doivent répondre à l’importance et à la destination des constructions ou des aménagements envisagés. 
+Le projet peut également être refusé ou n'être accepté que sous réserve de prescriptions spéciales si les accès 
+présentent un risque pour la sécurité des usagers des voies publiques ou pour celle des personnes utilisant ces 
+accès. Cette sécurité doit être appréciée compte tenu, notamment, de la position des accès, de leur configuration 
+ainsi que de la nature et de l'intensité du trafic. 
+L’article vise les conditions de desserte des terrains par les voies publiques ou privées mais aussi l’accès 
+à ces voies. 
+ 
+ACCES 
+Les nouvelles constructions doivent respecter les règles suivantes :  
+- Les accès doivent être situés sur la voie la moins gênante pour la circulation.  
+
+ 
+42 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 42 
+PLU 
+- Ils doivent avoir une largeur d’emprise de 4m minimum pour les projets de moins de trois logements.  
+- Ils doivent avoir une largeur d’emprise de 5,50m minimum pour les projets de trois logements et plus. 
+- La voie d’accès est de 25m maximum de longueur. 
+ 
+En zone UBd :  
+- Les constructions destinées à l’habitation, de moins de trois logements, doivent être desservies par un 
+accès  unique d’une  largeur  d’emprise  de  6m,  réparti  en  3m  d’accès  à la  parcelle  +  3m  d’aire  de 
+stationnement, 
+- Les constructions destinées à l’habitation, de trois logements et plus, doivent être desservies par un 
+accès d’une largeur d’emprise de 5m minimum. 
+ 
+VOIES  INTERNES  ET  EMPRISE  DES  SERVITUDES  DE  PASSAGE  DESSERVANT  LA 
+CONSTRUCTION 
+Les voies ou emprises doivent avoir une longueur maximum de 25m et une largeur sur toute la longueur du chemin 
+d’accès de 4m minimum pour les projets de moins de trois logements.  
+Les voies ou emprises doivent avoir une largeur sur toute la longueur du chemin de 5,50m minimum pour les 
+projets de trois logements et plus. 
+La création d’un chemin d’accès situé à 4m ou à moins de 4m de part et d’autre de constructions neuves ou 
+existantes est interdite. 
+ 
+La création d’un chemin d’accès à côté d’un autre chemin d’accès est interdite. 
+   
+ 
+DESSERTE PAR LA VOIRIE 
+CES    PRESCRIPTIONS    S’APPLIQUENT    AUX    VOIES    PUBLIQUES    ET    PRIVEES A   CREER   ET   A   LA 
+REQUALIFICATION/ELARGISSEMENT DES VOIRIES EXISTANTES. 
+Par voirie, il faut entendre l’ensemble des voies de desserte publiques ou privées. 
+
+ 
+43 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 43 
+PLU 
+Dans le cas particulier d’un terrain situé au carrefour de voies identiques, est dite voie principale celle qui répond 
+à l’un ou l’autre des critères classés dans l’ordre suivant : 
+- celle qui supporte le trafic le plus important, 
+- celle qui a l’emprise la plus large, 
+- et celle que borde le plus grand nombre de constructions. 
+ 
+Les dimensionnements et les traitements des voiries doivent répondre aux prescriptions suivantes :  
+Emprise minimale : 5m 
+Chaussée minimale : 4 m 
+ 
+Concernant les voies desservant trois à quatre logements compris :  
+Emprise minimale : 6m 
+Chaussée minimale : 5m 
+ 
+Concernant les voies desservant cinq logements et plus :  
+Emprise minimale : 7,50m 
+Chaussée minimale : 5m 
+ 
+Les voies effectuées en plusieurs étapes et les voies en impasse doivent être aménagées afin de permettre aux 
+véhicules privés et à ceux des services publics (lutte contre l'incendie, enlèvement des ordures ménagères, ...) de 
+faire aisément demi-tour (placette de retournement, tourne-bride, voie en « T »,...). 
+UB-ARTICLE 4 : DESSERTE DES TERRAINS PAR LES RESEAUX 
+1. ASSAINISSEMENT 
+Il convient de se reporter à l’annexe assainissement.  
+1.1. REFERENCE 
+Les caractéristiques des systèmes d’assainissement, eaux usées et eaux pluviales, doivent être conformes aux 
+prescriptions résultantes : 
+- Du schéma directeur d’assainissement approuvé le 26 avril 1999 de la Ville de Saint-Cyr-sur-Loire,  
+- Du zonage d’assainissement et du règlement d’assainissement de Tours Métropole Val de Loire, et de ses 
+révisions, 
+- Du schéma directeur d’assainissement des eaux pluviales, approuvé par délibération municipale le 27 janvier 
+2014 par la Ville de Saint-Cyr-sur-Loire.  
+À la fin du chantier, une attestation de l’entreprise ayant fait l’installation ou du pétitionnaire ou son représentant 
+doit être fournie à la Commune. 
+ 
+1.2. EAUX USEES DOMESTIQUES 
+Le branchement sur le réseau d’assainissement collectif est obligatoire pour toute construction nouvelle. Toutefois, 
+pour les terrains techniquement non raccordables au réseau existant et se situant dans les zones d’assainissement 
+autonome,  l’assainissement  autonome  peut  être  autorisé  dans  le  respect  des  textes  en  vigueur  (le  mode 
+d’assainissement autonome individuel autorisé étant fonction de la nature du terrain). 
+En secteur techniquement non raccordable au réseau d’assainissement public, la construction d’un bâtiment de 
+plus de trois logements horizontal ou vertical est interdite. 
+
+ 
+44 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 44 
+PLU 
+ 
+1.3. EAUX USEES INDUSTRIELLES 
+Tous  les  rejets  correspondant  à  une  utilisation  de l’eau  autre  que  domestique,  sont  classés  dans  les  eaux 
+industrielles. 
+Conformément  à  l’article  L.1331-10  du  code  de  la  santé  publique,  tout  déversement  d’eaux  usées  autre  que 
+domestiques  doit  être  préalablement  autorisé  par  l’autorité  compétente  en  matière  de  collecte  à  l’endroit  du 
+déversement. De ce fait, les eaux industrielles peuvent être évacuées au réseau public dans la mesure où ces 
+déversements sont compatibles avec les conditions générales d’admissibilité des eaux industrielles. 
+Leurs caractéristiques  quantitatives  et  qualitatives  pourront  être  précisées  dans des  conventions spéciales de 
+déversement passées entre Tours Métropole Val-de-Loire et l’établissement désireux de se raccorder au réseau 
+d’évacuation publique. 
+ 
+1.4. EAUX PLUVIALES : DISPOSITIONS GENERALES 
+La  gestion  des  eaux  pluviales  à  la  parcelle  vise  à compenser  l’imperméabilisation  des  sols  inhérente  aux 
+constructions et à l’aménagement de leurs abords. Elle a pour objectif d’atténuer le ruissellement et d’alléger la 
+charge des infrastructures collectives d’assainissement existantes (égouts, collecteurs, déversoirs, ...) de plus en 
+plus saturées lors d’événements pluvieux marquants.  
+Dans ce cadre, lors de constructions neuves, les pétitionnaires doivent assurer la gestion de leurs eaux pluviales 
+à la parcelle, induisant la mise en œuvre d’une technique de stockage et/ou d’infiltration de celles-ci, si la nature 
+du sol le permet, ou bien de les restituer au réseau public avec un débit maximum, défini par la collectivité. Selon 
+la nature des opérations, des prescriptions liées à la qualité des rejets peuvent être imposées. 
+ 
+2.
+ RESEAUX DIVERS 
+Pour toute opération d’urbanisme et construction nouvelle, les nouveaux réseaux et branchements sont enterrés 
+sous  le  domaine  public  ou  privé  et  seront  conformes  au  cahier  des  charges  établi  par  les  différents 
+concessionnaires (ERdF, GRdF, fibre optique,...). 
+ 
+3. EAU POTABLE 
+Toute construction ou installation qui le requiert doit être raccordée au réseau public d’alimentation en eau potable. 
+Chaque  fois  que  cela  est  nécessaire,  une  déconnexion  totale  des  réseaux  présentant un  risque  chimique ou 
+bactériologique doit être mise en place.  
+UB-ARTICLE 5 : SUPERFICIE MINIMALE DES TERRAINS CONSTRUCTIBLES 
+Sans objet (abrogé par la loi ALUR du 24 mars 2014 art 157). 
+UB-ARTICLE  6  :  IMPLANTATION  DES  CONSTRUCTIONS  PAR  RAPPORT  AUX  VOIES  ET 
+EMPRISES PUBLIQUES 
+Cet article s’applique vis-à-vis des voies publiques ou ouvertes à la circulation du public et ne comprend pas les 
+propriétés publiques non qualifiables de voies de circulation qui sont traitées comme des terrains privés.  
+Les annexes peuvent être réalisées en continuité du bâti sans faire saillie par rapport à l’alignement existant, sous 
+réserve de l’environnement existant afin de conserver une homogénéité par rapport à l’alignement de la rue. 
+Les dispositions de l’article doivent, dans le cas d'un terrain placé à l'angle de deux ou plusieurs voies ou emprises 
+existantes ou futures, recevoir application par rapport à toutes les voies ou emprises publiques. 
+ 
+
+ 
+45 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 45 
+PLU 
+ 
+Pour les constructions à destination d’habitation de trois logements et plus :  
+Dans  ces définitions, ne sont  pas  prises en compte dans le  calcul  des distances,  les saillies ponctuelles des 
+constructions (balcons, lucarnes, loggias, bow-window) représentant au maximum 40% de la marge de recul. 
+ 
+Est autorisée : 
+Z si Z ≤ X × 40% 
+Exemple : si X = 5m et Z=2m maximum 
+ 
+ 
+Est interdit : 
+Z si Z > X × 40% 
+Exemple : si X = 5m et Z=3m 
+ 
+Pour les autres constructions :  
+Dans ces définitions ne sont pas prises en compte dans le calcul des distances, toutes les saillies ponctuelles des 
+constructions (balcons, lucarnes, loggias et oriels) inférieures à 1m de large par rapport à la façade. 
+ 
+REGLE GENERALE : 
+L’implantation des constructions, extensions et annexes doit se faire avec une marge de recul de 5m minimum par 
+rapport à l’alignement des voies et emprises publiques actuelles. 
+ 
+Toutefois, lorsqu’une construction sur la parcelle adjacente est implantée en limite séparative à moins de 5m de 
+l’alignement des voies et emprises publiques actuelles, la construction nouvelle peut être implantée en continuité 
+de celle-ci sans faire saillie par rapport à l’alignement de la construction sur la parcelle adjacente, sous réserve 
+d’une bonne intégration dans l’environnement. 
+ 
+Concernant  les  extensions,  l’alignement  des  constructions  existantes  pourra  être  conservé.  Les  extensions 
+pourront être réalisées en continuité du bâti sans faire saillie par rapport à l’alignement existant.  
+L’implantation des annexes  de  moins  de  20m²  d’emprise au  sol  et  présentant  une  architecture  identique à la 
+construction principale est libre dès lors qu’elle s’intègre à l’environnement existant. Dans le cas contraire, la règle 
+générale s’applique. 
+ 
+CAS PARTICULIERS :  
+Une marge de recul de 2m s’applique le long du domaine public ferroviaire pour toute construction nouvelle. 
+ 
+•
+ En secteur UBd : 
+ L’implantation des constructions et extensions est à 3m minimum de l’alignement des voies et emprises 
+publiques actuelles.  
+ L’implantation des annexes est à 5m minimum de l’alignement des voies et emprises publiques actuelles.  
+ 
+ 
+•
+  Les  constructions,  installations,  ouvrages,  équipements  dit  "techniques"  (transformateurs,  pylônes, 
+coffrets...), les ouvrages publics d’infrastructure, les constructions ou installations nécessaires aux services publics 
+ou d'intérêt collectif ont une implantation libre. 
+
+ 
+46 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 46 
+PLU 
+UB-ARTICLE  7  :  IMPLANTATION  DES  CONSTRUCTIONS  PAR  RAPPORT  AUX  LIMITES 
+SEPARATIVES 
+Les prescriptions ainsi édictées sont également applicables à l’implantation des constructions par rapport aux voies 
+privées existantes et futures. 
+L’implantation des constructions (constructions nouvelles, extensions, annexes) par rapport aux limites séparatives 
+doit respecter l'ordonnancement du bâti existant.  
+Dans tous les cas, la hauteur est calculée au nu de la façade par rapport au point le plus bas du sol environnant 
+existant sur le terrain à l’égout de toiture dans le cas d'un toit en pente, ou prise au point le plus haut de l'acrotère 
+dans le cas d'une toiture terrasse ou d’un toit plat ou prise au faîtage dans le cas d’un mur pignon.  
+Dans le cas d’opération d’aménagement ou de construction ayant pour effet la division du terrain d’assiette initial, 
+les règles de l’article 7 s’appliquent à chaque terrain issu de la division.  
+Lors d’une division d’un terrain déjà bâti pour créer un lot à bâtir, la totalité des parcelles issues de la division 
+doivent respecter les règles d’implantation par rapport aux limites, y compris les constructions existantes. 
+ 
+  
+ 
+ 
+Pour les constructions à destination d’habitation de trois logements et plus :  
+La distance est mesurée entre la limite séparative et le nu de la façade considérée. Dans cette définition, toutes 
+les saillies des constructions (balcons, lucarnes, loggias, oriels,...) représentant au maximum 40% de la distance 
+requise ne sont pas prises en compte. 
+Est autorisé : 
+A si A ≤ W x 40% 
+Exemple : si W = 3m et A = 0.80m 
+Si W = 3m et A = 1.20m 
+Est interdit : 
+D si D > W x 40% 
+Exemple : si W = 3m et D = 1.50m 
+Dans les autres cas :  
+Dans ces définitions ne sont pas prises en compte dans le calcul des distances, toutes les saillies ponctuelles des 
+constructions (balcons, lucarnes, loggias et oriels) inférieures à 1m de large par rapport à la façade. 
+ 
+Dans le cas d’opération d’aménagement ou de construction ayant pour effet la division du terrain d’assiette 
+initial, les règles de l’article 7 s’appliquent à chaque terrain issu de la division.  
+
+ 
+47 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 47 
+PLU 
+Lors d’une division d’un terrain déjà bâti pour créer un lot à bâtir, la totalité des parcelles issues de la division 
+doivent respecter les règles d’implantation par rapport aux limites, y compris les maisons existantes. 
+ 
+Pour les constructions neuves :  
+Aucune distinction n’est faite concernant les 20m de profondeur.  
+Cas général :  
+L’implantation  est  interdite  en  limite  séparative. La  distance,  comptée  horizontalement  de  tout  point de  la 
+construction, par rapport au point le plus proche de la limite séparative, doit être supérieure ou égale à la moitié de 
+la différence d’altitude entre ces deux points avec un minimum de 5m. 
+Exception : 
+Des dispositions différentes pourront être autorisées ou imposées pour des raisons d’harmonie, notamment pour 
+tenir  compte  de  l’implantation  des  constructions  existantes  ou  projetées  dans  le  parcellaire  contigu, et  pour 
+permettre l’amélioration des constructions existantes. 
+ 
+Pour les travaux sur constructions existantes : 
+• Sur 20m de profondeur par rapport aux voies ou emprises publiques : 
+L’implantation de toutes constructions (constructions nouvelles, extensions et annexes) se fait soit : 
+- de limite séparative à limite séparative, excepté en secteurs UBb, UBc, UBd, 
+- le long d’une limite séparative, 
+- en retrait de chaque limite séparative. 
+Dans ces deux derniers cas la distance, en secteurs UB stricte et UBd, comptée horizontalement de tout point 
+de la construction, par rapport au point le plus proche de la limite séparative, doit être supérieure ou égale à la 
+moitié de la différence d’altitude entre ces deux points avec un minimum de 4m. 
+Dans ces deux derniers cas la distance, en secteurs UBa, UBb, UBc, concernant les constructions à destination 
+d’habitation de moins de trois logements, comptée horizontalement de tout point de la construction, par rapport au 
+point le plus proche de la limite séparative, doit être supérieure ou égale à la moitié de la différence d’altitude entre 
+ces deux points avec un minimum de 4m. 
+Dans ces deux derniers cas la distance, en secteurs UBa, UBb, UBc, concernant les constructions à destination 
+d’habitation de trois logements et plus, comptée horizontalement de tout point de la construction, par rapport au 
+point le plus proche de la limite séparative, doit être supérieure ou égale à la différence d’altitude entre ces deux 
+points avec un minimum de 4m. 
+ 
+•
+ Au-delà de 20m de profondeur par rapport aux voies ou emprises publiques : 
+La règle générale ci-dessous ne s’applique pas en secteur UBd. 
+REGLE
+ GENERALE : 
+L’implantation des constructions n’est pas autorisée en limite séparative : dans ce cas, concernant les constructions 
+à destination d’habitation de moins de trois logements, la distance comptée horizontalement de tout point de la 
+construction par rapport au point le plus proche de l’autre limite séparative doit être supérieure ou égale à la moitié 
+de la différence d’altitude entre ces deux points avec un minimum de 4m. 
+Concernant  les  constructions  à  destination  d’habitation  de  trois  logements  et  plus,  la  distance  comptée 
+horizontalement de tout point de la construction par rapport au point le plus proche de l’autre limite séparative doit 
+être supérieure ou égale à la différence d’altitude entre ces deux points avec un minimum de 4m
+. 
+CAS PARTICULIERS : 
+Seules sont autorisées, en limite séparative : 
+ Dans le périmètre des monuments historiques, l’implantation des constructions nouvelles est autorisée en limite 
+séparative. 
+
+ 
+48 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 48 
+PLU 
+ Lorsque cela est justifié par une amélioration architecturale, l’implantation en limite séparative est possible pour 
+les  extensions  de  constructions  déjà  existantes  en limite séparative  à 20m minimum  par  rapport  aux voies  et 
+emprises publiques (cf croquis ci-dessous).  
+Toutefois, lorsqu’une construction sur la parcelle est implantée en limite séparative à moins de 20m de l’alignement 
+des voies et emprises publiques actuelles, l'extension peut être implantée en limite séparative en continuité de 
+l'existant, sous réserve d’une bonne intégration dans l’environnement (respect de l'ordonnancement du bâti existant 
+à l'échelle de la rue ou d'une partie de la rue, implantation en cohérence avec les constructions adjacentes). 
+ 
+ 
+ Le jumelage de deux constructions ou/et annexes ou/et extensions en limite séparative est possible. 
+ Des dispositions différentes pourront être autorisées ou imposées pour des raisons d’harmonie, notamment 
+pour  tenir  compte  de  l’implantation  des  constructions  existantes  ou  projetées  sur  celles  des  parcelles 
+immédiatement contiguës, et pour permettre l’amélioration des constructions existantes. 
+ 
+Pour les équipements publics présentant des nuisances sonores (au vu de l’intensité, de la répétition et de la durée 
+du bruit), l’implantation en limite séparative n’est pas autorisée et doit respecter la règle générale un retrait par 
+rapport aux limites séparatives. Ainsi, la distance, comptée horizontalement de tout point de la construction, par 
+rapport au point le plus proche de la limite séparative, doit être supérieure ou égale à la moitié de la différence 
+d’altitude entre ces deux points avec un minimum de 3m. 
+Pour les annexes d’habitation de moins de 20 m², l’implantation est libre. 
+Pour les piscines et bassins enterrés (margelles comprises), l’implantation doit se faire à 3m minimum de la limite 
+séparative. Dans le cas d’une voie privée non ouverte au public, l’implantation doit se faire à 3m minimum de cette 
+voie.  
+UB-ARTICLE 8 : IMPLANTATION DES CONSTRUCTIONS LES UNES PAR RAPPORT AUX AUTRES 
+SUR UNE MEME PROPRIETE 
+Dans le cas de constructions de moins de trois logements, la distance entre deux constructions doit être égale 
+à la demi-hauteur de la plus haute des constructions (la hauteur maximale est prise au point le plus haut de la 
+construction - au point le plus haut de l'acrotère dans le cas d'une toiture plate ou au faîtage dans le cas d’un toit 
+en pente - et mesurée à partir du point le plus bas du sol naturel environnant existant sur le terrain) avec un 
+minimum de 3m, à l’exception des annexes qui seront implantées à 3m minimum de toute autre construction. 
+
+ 
+49 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 49 
+PLU 
+Dans le cas de constructions de trois logements et plus, la distance entre deux constructions doit être égale à 
+la hauteur de la plus haute des constructions (la hauteur maximale est prise au point le plus haut de la construction 
+- au point le plus haut de l'acrotère dans le cas d'une toiture plate ou au faîtage dans le cas d’un toit en pente - et 
+mesurée à partir du point le plus bas du sol naturel environnant existant sur le terrain) avec un minimum de 3m, à 
+l’exception des annexes qui seront implantées à 3m minimum de toute autre construction. 
+ 
+Dans tous les cas :  
+Les piscines sont implantées à 3m minimum de la construction principale ou en extension de celle-ci par la jonction 
+d’une terrasse. 
+Le regroupement d’annexes peut être exigé.  
+L’implantation doit notamment permettre le passage des véhicules d'entretien et ceux réservés à la lutte contre 
+l'incendie (cf. article UB3). 
+UB-ARTICLE 9 : EMPRISE AU SOL DES CONSTRUCTIONS 
+Pour les constructions neuves :  
+REGLE GENERALE : 
+ L’emprise au sol pour la construction à destination d’habitation de moins de trois logements est limitée à : 
+20% de la surface du terrain pour les terrains d’une superficie <700m², 
+30% de la surface du terrain pour les terrains d’une superficie ≥ 700m². 
+ L’emprise au sol de l’ensemble des constructions à destination d’habitation de trois logements et plus, ou à 
+destination autre que d’habitation, est limitée à :  
+20% de la surface du terrain pour les terrains d’une superficie < 700m², 
+25% de la surface du terrain pour les terrains d’une superficie ≥ 700m². 
+ En secteur UBd : l’emprise au sol est de 30% de la surface du terrain, excepté pour les constructions, ouvrages, 
+installations,  travaux  liés  ou  nécessaires  aux  services  publics  ou  d’intérêt  collectif  (CINASPIC)  pour  lesquels 
+l’emprise au sol est de 40% de la surface du terrain. 
+ 
+Pour les travaux sur constructions existantes : 
+REGLE GENERALE : 
+ L’emprise au sol pour une construction de moins de trois logements est limitée à : 
+30% de la surface du terrain pour les terrains d’une superficie < 700m², 
+35% de la surface du terrain pour les terrains d’une superficie ≥ 700m². 
+ L’emprise au sol pour une construction à destination d’habitation de trois logements et plus, ou à destination 
+autre que d’habitation, est limitée à :  
+20% de la surface du terrain pour les terrains d’une superficie < 700m², 
+25% de la surface du terrain pour les terrains d’une superficie ≥ 700m². 
+ 
+  
+
+ 
+50 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 50 
+PLU 
+CAS PARTICULIERS : 
+Annexes : 
+L’emprise au sol des annexes des constructions à destination d’habitation de moins de trois logements est limitée à 
+: 
+- à 40m² pour les terrains d’une superficie < 700m², 
+- à 50m² pour les terrains d’une superficie comprise entre 700m² et 999 m², 
+- à 70m² pour les terrains d’une superficie comprise entre 1000m² et 1999 m², 
+- à 150m² pour les terrains d’une superficie ≥ 2000m². 
+ 
+En secteur UBd, l’emprise au sol des annexes des constructions à destination d’habitation de moins de trois 
+logements est limitée à 30m². 
+ 
+Dans tous les cas :  
+L’emprise  au  sol  des  annexes  des  constructions  à  destination  d’habitation  de  trois  logements  et  plus, ou  à 
+destination autre que d’habitation, est limitée à 2,5% de la surface du terrain. 
+L’emprise au sol est majorée à 3,5% de la surface du terrain en cas de locaux vélos annexes couverts. 
+En secteur UBd, l’emprise au sol des annexes des constructions à destination d’habitation de trois logements et 
+plus, ou à destination autre que d’habitation, est limitée à 10% de la surface du terrain. 
+ 
+Équipements publics : 
+Pour  les  équipements  publics  tels  que  les  postes  de  distribution  électrique,  les  armoires  techniques  des 
+concessionnaires et tous les équipements techniques liés au bon fonctionnement des réseaux, les dispositions 
+relatives à l’emprise au sol ne s’appliquent pas. 
+UB-ARTICLE 10 : HAUTEUR MAXIMALE DES CONSTRUCTIONS 
+La hauteur maximale est prise au point le plus haut de la construction (au faîtage dans le cas d'un toit en pente ou 
+au point le plus haut de l'acrotère dans le cas d’un toit plat) et mesurée à partir du point le plus bas du sol naturel 
+environnant existant sur le terrain.  
+Dans le cas d’un attique, la hauteur maximale est prise au point le plus haut de la construction (au faîtage dans le 
+cas de l’attique couvert d’un toit en pente ou au point le plus haut de l'acrotère dans le cas d’un toit plat) et mesurée 
+à partir du point le plus bas du sol naturel environnant existant sur le terrain. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+ 
+51 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 51 
+PLU 
+REGLE GENERALE : 
+Pour les constructions existantes à destination d’habitation de moins de trois logements, l’aménagement du volume 
+sous combles est possible. 
+En limite séparative, la hauteur des constructions est de 7m maximum. 
+En limite séparative, lorsqu’une construction sur la parcelle adjacente est implantée en limite séparative, et lorsque 
+la construction nouvelle est implantée en continuité de celle-ci (sans faire saillie au nu de la façade par rapport à 
+l’alignement de la construction sur la parcelle adjacente), la limite de 7m maximum n’est pas appliquée, sous 
+réserve d’une bonne intégration dans l’environnement.  
+ 
+Dans le secteur UB stricte :  
+-Concernant  les  constructions  à  destination  d’habitation  de  moins  de  trois  logements, la  hauteur  des 
+constructions et des extensions est de R+1+combles ou R+1 maximum, dans la limite de 11m. 
+-Concernant les autres constructions, la hauteur des constructions et des extensions est de R+2+combles 
+maximum dans la limite de 16m ou R+2+attique maximum avec toit plat dans la limite de 14m ou R+2+attique 
+maximum avec toit en pente dans la limite de 16m. 
+ 
+Dans les secteurs UBa, UBb, UBc : la hauteur des constructions et des extensions est de R+1 ou R+combles 
+maximum, dans la limite de 8m.  
+ 
+Dans le secteur UBd :  
+- Pour les constructions de trois logements et plus situées le long de l’avenue André Ampère, leur hauteur 
+est limitée à R+1+attique, dans la limite de 11m.  
+- Pour les autres constructions de trois logements et plus, leur hauteur est limitée à R+2+attique, dans la 
+limite de 16m. 
+- Pour les autres constructions, leur hauteur est limitée à R+1 ou R+attique, dans la limite de 8m. 
+- Pour  les  constructions,  ouvrages,  installations,  travaux  liés  ou  nécessaires  aux  services  publics  ou 
+d’intérêt collectif (CINASPIC), leur hauteur est limitée à R+3+attique, dans la limite de 19m. 
+ 
+C
+ONSTRUCTION DES EXTENSIONS 
+La règle de hauteur est la même que la règle générale. 
+Dans le cas d’une construction principale ayant déjà une hauteur supérieure à celle fixée ci-dessus, la hauteur de 
+l’extension est limitée au maximum à la moyenne des hauteurs de la construction principale et de la construction 
+adjacente.  
+ 
+CONSTRUCTION DES ANNEXES 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+ 
+52 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 52 
+PLU 
+La hauteur des annexes est de R dans la limite de 3,60m maximum au point le plus haut selon le schéma ci-dessus. 
+ 
+CAS PARTICULIERS : 
+•  Une  hauteur  différente  peut  être  admise  pour  permettre  la  reconstruction  après  sinistre,  la  réhabilitation, 
+l'extension et le changement de destination de bâtiments existants dans la limite de la hauteur initiale.  
+•  Il  n'est  pas  fixé  de  règle  pour  les  constructions,  installations,  ouvrages,  équipements  dit  "techniques" 
+(transformateurs,  pylônes,  coffrets...),  les  ouvrages  publics  d’infrastructure,  les  constructions  ou  installations 
+nécessaires aux services publics ou d'intérêt collectif. Les travaux de maintenance ou de modification de ces 
+ouvrages sont donc également autorisés pour des exigences fonctionnelles et/ou techniques. 
+•  Concernant  les  installations  de  production  d’électricité  utilisant  l’énergie  mécanique  du  vent,  leur hauteur 
+maximale au-dessus du sol, pâles comprises, est limitée à 10m. Si elles sont installées sur un bâtiment, leur hauteur 
+maximale au-dessus du sol, pâles comprises, ne peut excéder 2m au-dessus du faîtage du bâtiment. 
+UB-ARTICLE 11 : ASPECT EXTERIEUR DES CONSTRUCTIONS ET AMENAGEMENT DE LEURS 
+ABORDS 
+Les constructions doivent être particulièrement étudiées afin de tenir compte du caractère existant ou futur des 
+quartiers. Elles doivent s’intégrer dans le cadre constitué par les constructions voisines et le paysage, en en 
+respectant  les  matériaux,  les  couleurs  et  le  caractère  architectural  environnant.  Toutes  les  constructions 
+implantées sur un même terrain doivent être réalisées avec le même soin et en cohérence avec le traitement de 
+la construction principale. 
+Les constructions qui ne respecteraient pas ces prescriptions générales doivent faire l’objet d’une justification 
+architecturale, notamment en ce qui concerne l’harmonie avec le site et les constructions avoisinantes. 
+Le projet architectural devra respecter les cinq principes suivants :  
+- Le contexte général et l’histoire du lieu, 
+- L’implantation, 
+- La volumétrie, 
+- Le traitement et l’ordonnancement de façades, 
+- Les matériaux. 
+L’article s’applique aux équipements publics type transformateur, armoire,... 
+Sauf impossibilité technique, les dispositifs nécessaires à l’utilisation des énergies renouvelables (tels que les 
+capteurs solaires) doivent être intégrés à l’architecture des constructions. 
+Les dispositifs techniques (par exemple les appareils de climatisation et de chauffage, cages d’ascenseur,...) ne 
+doivent pas être visibles depuis l’espace public ou doivent être traités de façon homogène avec les façades de la 
+construction principale. Ils doivent être intégrés ou traités pour qu’il n’y ait pas d’impact visuel depuis le sol et depuis 
+les constructions voisines (dissimulation totale derrière un acrotère, habillage identique à la construction,...). 
+Pour  les  restaurations  ou  réhabilitations,  les  matériaux  sont  harmonisés  avec  l’existant  et/ou  l’environnement 
+immédiat.  
+Concernant les extensions, elles peuvent présenter une architecture différente de celle de la construction principale 
+existante à condition de s’intégrer avec l’existant et l’environnement immédiat. Une attention toute particulière sera 
+portée à l’utilisation des systèmes constructifs ou matériaux contemporains.   
+ 
+Périmètre classé au patrimoine mondial de l'Unesco 
+Les travaux et les constructions réalisés à l'intérieur de ce périmètre devront respecter l'intégrité et la qualité du 
+patrimoine architectural et paysager ligérien. Le cas échéant, les projets devront faire l’objet d’études détaillées 
+
+ 
+53 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 53 
+PLU 
+pour assurer leur intégration dans l’environnement et éviter de porter atteinte à la Valeur Universelle Exceptionnelle 
+(VUE) du site UNESCO. 
+ 
+Eléments bâtis protégés au titre de l’article L.151-19 du code de l’urbanisme  
+Les interventions sur le bâtiment identifié au titre de l’article L.151-19 du code de l’urbanisme ne doivent pas 
+dénaturer  l’appartenance  typologique  de  l’immeuble et  ses  principales  caractéristiques  architecturales.  Une 
+attention  particulière  doit  être  apportée  lors  de  toute  intervention  sur  le  bâtiment :  extension,  ravalement  de 
+façade,... 
+Les travaux sur le bâti ancien remarquable reprendront les dispositions architecturales d’origine. 
+ 
+ En secteur UBd, les architectures à l’esthétique contemporaine sont autorisées.   
+ En  secteurs  UB  stricte,  UBa  concernant  l’OAP  Croix de  Pierre,  UBb,  les  architectures  à  l’esthétique 
+contemporaine peuvent être autorisées sous réserve d’une bonne intégration dans le site.  
+L’appréciation de l’esthétique contemporaine est fonction notamment : 
+- de la conception architecturale du projet, 
+- du choix et de la qualité des matériaux. 
+En secteurs UBc et UBa, les extensions et annexes peuvent présenter une architecture contemporaine si la 
+construction  existante  est  d’architecture  contemporaine.  Les  extensions  et  annexes  doivent  s’intégrer avec 
+l’existant et l’environnement immédiat. Une attention toute particulière sera portée à l’utilisation des systèmes 
+constructifs ou matériaux contemporains.  
+En secteurs UBc et UBa, entre la construction principale existante d’architecture non contemporaine et l’extension 
+à créer, les éléments de liaison peuvent être d’architecture à l’esthétique contemporaine.  
+Exemple : un élément de jonction en toiture terrasse entre deux volumes bâtis avec des toits pentus,... 
+ 
+11.1. COUVERTURES 
+11.1.1. Généralités 
+ En secteur UBd, le mode de couverture pour les constructions nouvelles et existantes, et leurs extensions est : 
+le toit plat ou le toit pentu avec ou sans croupes. Le mode de couverture pour les annexes est le toit plat ou toit à 
+faible pente. 
+ En  secteurs  UB  stricte, UBa,  UBb,  le  mode  de  couverture  privilégié  pour  les  constructions  nouvelles  et 
+existantes, et leurs extensions est le toit pentu avec ou sans croupes. Les toits-plats sont interdits. Ils peuvent 
+néanmoins  être  autorisés  à  titre  ponctuel,  également  pour  les  annexes,  si  l’environnement  existant  propose 
+majoritairement des toits-plats ou s’ils ne sont pas visibles depuis le domaine public. Le but est leur intégration 
+dans l’environnement existant. 
+ En secteur UBc, sauf concernant l’OAP Charles de Gaulle,
+ les nouvelles constructions doivent avoir un toit 
+pentu  avec  ou  sans  croupes.  Les  toitures  monopentes  et  quatre  pans  sont  autorisées  dès  lors  qu’elles  ne 
+constituent pas le mode principal de couverture. 
+Concernant les constructions existantes ayant une toiture plate, leurs extensions et leurs annexes peuvent avoir 
+la  même  forme  que  celle  de  la  construction  principale  sous  réserve  de  bien  s’intégrer  dans  l’environnement 
+existant.  
+Concernant les constructions existantes ayant une toiture avec pente(s), leurs extensions et leurs annexes doivent 
+avoir la même forme que celle de la construction principale.  
+ En secteur UBa, le toit plat est interdit, excepté dans le cadre de l’OAP de la Croix de Pierre. 
+
+ 
+54 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 54 
+PLU 
+ En secteur UB stricte, le toit à la Mansart est autorisé sur les constructions de trois logements et plus sous 
+réserve d’une bonne intégration dans l’environnement. 
+ Pour les constructions à destination autre que d’habitation, la forme de la toiture est libre dès lors qu’elle ne nuit 
+pas à l’environnement immédiat existant. 
+ 
+11.1.2. Les angles de toit 
+ Le toit est plat lorsqu'il est inférieur ou égal à 10°. 
+ Lorsque le toit est en pente, l’angle maximum autorisé est 50°. 
+Pour les immeubles d’habitation de trois logements et plus : 60°. 
+Ces dispositions ne sont pas applicables aux vérandas et verrières. 
+ Lorsque le toit est à la Mansart : 
+La hauteur du brisis doit être proportionnée au volume de la construction et harmonisée avec l’environnement. 
+ 
+11.1.3. L’orientation des faîtages 
+Le faîtage du volume principal doit être parallèle à l’alignement ou dans le sens des faîtages de l'environnement 
+immédiat si cela correspond aux caractéristiques de la rue. 
+En l’absence de ligne de faîtage dominante dans l’environnement, un faîtage principal orthogonal à l’alignement 
+est autorisé. 
+ 
+11.1.4. Nature des matériaux de couverture  
+ Est autorisée l’ardoise taillée dans des schistes naturels, de couleur gris-bleuté, dite ardoise naturelle. La pose 
+en diagonale est interdite ainsi que tout décor dans la couverture. 
+L’ardoise artificielle est interdite. 
+ Sont autorisés le bac acier dans les nuances de gris soutenu uniquement pour des éléments de liaison entre 
+deux  constructions  à  destination  d'habitation  et  pour  les  constructions  destinées  à  l'exercice  d'une  activité 
+économique, le zinc quartz, sous réserve d’une bonne intégration dans l’environnement.  
+  Pour  les  constructions  à  destination  d’habitat  en toit  plat,  la  préférence  peut  être  donnée  à  une  toiture 
+végétalisée, si la végétalisation est pérenne. 
+ Est autorisée : la petite tuile plate d’aspect vieilli et traditionnel, sauf en secteur UBd. Dans les secteurs UBa 
+et UBb, elle est autorisée uniquement dans le cas d’extensions de constructions principales utilisant elle-même ce 
+matériau. 
+ Le mélange traditionnel de matériaux sur un même bâtiment (tuiles et ardoises) est possible dès lors que la 
+construction s’inscrit dans un environnement architectural approprié. 
+ 
+  
+
+ 
+55 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 55 
+PLU 
+11.1.5. Les accessoires de couverture et autres installations techniques 
+Tous les accessoires de couverture doivent être réalisés en adéquation avec l’existant (cheminées, descentes 
+d’eaux pluviales, gouttières, couvertines,...). 
+ Les faîtières sont constituées : 
+- de tuiles demi ronde avec ou sans joint. 
+ 
+- de zinguerie angulaire avec ou sans joint : 
+ 
+- Le faîtage peut également être sous forme de lignolet :  
+ 
+Leurs dimensions et leurs couleurs ainsi que celles des joints doivent s’harmoniser avec l’ensemble des matériaux 
+du toit. 
+ 
+ Les cheminées : elles peuvent être sur les deux côtés du toit conformément au dessin ci-dessous.  
+ 
+La hauteur de la cheminée ne doit pas excéder 0,40m du faîtage ou de l’acrotère sauf contraintes techniques. Les 
+matériaux des cheminées doivent être en harmonie avec la construction. L’utilisation de l’inox est interdite. Le 
+couronnement des cheminées doit présenter une saillie. 
+ Les aspirateurs statiques et les déflecteurs sont interdits sauf contraintes techniques justifiées. Ils doivent être 
+de la même couleur que le matériau de couverture et le plus plat possible. 
+
+ 
+56 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 56 
+PLU 
+ Les descentes d’eaux pluviales et les gouttières : 
+- Les descentes d’eaux pluviales doivent être situées de façon à ce qu’elles participent esthétiquement 
+à l’architecture de la construction. Elles peuvent être en zinc, en cuivre, en acier, ou en aluminium laqué 
+ou en P.V.C de couleur harmonieuse avec les murs de la construction. 
+- Les gouttières doivent être en harmonie avec les descentes d’eaux pluviales tant par leur matériau que 
+par leur couleur. 
+ Les étanchéités doivent être non visibles depuis l’espace public et de couleur non réfléchissante. 
+ Les couvertines sont métalliques et leur couleur est identique à celle de la construction. Seule une couvertine 
+suffisamment haute supérieure à 15cm peut être acceptée d’une autre couleur. 
+ 
+11.1.6. Les ouvertures de toit 
+Les ouvertures de toit doivent être cohérentes, avec la construction dans son ensemble, dans leur matériau et leur 
+forme.  L’environnement  existant  pourra  être  pris  en  compte  si  nécessaire.  Elles  sont  recommandées  sur les 
+façades arrières. Leur nombre peut être limité : les ouvertures de toit doivent être installées de façon ponctuelle, 
+espacées et en nombre raisonnable. Les châssis de toit accolés sont interdits. 
+ 
+Sont autorisés :  
+ Les châssis de toit : ils sont de type « à encastrer » dans le plan de toiture avec la saillie la plus réduite possible 
+en fonction des techniques mises en œuvre, implantées dans la partie inférieure des combles et axés soit sur les 
+ouvertures de l’étage inférieur soit sur les trumeaux. Ils seront mis en œuvre alignés sur un seul rang.  
+Dans le cas où une construction existante comporte des châssis de toit non encastrés, les nouveaux châssis de 
+toit sont de type « à encastrer ». 
+Les volets roulants et les stores sont autorisés comme occultation extérieure en fonction de l’environnement et 
+devront être au maximum dissimulés dans le plan de toiture. 
+La menuiserie et la face extérieure des stores seront de même couleur que la couverture de la construction, et/ou 
+en harmonie avec celle-ci.  
+L’usage de verrière en toiture est utilisé au lieu et place des châssis de toit accolés. 
+ Les conduits de lumière : leur implantation est régie par les mêmes règles que les châssis de toit.  
+ 
+ Pour les toitures terrasses, les ouvertures de toit sont autorisées dès lors qu'elles ne sont pas visibles depuis le 
+domaine public et que leur hauteur ne dépasse pas celle de l'acrotère à son point le plus haut. 
+ Les chatières pour les aérations de combles. Pour les constructions nouvelles et existantes, elles doivent être 
+obligatoirement plates et de même couleur que la toiture. 
+                
+
+ 
+57 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 57 
+PLU 
+ Les lucarnes à fronton, à croupe, cintrées, les lucarnes dites "œil de bœuf", les lucarnes dites meunières. Les 
+matériaux sont ceux de la couverture ou de la façade et les menuiseries identiques à celles de la façade. Les 
+lucarnes doivent être proportionnées à la toiture à la fois dans leur volumétrie et leur nombre. 
+Exemple de lucarnes autorisées :  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Sont interdits :  
+• Les lucarnes rampantes et les lucarnes dites "chien assis". 
+     
+• Les outeaux. 
+       
+ Les panneaux solaires doivent être intégrés à la construction, afin de limiter leurs impacts visuels, et non 
+rapportés comme une contrainte technique. 
+ 
+Lucarne à fronton 
+Lucarne œil de bœuf Lucarne à deux pans 
+Lucarne à croupe 
+Lucarne cintrée 
+Lucarne chien assis 
+Lucarne rampante 
+Lucarne meunière 
+ou gerbière 
+
+ 
+58 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 58 
+PLU 
+Ils sont encastrés dans le plan de toiture (les éventuels débords doivent être les plus faibles possibles), de même 
+pente que la toiture de la construction. Ils sont positionnés symétriquement entre le haut du faîtage, le chéneau et 
+les rives. Les cadres et filaments seront noirs. 
+Leurs impacts visuels doivent être limités. Ils sont interdits en façade.  
+Les panneaux implantés sur toit plat doivent être intégralement cachés par l’acrotère.  
+ 
+11.2. FAÇADES 
+11.2.1. Généralités 
+ Les façades doivent respecter l’esprit de l’architecture traditionnelle tourangelle et de ses matériaux. 
+Les  architectures  proposées  doivent  présenter  une  bonne  intégration  dans  l’environnement  immédiat. 
+L’appréciation de l’esthétique est fonction de la conception architecturale liée à l’importance et à la nature de la 
+nouvelle construction, et au choix et à la qualité des matériaux. 
+Les éléments constitutifs d’une bonne intégration architecturale sont : 
+- La conception architecturale, 
+- L’importance du volume, 
+- L’harmonie des pentes de toit, 
+- L’harmonie entre styles et matériaux, 
+- Le dimensionnement de l’ossature. 
+ Les façades secondaires, aveugles ou non, doivent être traitées avec le même soin que les façades principales 
+et en harmonie avec elles. 
+ 
+ En secteur UBd, les revêtements de façade d’une construction à destination d’habitation de trois logements et 
+plus doivent être réalisés majoritairement (>80%) avec des matériaux naturels qualitatifs tels que la pierre naturelle. 
+L’enduit à base de chaux ou tout autre matériau qualitatif peut être partiellement utilisé (<20%).  
+ Dans les autres secteurs, les revêtements de façade d’une construction à destination d’habitation de trois 
+logements et plus doivent employer au minimum 70% de matériaux naturels qualitatifs tels que la pierre naturelle. 
+ 
+ Les revêtements de façade doivent être réalisés avec de l’enduit à base de chaux ou tout autre matériau qualitatif 
+ayant des caractéristiques similaires à l’enduit à base de chaux. 
+  Les  façades  qui  utilisent  les  matériaux  traditionnels  et  s’harmonisent  plus  aisément  avec  l’architecture 
+tourangelle sont l’appareillage de pierre, de taille plane (non bosselée) et les façades recouvertes d’un enduit à la 
+chaux. 
+ Les percements en façade : 
+Pour  toutes  les  constructions  nouvelles,  les  percements  de  façade  doivent  respecter  de  un  à  trois  modules 
+différents, mais qui peuvent être dupliqués ou orientés verticalement ou horizontalement.  
+   
+Les baies sont positionnées en fonction de la composition générale des façades : hiérarchie des niveaux, rapport 
+pleins/vides, descente de charges de la construction,... 
+ 
+
+ 
+59 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 59 
+PLU 
+ Les occultants des ouvertures : 
+Les volets roulants et les stores sont autorisés comme occultation extérieure en fonction de l’environnement et 
+devront être au maximum dissimulés dans le plan de toiture. Les volets roulants devront être totalement intégrés à 
+la construction pour les nouvelles constructions, ou dans le cas d’une restauration ou d’une réhabilitation.  
+Les volets roulants doivent être de même nature et de même couleur que les menuiseries.  
+Les coffres en sailli sont interdits. Pour les constructions existantes, le coffre doit être intégré dans le tableau. 
+Les persiennes sont autorisées si elles font partie intégrante du principe architectural retenu. Leur matériau et leur 
+couleur doivent s’intégrer à l’architecture de la construction. 
+  L’usage  et  la  couleur  des  matériaux  doivent  être  en  harmonie  avec  l’existant  (environnement  immédiat et 
+constructions déjà existantes sur le terrain). 
+ 
+11.2.2. L’usage des matériaux naturels qualitatifs  
+Dans le cas de l’usage de la pierre naturelle, celle-ci doit être employée majoritairement sur l’ensemble de toute 
+une façade.  
+La pierre est utilisée en parement de façade mais aussi dans tous les types de modénatures faisant référence à 
+l’usage de la pierre. Dans ce cas, les modénatures doivent faire référence à l’architecture classique tant dans leur 
+forme que dans leur pose. 
+Pour les corniches et bandeaux, les joints doivent être le plus discret possible. Les joints de couleur grise sont 
+interdits. 
+ 
+11.2.3. L’usage de l’enduit 
+ L’enduit traditionnel est l’enduit ton pierre, calcaire clair, Tuffeau de Touraine, avec sable du Loir (tamisé ou non 
+tamisé) et chaux blanche, gratté en finition. Des enduits plus soutenus pourront être intégrés à la façade sous 
+réserve d’être en harmonie avec l’architecture de la construction et l’environnement immédiat. 
+ Sont interdits les enduits blancs (sauf restauration ou extension dans la continuité de l'existant), les enduits 
+monocouches. 
+ 
+11.2.4. L’usage de la peinture 
+Elle  est  interdite  en  revêtement  de  façade,  sauf  en  cas  de  restauration  ou  sur  les  éléments  ponctuels de 
+modénature en béton. 
+ 
+11.2.5. L’usage du bois 
+L’usage  du  bois  est  autorisé  en  ossature  ou  en  habillage  sous  réserve  de  s’harmoniser  avec  l’architecture 
+tourangelle et de s’intégrer dans son environnement. 
+Le  bardage  bois  est  autorisé  uniquement  pour  les  extensions  et  les  annexes,  s'il  est  déjà  existant  dans 
+l'environnement immédiat et que les extensions et les annexes et le bardage bois dans l’environnement immédiat 
+sont visibles ensembles depuis le domaine public. Le bardage bois est autorisé également si les extensions et les 
+annexes sont intégralement non visibles depuis le domaine public (emprises et voiries publiques). 
+Les couleurs : 
+Le choix des couleurs et lasures doit être opéré en fonction du projet et de son environnement.  
+- Le bardage bois : blanc cassé (similaire au RAL 9001) et couleur gris clair (similaire au RAL 9002 ou 7035), bois 
+naturel stabilisé de préférence ne présentant pas une finition brute de sciage. 
+
+ 
+60 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 60 
+PLU 
+- Les huisseries et ouvrants des percements extérieurs : blanc cassé (similaire au RAL 9001 ou 9010), gris clair 
+(similaire au RAL 9002 ou 7035), gris anthracite (similaire au RAL 7016), brun terre d’ombre (similaire au RAL 
+7022), gris quartz (similaire au RAL 7039). 
+-  Les  volets :  blanc  cassé  (similaire  au  RAL  9001  ou  9010),  gris  clair  (similaire  au  RAL  9002  ou  7035),  gris 
+anthracite (similaire au RAL 7016), brun terre d’ombre (similaire au RAL 7022), gris quartz (similaire au RAL 7039). 
+- Les garde-corps : blanc cassé (similaire au RAL 9001 ou 9010),  gris clair (similaire au  RAL 9002 ou 7035), vert 
+anglais  (similaire  au  RAL  6009),  ton  bois  naturel, gris  anthracite  (similaire au  RAL 7016),  brun  terre d’ombre 
+(similaire au RAL 7022), gris quartz (similaire au RAL 7039). 
+- Les portes d’entrée : ton bois naturel (hors essences exotiques), blanc cassé (similaire au RAL 9001 ou 9010), 
+gris clair (similaire au  RAL 9002 ou 7035),  et couleurs sombres : vert anglais (similaire au RAL 6009), bordeaux 
+(similaire au RAL 3004), bleu foncé (similaire au RAL 5003), gris anthracite (similaire au RAL 7016), brun terre 
+d’ombre (similaire au RAL 7022), gris quartz (similaire au RAL 7039). 
+- Les portails et portillons : ton bois naturel (hors essences exotiques), blanc cassé (similaire au RAL 9001 ou 
+9010), gris clair (similaire au  RAL 9002 ou 7035), et couleurs sombres : vert anglais (similaire au RAL 6009), 
+bordeaux (similaire au RAL 3004), bleu foncé (similaire au RAL 5003), gris anthracite (similaire au RAL 7016), brun 
+terre d’ombre (similaire au RAL 7022), gris quartz (similaire au RAL 7039). Leur(s) couleur(s) doi(ven)t être en 
+adéquation avec la clôture.  
+Toute autre couleur doit s’harmoniser avec l’environnement. 
+ 
+11.2.6. L’usage du PVC et du métal 
+Le PVC ou le métal peuvent être utilisés pour tous les types de menuiseries. Le choix des couleurs doit être opéré 
+en fonction du projet et de son environnement.  
+Ils doivent être de couleur  blanc cassé (similaire au RAL 9001), gris clair (similaire au RAL 9002 ou 7035). Ils 
+peuvent être de couleur sombre uniquement pour :  
+- les portails et portillons : vert anglais (similaire au RAL 6009), noir (similaire au RAL 9005), bleu (similaire au RAL 
+5003), ou gris anthracite (similaire au RAL 7016), brun terre d’ombre (similaire au RAL 7022), gris quartz (similaire 
+au RAL 7039). 
+- les portes d’entrée: vert anglais (similaire au RAL 6009), bordeaux (similaire au RAL 3004), bleu (similaire au 
+RAL 5003) ou gris anthracite (similaire au RAL 7016), brun terre d’ombre (similaire au RAL 7022), gris quartz 
+(similaire au RAL 7039). 
+- les garde-corps : vert anglais (similaire au RAL 6009), gris anthracite (similaire au RAL 7016), brun terre d’ombre 
+(similaire au RAL 7022), gris quartz (similaire au RAL 7039). 
+- les huisseries et ouvrants des percements extérieurs : gris anthracite (similaire au RAL 7016), brun terre d’ombre 
+(similaire au RAL 7022), gris quartz (similaire au RAL 7039), noir (similaire au RAL 9005). 
+-  les  volets :  gris  anthracite  (similaire  au  RAL  7016),  brun  terre  d’ombre  (similaire  au RAL  7022),  gris  quartz 
+(similaire au RAL 7039), noir (similaire au RAL 9005). 
+Toute autre couleur doit s’harmoniser avec l’environnement. 
+L’usage du PVC pour les volets roulants avec coffre extérieur est interdit pour les restaurations et rénovations de 
+bâtiments présentant un intérêt architectural ou historique. 
+ 
+11.2.7. L’usage du verre 
+Il doit s’intégrer à la fois à l’architecture des constructions et à son environnement. 
+ 
+ 
+ 
+
+ 
+61 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 61 
+PLU 
+11.2.8. L’usage de la céramique 
+La céramique est autorisée uniquement en élément d’accompagnement de l’architecture d’esthétique moderne 
+pour les constructions à destination d’habitation de moins de trois logements. 
+Pour les constructions d’habitation de trois logements et plus, la céramique est autorisée uniquement dans le 
+traitement des attiques et en élément d’accompagnement de l’architecture principale.  
+En secteur UBd, l’usage de la céramique est autorisé de manière générale pour la construction, ses extensions 
+et ses annexes. 
+ 
+11.3. EXTENSIONS 
+REGLE GENERALE : 
+Les extensions doivent s’intégrer avec l’existant et l’environnement immédiat.  
+Lorsqu’une architecture existante a du caractère, toute extension ne doit pas porter atteinte à ses qualités mais 
+les respecter. 
+L’extension doit être identique et/ou homogène, sinon imiter l’architecture existante dans : 
+- sa volumétrie en particulier au niveau du jeu des toitures, 
+- sa composition de façade voire son style, 
+- ses matériaux et ses couleurs. 
+Cependant un élément de liaison avec une toiture et une architecture différente peut être autorisé entre le volume 
+principal et l’extension, sous réserve d’une bonne intégration dans l’environnement.  
+ 
+DISPOSITIONS PARTICULIERES : 
+Lorsqu’une  construction  existante  présente  peu  de  qualités  (disparité  des  volumes,  des  matériaux,  de  la 
+composition du bâti, manque d’harmonie générale), toute extension doit être l’occasion de lui conférer du caractère 
+par : 
+- la recomposition du volume ou du dessin de façade, 
+- la qualité de nouveaux matériaux et de l’exécution. 
+Des extensions architecturalement différentes de la construction existante peuvent être acceptées dès lors qu’elles 
+sont bien intégrées dans l’environnement existant ou non visibles depuis les voies et emprises publiques.  
+Toute extension peut avoir un revêtement différent de celui de la construction principale (zinc, bardage bois ou 
+imitation bois qualitative, pierre naturelle respectant la tradition tourangelle ou similaire à la pierre et qualitatif) sous 
+réserve de sa bonne intégration avec l’existant et l’environnement immédiat. 
+Les  toits-plats sont  interdits.  Ils  peuvent  néanmoins  être  autorisés  à titre  ponctuel si l’environnement  existant 
+propose majoritairement des toits-plats ou s’ils ne sont pas visibles depuis le domaine public. Le but est leur 
+intégration dans l’environnement existant. 
+ 
+En secteur UBd, les extensions doivent être identiques à la construction principale. Elles doivent respecter la 
+même volumétrie que celle du bâtiment principal, en reprenant les mêmes proportions, les mêmes ouvertures, les 
+mêmes matériaux et les mêmes couleurs.  
+ 
+  
+
+ 
+62 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 62 
+PLU 
+11.4. ANNEXES 
+REGLE GENERALE : 
+Les annexes doivent : 
+- respecter une bonne intégration dans l’environnement urbain ou paysager, 
+- être de forme sobre et épurée et ne présenter aucune stylisation sophistiquée ou particulière, 
+- ne pas porter atteinte aux qualités d’une architecture existante ayant du caractère, et les respecter.  
+Une toiture mono pan peut être autorisée, lorsque l’annexe est adossée à un mur de clôture déjà existant et dans 
+le respect de la hauteur de celui-ci, sans pouvoir excéder la hauteur prévue à l’article UB10, 
+Le regroupement d’annexes peut être demandé, ainsi que la continuité en volume et en matériaux, lorsque ceux-
+ci présentent des qualités architecturales. 
+Des matériaux de couverture imitant l’ardoise (sa pose, sa forme et sa couleur) sont autorisés pour les annexes 
+n’excédant pas 20m² d’emprise au sol. 
+De plus, pour les annexes à partir de 20m² d’emprise au sol, elles doivent être identiques et/ou homogènes, 
+sinon imiter l’architecture existante dans le respect des prescriptions indiquées au présent article pour ce qui a trait 
+à : 
+• leur volumétrie en particulier au niveau du jeu des toitures, 
+• leur composition de façade voire leur style, 
+• leurs matériaux et leurs couleurs. 
+ 
+DISPOSITIONS PARTICULIERES : 
+Lorsqu’une  construction  existante  présente  peu  de  qualités  (disparité  des  volumes,  des  matériaux,  de  la 
+composition du bâti, manque d’harmonie générale) :  
+• Des annexes architecturalement différentes de la construction existante peuvent être acceptées dès lors 
+qu’elles sont bien intégrées dans l’environnement existant ou non visible depuis les voies et emprises 
+publiques.  
+• Les annexes peuvent avoir un revêtement différent de celui de la construction principale (zinc, bardage 
+bois ou imitation bois qualitative, pierre naturelle respectant la tradition tourangelle ou similaire à la pierre 
+et qualitatif), sous réserve de leur bonne intégration avec l’existant et l’environnement immédiat. 
+• Les  toits-plats  sont  interdits.  Ils  peuvent  néanmoins  être  autorisés  à  titre  ponctuel si  l’environnement 
+existant propose majoritairement des toits-plats ou s’ils ne sont pas visibles depuis le domaine public. Le 
+but est leur intégration dans l’environnement existant. 
+Il est précisé qu’en secteur UBd, la toiture doit être plate ou à faible pente. 
+ 
+11.5. ADAPTATION AU TERRAIN NATUREL 
+Au droit de la façade principale de la construction (comprenant l’entrée piétonne principale de la construction), il 
+ne peut pas y avoir une différence de plus ou moins 60 cm entre le niveau du terrain naturel existant au droit de la 
+façade principale de la construction et le plancher bas fini du rez-de-chaussée de la construction. 
+L’adaptation du terrain peut être réalisée en déblai limité et par paliers. 
+La construction doit s’adapter à la topographie du terrain naturel, c'est-à-dire du terrain existant avant tous travaux.  
+ 
+  
+
+ 
+63 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 63 
+PLU 
+11.6. CLÔTURES 
+REGLES GENERALES 
+Les clôtures nouvelles doivent être implantées en continuité des clôtures adjacentes existantes. Leur hauteur doit 
+être en cohérence avec l’environnement existant ainsi que leurs caractéristiques. 
+Les clôtures doivent s’intégrer convenablement dans l’environnement par leurs matériaux, leur couleur et leurs 
+proportions. Le choix du type de clôture doit prendre en compte les clôtures existantes dans l’environnement. 
+Ainsi, afin que l’espace public soit cohérent, homogène et de qualité au niveau de la rue, voir du quartier si cela 
+crée un ensemble, la clôture doit s’inspirer du paysage de la rue, voir du quartier avec une bonne intégration dans 
+ce contexte. La clôture doit chercher à retrouver les éléments dominants des autres clôtures de la rue, voir du 
+quartier, dans la limite du respect des règles du PLU (forme, hauteur, matériaux).  
+Dans tous les cas, les poteaux, le grillage et les lames occultantes devront être de couleur identique. 
+La hauteur de la clôture, non compris les murs de soutènement, est comptée à partir du niveau du domaine public 
+(voie ou emprise publique) ou de la voie ouverte au public pour les clôtures donnant sur le domaine public ou sur 
+une voie ouverte au public, et à partir du terrain naturel à clore pour les clôtures en limites séparatives. 
+Les coffrets, électriques et gaz, sont soit intégrés au bâtiment, soit composés avec la clôture. 
+La haie est le mode de clôture privilégié. 
+ 
+Concernant les types d’occultant, sont autorisés : 
+- Les brises-vues métalliques pleins, 
+- Les lames occultantes insérées dans le grillage et de la même couleur que le grillage, 
+Les  éléments  en  composites  sont  autorisés  sous  réserve  d’une  bonne  intégration  dans  l’environnement,  et 
+privilégiés en limites séparatives. 
+Les occultants de type canisse ou toiles brises-vues sont interdits. 
+ 
+11.6.1. Clôtures sur voies ou emprises publiques et voies ouvertes au public : clôtures barreaudées, haies, 
+grillage, murs et murs bahuts 
+
+ Les clôtures barreaudées 
+Dans  tous  les  secteurs,  la  grille  en  serrurerie  barreaudée  est  autorisée,  d’une  hauteur  de  2m  maximum  et 
+obligatoirement doublée d’une haie et massifs arbustifs d’une hauteur de 2m. Leur couleur est gris anthracite (RAL 
+7016), vert anglais (similaire au RAL 6009). 
+Toute autre couleur doit être en harmonie avec l’environnement immédiat. 
+ 
+En secteur UBd :  
+• Les clôtures sont constituées d’un grillage ou d’une grille en serrurerie, barreaudée d’une hauteur de 1,50m de 
+haut et obligatoirement doublée d’une haie et massifs arbustifs d’une hauteur de 1,60m. Leur couleur est gris 
+anthracite (RAL 7016). 
+• Les piliers sont proportionnés à la clôture, au portail et portillon. Ils sont réalisés dans les mêmes matériaux et 
+de la même couleur que les murs de la construction principale ou en métal comme le portail et le portillon. La 
+hauteur des piliers est d’1,50m. 
+• Les portails et portillons sont dans le même métal et de la même couleur que la grille de la clôture. Leur hauteur 
+est d’1,50m. Les portails sont interdits lorsqu’ils donnent sur le Grand Parc.  
+ 
+ 
+
+ 
+64 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 64 
+PLU 
+
+ Les haies et grillage 
+La hauteur des haies est limitée à 2m. 
+Les haies sont constituées de végétaux dont une liste indicative est dressée en pièce 3.12 du dossier de PLU. 
+Le doublement de la haie par le grillage est autorisé, le grillage pouvant se situer derrière la haie, côté intérieur du 
+terrain, avec une hauteur limitée à 2m. 
+Le grillage doit être plastifié de couleur vert anglais (similaire au RAL 6009) ou gris anthracite (similaire au RAL 
+7016) avec maille verticale, supporté par des poteaux métalliques de faible section et de couleur vert anglais 
+(similaire au RAL 6009) ou gris anthracite (similaire au RAL 7016), il peut être soutenu par une bordurette en 
+ciment si celle-ci n’excède pas 15cm de hauteur. 
+Dans tous les cas, le grillage, les lames occultantes et les poteaux devront être de couleur identique.  
+ 
+
+ Les murs 
+La hauteur des murs, chapeau compris est limitée à 1,75m. 
+La finition du mur doit être couverte par un chaperon de forme arrondie, ou mono pan ou à deux pans en fonction 
+des matériaux employés.  
+Ils sont réalisés soit : 
+ En moellons :  
+Il est recommandé que la crête du mur suive la pente de la rue. 
+ 
+ 
+ 
+ En parpaings enduits sur les deux faces. Ils s’apparentent à ceux des constructions. Les nouveaux murs devront 
+être en enduit de couleur ton pierre, calcaire clair, Tuffeau de Touraine, ou s’intégrer à l’environnement immédiat 
+existant. 
+ 
+Il  est  recommandé  que  la  crête  du  mur,  lorsque  la  rue  est  en  pente,  soit  fractionnée  en  paliers  horizontaux 
+proportionnés dans leur ensemble et de faire des joints de dilatation en conséquence. 
+ 
+ Les murs bahuts : ils sont surmontés d’une clôture ajourée (à privilégier) ou d’une clôture pleine, l’ensemble ne 
+pouvant pas excéder 2m de hauteur. 
+Les murs bahuts doivent respecter les dispositions prévues ci-dessus pour les murs à l’exception de la hauteur. 
+Les nouveaux murs bahuts doivent être compris entre 60 et 80 cm de haut surmontés d’une grille métallique entre 
+1,20 et 1,40 m maximum, le tout ne devant pas excéder 2m de haut. Une tolérance d’une dizaine de cm pourra 
+être admise dans le cas de clôture sur terrain pentu. 
+Les nouveaux murs bahuts pourront ne pas respecter la hauteur ci-dessus pour être en adéquation avec les murs 
+bahuts de la rue. 
+Recommandation : la proportion du mur plein par rapport à la partie ajourée doit respecter les proportions 1/3 – 
+2/3.  
+ 
+
+ 
+65 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 65 
+PLU 
+En secteur UBc, les nouveaux murs bahuts sont autorisés uniquement avec la partie du mur supérieure ajourée. 
+Les murs pleins sont autorisés sur rue uniquement si les propriétés adjacentes sont déjà constituées de murs 
+pleins.  
+ 
+Dans  tous  les  secteurs,  les  clôtures  ajourées  sont  :  les  grilles  métalliques,  les  lisses  en  bois  stabilisé  ne 
+présentant pas une finition brute de sciage, en P.V.C ou en métal et les grillages à condition qu’ils soient doublés 
+d’une haie vive, les clôtures grillagées avec lames occultantes de même couleur (les lames doivent être en bois 
+stabilisé peint ou en PVC ou en métal. Dans tous les cas, le matériau utilisé doit être pérenne). Les couleurs 
+autorisées sont le blanc cassé (similaire au RAL 9001), le blanc grège (similaire au RAL 1013 ou 1015), le vert 
+anglais (similaire au RAL 6009), le gris anthracite (similaire au RAL 7016). Toute autre couleur doit s’harmoniser 
+avec l’environnement. 
+Sont autorisées les clôtures pleines, les lisses en bois stabilisé ne présentant pas une finition brute de sciage, en 
+P.V.C ou en métal. Les couleurs autorisées sont le blanc cassé (similaire au RAL 9001), le blanc grège (similaire 
+au RAL 1013 ou 1015), le vert anglais (similaire au RAL 6009), le gris anthracite (similaire au RAL 7016). Toute 
+autre couleur doit s’harmoniser avec l’environnement. 
+Sont interdits les éléments préfabriqués en ciment brut tels que les plaques et poteaux ciment. 
+ 
+
+ Les piliers 
+Ils sont proportionnés à la clôture et aux portail et portillon. Ils sont faits d’appareils de pierre lisse, non bosselée, 
+naturelle ou reconstituée ou d’éléments maçonnés ou enduits, s’apparentant aux enduits des constructions ou 
+identiques en terme de couleur et de matériau aux portail et portillon. Les piliers en aluminium sont possibles selon 
+les  contraintes  techniques  et  une  bonne  intégration  dans  l’environnement.  Les  piliers  seront  couronnés.  Leur 
+section maximale est de 40cm x 40cm, à l’exception des piliers en pierre de taille naturelle. 
+La hauteur des piliers doit être appréciée en fonction de la hauteur de la clôture et ne peut excéder 2,30m y compris 
+le chapeau, à l’exception des piliers en pierre de taille dont la hauteur est appréciée en fonction de la clôture. 
+Les piliers, s’ils sont réalisés dans le même matériau que le portail et le portillon, seront également de la même 
+couleur que ces derniers.  
+ 
+
+ Les portails et portillons 
+Ils sont en bois, en métal ou en PVC.  
+Leur hauteur doit être proportionnée avec celle de la clôture. 
+ 
+CAS
+ PARTICULIERS : 
+Quatre types de modalités sont autorisés : 
+  La  poursuite  sur  une  même  propriété  d’un  type  ou  d’une  hauteur  de clôture  existant  sous  réserve  qu’elle 
+s’intègre dans l’environnement. 
+ L’adaptation au relief, en particulier la réalisation de murs de soutènement entraînant un dépassement de la 
+hauteur maximale autorisée sous réserve de ses qualités esthétiques et de l’intégration dans le site. 
+ Le dépassement de la hauteur pour des raisons motivées de sécurité ou d’intégration dans l’environnement 
+immédiat. 
+ Les clôtures situées dans un carrefour peuvent être imposées basses et ajourées pour des raisons de visibilité. 
+ 
+11.6.2. Les clôtures en limites séparatives 
+Les modes de clôtures séparatives sont ceux autorisés sur voie ou emprise publique ou sur voie ouverte au public.  
+
+ 
+66 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 66 
+PLU 
+Les occultants de type canisse ou toiles brises-vues sont interdits sauf s’ils sont employés temporairement (pour 
+une durée inférieure à 2 ans). Ils sont interdits dans l’OAP Charles de Gaulle et l’OAP Central Parc/Bois Ribert. 
+ 
+En zone UBd, la hauteur des clôtures est d’1,50m.  
+Dans le cas d’une construction à destination d’habitation de moins de trois logements, les clôtures sont constituées 
+d’un grillage semi rigide ou rigide de maille verticale et doublées d’une haie composée d’essences variées et 
+locales d’une hauteur d’1,60m.  
+Dans le cas d’une construction à destination d’habitation de trois logements et plus, les clôtures sont constituées 
+de la même grille (même forme, même matériau, même couleur) que celles sur voie ou emprise publique ou sur 
+voie ouverte au public.  
+ 
+En secteur UBc, la clôture doit être sous forme d’un grillage doublé d’une haie implantée devant ou derrière le 
+grillage.  
+ 
+11.6.3. Le cas des clôtures existantes 
+Est autorisée la restauration des murs et clôtures existants dont les caractéristiques ne correspondent pas aux 
+normes ci-dessus indiquées sous réserve de leur bonne intégration au site. 
+ 
+11.7. CAS PARTICULIER DES PISCINES 
+La piscine peut être réalisée en annexe ou en extension de la construction par liaison d’une terrasse. La margelle 
+ou terrasse devra être faite dans un matériau homogène avec la construction principale.  
+Le liner devra être de couleur très clair (beige, gris clair, sable, vert argile, vert d’eau, bleu pastel) ou très sombre 
+(gris marbré, bleu ardoise, noir). Le bleu type « adriatique » est interdit.  
+La bâche de remisage ou le volet roulant devront être beige, gris clair, sable. Le niveau supérieur des margelles 
+devra être au niveau du terrain naturel avec une tolérance de plus ou moins 10cm. 
+ 
+11.8. CAS PARTICULIER DES EQUIPEMENTS PUBLICS  
+La couleur des équipements publics type transformateur, armoire,... est : vert anglais (similaire au RAL 6009), gris 
+anthracite similaire au RAL 7016), enduit ton pierre, calcaire clair, Tuffeau de Touraine. 
+ 
+11.9. ENSEIGNE, PRE ENSEIGNE, AFFICHAGE PUBLICITAIRE 
+Se reporter au règlement de publicité en vigueur de la Ville de Saint-Cyr-sur-Loire. 
+UB-ARTICLE 12 : AIRES DE STATIONNEMENT 
+Les  aires  de  stationnement  doivent  être  réalisées  sur  le  terrain,  en  surface,  en  souterrain  ou  intégrées  à  la 
+construction. Dans le cas de constructions à destination d’habitation de moins de trois logements, les aires de 
+stationnement pourront être également réalisées sur un autre terrain, dans un rayon de 300m, de manière à assurer 
+le stationnement des véhicules en-dehors des voies publiques. 
+Le nombre de places de stationnement est apprécié en tenant compte à la fois de la destination de la construction, 
+de la taille du projet, de sa localisation, des besoins de la clientèle, du personnel, des véhicules de livraison et des 
+conditions de stationnement et de circulation dans le voisinage. 
+Chaque  fois  qu'une  construction  comporte  plusieurs destinations,  le  nombre  total  des  emplacements  de 
+stationnement exigibles est déterminé en appliquant à chacune d'elles la norme qui lui est propre. 
+
+ 
+67 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 67 
+PLU 
+En cas de travaux sur l'existant, en cas d'extension ou en cas d'annexe, ne créant pas de logement supplémentaire, 
+l'article 12 est sans objet (aucune place de stationnement supplémentaire). 
+ 
+12.1. STATIONNEMENTS DES VEHICULES 
+Le nombre de place de stationnement ne peut être inférieur aux normes minimales suivantes qui peuvent servir de 
+base à cette appréciation, à savoir 25m² par emplacement accès compris. 
+ 
+Il est recommandé qu’une place de stationnement des véhicules légers à usage public ait une largeur 
+minimum de : 
+- en perpendiculaire : 2,5 m (avec tolérance maximum de 4%), 
+- en épis : 2,5 m (avec tolérance maximum de 4%), 
+- en longitudinale : 2 m (avec tolérance maximum de 5%). 
+La réglementation handicapée doit être respectée. 
+Le nombre minimum de place de stationnement par logements sociaux est de 1 place. 
+ 
+C
+ARACTERISTIQUES DE LA RAMPE D’ACCES A UN STATIONNEMENT SOUTERRAIN 
+ Elles sont déterminées en fonction de la largeur de la rue et du nombre de places de parking à desservir. 
+ La largeur de la rampe d’accès est déterminée par le contexte urbain. 
+ Dans tous les cas, une plate-forme permettant l’attente d’un véhicule dans de bonnes conditions de sécurité doit 
+être réalisée sur le domaine privé avec une pente conforme à la réglementation en vigueur. 
+ 
+12.1.1. Constructions à destination d’habitation 
+Pour  les  constructions  à  destination  d’habitation  de  un  ou  deux  logements  maximum  : 2  places  de 
+stationnement minimum par logement. 
+Pour les constructions à destination d’habitation d'au moins trois logements : 
+Une place de stationnement minimum pour les logements de type I, 
+2 places de stationnement minimum pour les logements de type II et plus. 
+Il est imposé un nombre d'aires de stationnement visiteurs propre à assurer le stationnement des véhicules visiteurs 
+hors des voies publiques correspondant aux caractéristiques du projet, avec un minimum de 10% supplémentaires 
+du  nombre  de  places  de  stationnement  requis  pour  les  constructions  de  trois  logements  et  plus  pour  le 
+stationnement visiteurs. Ces places doivent être réalisées en surface sur la parcelle privative et restées libres 
+d'accès.  
+Pour les opérations de trois terrains à bâtir et plus, concernant les places visiteurs : 1 place visiteur pour trois lots 
+à bâtir. 
+Une place de stationnement par logement sera enterrée à partir de 10 logements. 
+ 
+En cas de changement d’affectation ou de création de logements supplémentaires lors de la transformation d’un 
+bâtiment existant, le nombre de places de stationnement supplémentaire doit correspondre aux normes ci-dessus 
+édictées.  
+En cas de changement d’affectation d’un garage n’entraînant pas de changement de destination, le nombre de 
+places de stationnement correspondant à ladite destination doit être respecté. En cas de changement d’affectation 
+d’un  garage  entraînant  un  changement  de  destination,  le  nombre  total  des  emplacements  de  stationnement 
+exigibles est déterminé en appliquant à chacune d'elles la norme qui lui est propre. 
+
+ 
+68 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 68 
+PLU 
+ 
+12.1.2. Constructions à destination autre que d’habitation 
+Les aires mutualisées de stationnement liées aux activités tertiaires prises en compte dans un projet d’ensemble 
+préalablement défini sont autorisées si elles répondent à l’ensemble des besoins des activités. 
+Concernant le stationnement des véhicules légers :  
+ Pour les destinations de commerce, de bureaux, d’artisanat : 
+1 place minimum pour 50m² de surface plancher (SP), avec un minimum de 2 places. 
+  Concernant  les  constructions,  ouvrages,  installations,  travaux  liés  ou  nécessaires  aux  services  publics  ou 
+d'intérêt collectif (CINASPIC), il est imposé la réalisation d'installations propres à assurer le stationnement hors des 
+voies publiques des véhicules correspondant aux caractéristiques du projet. 
+ Hébergement hôtelier : 
+1 place minimum pour 2 chambres. 
+À partir d’une capacité de 50 chambres, il peut être exigé l’aménagement d’une aire de stationnement pour autocars 
+en dehors du domaine public. 
+ Restauration : 
+1 place minimum pour 8m² de SP. 
+ 
+Il n’est pas fixé de règles pour les autres équipements. Elles sont appréciées en fonction des besoins générés par 
+l’équipement. 
+ 
+Concernant le stationnement des poids lourds :  
+Le nombre de places de stationnement pour les poids lourds sera apprécié au cas par cas. Elles devront être 
+réalisées en plus des stationnements imposés pour les véhicules légers.  
+ 
+Le stationnement nécessaire à l’exercice de l’activité (exemple : concessionnaire de véhicules) n’est pas compris 
+dans le calcul du stationnement du présent article.  
+ 
+12.2. STATIONNEMENTS DES VELOS 
+Une place de stationnement vélo équivaut à une surface de 1,5m². Tout local vélo doit avoir une surface d’au moins 
+10m². L’installation de points d’accroche sécurisés est recommandée dans ces locaux, ainsi que des emplacements 
+pour les vélos à assistance électrique. 
+Destination de la construction Stationnement vélo 
+Habitation 
+1 place par logement de type 1, 2, studio et chambre 
+étudiant 
+2 places par logement de type 3 
+3 places par logement de type 4 et plus 
+Les   espaces   de   stationnement  pour  les   vélos 
+classiques, hors dégagements pour la circulation dans 
+ces  locaux,  sont  de  1,5m²  (2m×0,75m)  minimum  par 
+emplacement. 
+
+ 
+69 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 69 
+PLU 
+Équipements d’intérêt collectif et services publics 
+Le  nombre  de  places  de  stationnement  à  créer  est 
+estimé en fonction de l’importance de la destination et 
+des besoins du projet.  
+Commerce et hébergement hôtelier, artisanat 
+3%  de  la  surface  de  plancher,  avec  un  minimum  de 
+10m². 
+Concernant  l’hébergement  hôtelier,  un  ratio  une 
+place/un couchage peut être demandé pour développer 
+le tourisme à vélo par exemple.  
+Autres destinations 1,5% de la surface de plancher, avec un minimum de 
+10m². 
+UB-ARTICLE 13 : ESPACES LIBRES ET PLANTATIONS  
+Dans le cas d’opération d’aménagement ou de construction ayant pour effet la division du terrain d’assiette initial, 
+les règles de cet article s’appliquent à chaque terrain issu de la division.  
+Lors d’une division d’un terrain déjà bâti pour créer un lot à bâtir, la totalité des parcelles issues de la division 
+doivent respecter les règles imposées pour les espaces verts, y compris les constructions existantes. 
+ 
+13.1. ESPACES LIBRES 
+Les espaces libres non strictement nécessaires aux circulations et au stationnement doivent être aménagés et 
+paysagers et ne pas nuire à l’environnement.  
+Les aménagements réalisés dans les marges de recul doivent recevoir un traitement soigné. Ils doivent favoriser 
+l'infiltration naturelle de l'eau de pluie, dans le respect des normes qualitatives en vigueur.  
+Les espaces verts et les espaces communs doivent être aménagés de manière à participer à la trame verte et des 
+cheminements doux de la commune, et participer au développement de la ville parc ou ville jardin caractéristique 
+propre à Saint-Cyr-sur-Loire. 
+ 
+13.2. PLANTATIONS 
+Dans le cadre du développement durable, le choix d'essences majoritairement locales est privilégié. Les essences 
+invasives sont proscrites et celles présentant un fort pouvoir allergisant doivent être évitées au maximum. 
+Les plantations existantes remarquables situées dans les espaces boisés non classés (arbre isolé, groupements 
+d’arbres,...) doivent être prises en compte dans la composition urbaine ou architecturale des projets et être au 
+maximum préservées. 
+Les espaces non construits et non réservés aux stationnements et à la voirie sont obligatoirement paysagers 
+(gazon, plantations). 
+Si la réalisation d’une construction entraîne l’abattage d’arbres importants (plus de 4m de hauteur), le constructeur 
+est tenu d’en replanter le même nombre. 
+Les parkings, plantés et paysagers ou de type « ever green », n’entrent pas dans le calcul de la surface des 
+espaces verts. Les abords des rampes d’accès au sous-sol doivent être paysagers. 
+Chaque terrain à bâtir doit répondre aux règles de l’article. 
+ 
+
+
+
+ 
+70 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 70 
+PLU 
+
+ Espaces verts et végétalisation des stationnements : 
+ 
+ 
+Construction à destination 
+d’habitation de moins de 
+trois logements 
+Construction à destination 
+d’habitation de trois 
+logements et plus 
+Construction à 
+destination autre que 
+d’habitation 
+Surface 
+minimale 
+d’espace vert 
+Pour les nouvelles 
+constructions  ou  extension 
+d’un  bâtiment  existant  ou 
+annexe :  
+- 40%
+ de  la  surface  du 
+terrain pour les terrains 
+d’une   superficie   ≤ 
+300m², 
+- 40%  de  la  surface  du 
+terrain pour les terrains 
+d’une superficie 
+comprise  entre  301m² 
+et 699m², 
+- 55%  de  la  surface  du 
+terrain pour les terrains 
+d’une   superficie ≥ 
+700m² ;   excepté   en 
+secteur  UBc  où  la 
+surface minimale 
+d’espace  vert  est  de 
+60%  de  la  surface  du 
+terrain pour les terrains 
+d’une   superficie ≥ 
+700m².  
+Les parties de terrain libres 
+de    toute    construction 
+doivent être aménagées en 
+espaces  verts  et  plantées 
+d’arbres  de  haute  tige  (1 
+arbre minimum pour 100m² 
+d’espace libre). 
+50%  minimum  de  la  surface du 
+terrain doivent être réservés aux 
+espaces  verts  communs  (haies 
+et pelouse et arbres de haute tige 
+et arbustes). 
+Concernant  la  configuration 
+des espaces verts : 
+50%  au  moins  de  la  superficie 
+requise  pour  les  espaces  verts 
+communs  doivent  former  un 
+espace d’un seul tenant dont la 
+configuration    est    la    plus 
+appropriée   à   sa   destination 
+(loisir, détente, jeux).  
+ 
+Cas particuliers :  
+- Pour les opérations de trois 
+terrains  à  bâtir  et  plus : 
+15%   minimum   de   la 
+surface  du  terrain  doivent 
+être réservés aux espaces 
+verts  communs  (haies  et 
+pelouse et arbres de haute 
+tige  et  arbustes),  sauf  en 
+secteur UBd. 
+- En     secteur     UBd, 
+concernant les 
+constructions,   ouvrages, 
+installations,  travaux  liés 
+ou    nécessaires    aux 
+services    publics    ou 
+d’intérêt collectif 
+(CINASPIC) : 20% 
+d’espaces  verts  minimum 
+sont imposés. 
+- Concernant   l’OAP   ZAC 
+Charles  de  Gaulle :  15% 
+minimum de la surface du 
+terrain     doivent     être 
+réservés   aux   espaces 
+verts. 
+15%  minimum  de  la 
+surface    du    terrain 
+doivent  être  réservés 
+aux    espaces    verts 
+(haies  et  pelouse  et 
+arbres de haute tige et 
+arbustes). 
+Végétalisation 
+des 
+stationnements 
+Dans le cas de plusieurs constructions nouvelles, les prescriptions s’appliquent à chaque 
+futur  terrain.  Les  voiries,  lorsque  le  projet  en  comporte,  doivent  être  plantées  d’arbres 
+d’alignement et paysagées. 
+ Dans  tous  les  cas,  les  stationnements  en  surface  sont 
+paysagers et plantés. Le nombre d’arbres, en fonction du 
+
+ 
+71 
+REGLEMENT 
+ZONE UB 
+VILLE DE SAINT-CYR-SUR-LOIRE 71 
+PLU 
+nombre de places, est apprécié selon l’essence choisie et 
+l’effet végétal recherché. Il ne doit pas être inférieur à un 
+arbre  pour  200m²  de  surfaces  de  stationnement.  Les 
+cépées doivent avoir une taille de 150/200 minimum ; les 
+arbres tiges doivent avoir une taille de 16/18 minimum. 
+Les dalles extérieures de parkings enterrés ne servant pas 
+au  stationnement  en  surface  doivent  être  aménagées en 
+dallage ou en pelouse. 
+Les espaces verts donnant sur l’espace public doivent être 
+de préférence non clos. 
+ 
+13.3. ESPACES BOISES CLASSES 
+Les  « espaces  boisés  classés  à  conserver  et  les  espaces  boisés  à  créer »  apparaissent  dans  le  document 
+graphique. Les bois ou parcs intéressés par cette servitude sont soumis aux dispositions du code de l’urbanisme. 
+Le classement interdit tout changement d'affectation ou tout mode d'occupation du sol de nature à compromettre 
+la conservation, la protection ou la création des boisements. 
+ 
+13.4.  ELEMENTS  PAYSAGERS  IDENTIFIES  AU  TITRE  DE  L’ARTICLE  L.  151-19  DU  CODE  DE 
+L’URBANISME 
+Dans ces espaces sont autorisés les aménagements destinés à améliorer ou à entretenir la qualité végétale du 
+site avec possibilité de création de passage pour la circulation. Le cas échéant, les constructions et installations 
+peuvent être admises à condition de ne pas porter atteinte aux éléments identifiés (exemples : arbres, murs de 
+clôture  maçonnés)  ;  dans  le  cas  contraire,  elles  doivent  être  accompagnées  de  mesures  compensatoires 
+restitutives. 
+ 
+Arbre remarquable isolé : l’abattage d’un arbre remarquable est interdit sauf en cas de risque phytosanitaire ou 
+pour assurer la sécurité des biens et des personnes. Un périmètre perméable suffisant autour de l’arbre est à 
+respecter afin d’assurer sa pérennité et son développement. 
+ 
+L’implantation des constructions doit être étudiée de manière à préserver au maximum les plantations existantes.  
+Quelle  que  soit  leur  grandeur  ou  leur  situation,  ces  éléments  sont  constitutifs  du  paysage  et  participent  à  la 
+biodiversité. Leur maintien et éventuellement leur réhabilitation devront être recherchés, en particulier pour les 
+parcs et jardins attenants aux constructions anciennes. 
+UB-ARTICLE 14 : POSSIBILITES MAXIMALES D’OCCUPATION DU SOL 
+Sans objet (abrogé par la loi ALUR du 24 mars 2014 art 157). 
+
+ 
+72 
+REGLEMENT 
+ZONE UC 
+VILLE DE SAINT-CYR-SUR-LOIRE 72 
+PLU 
+DISPOSITIONS APPLICABLES À LA ZONE UC 
+CARACTERE DE LA ZONE (RAPPEL DU RAPPORT DE PRESENTATION) 
+La zone UC regroupe les quartiers ou séquences urbaines qui, par leur morphologie et leurs caractéristiques bâties 
+(habitat individuel), participent à la diversité et à l'identité du paysage urbain. Elle comprend :  
+ Cottage Park qui constitue le lotissement le plus ancien de la ville, organisé autour de la rue Henri Lebrun, l'allée 
+des Pins et l'allée des Ifs.  
+Il s'agit d'un quartier d'habitat individuel constitué par des maisons des années 30 établit sur un parcellaire en 
+lanière. La trame végétale est très perceptible depuis l'espace public.  
+ les espaces bâtis délimités par la rue du Dr Calmette, la rue du Bocage et la rue de Portillon.  
+ deux quartiers homogènes en termes de morphologie : 
+o de part et d'autre de la rue des Trois Tonneaux ;  
+o de part et d'autre de la rue Maurice Sarrail.  
+ la séquence bâtie positionnée en rive Ouest de la rue Victor Hugo, avec un vélum végétal en fond de parcelle ; 
+ainsi que la séquence établie de part et d'autre de la rue Bergson, 
+ la séquence établie de part et d'autre de la rue Jean Jaurès et l’impasse Jean-Jaurès, 
+ la séquence bâtie établie dans la partie centrale de la rue Fleurie marquée par la présence d'anciens bâtiments 
+agricoles (en cours de réhabilitation) et des longères avec pignons sur rue et grands jardins au Sud. 
+ 
+Du fait de l’existence constatée de termites dans une petite partie de cette zone, il y a lieu de se reporter aux 
+prescriptions de l’arrêté préfectoral en vigueur. 
+ 
+Avertissements liés aux risques : dans les secteurs concernés par le risque d'inondation, toutes les occupations et 
+utilisations du sol doivent respecter les dispositions édictées par le Plan de Prévention des Risques faisant partie 
+des annexes du PLU. 
+UC-ARTICLE 1 : OCCUPATIONS OU UTILISATIONS DU SOL INTERDITES 
+Sont interdites toutes les occupations ou utilisations des sols non compatibles avec les caractères propres à la 
+zone : 
+• Les établissements, installations ou utilisations du sol qui, par leur destination, leur nature, leur importance ou 
+leur aspect sont incompatibles avec la salubrité, la tranquillité, la sécurité ou l’environnement d’un quartier 
+d’habitation, et qui peuvent entraîner des nuisances graves vis-à-vis du voisinage, 
+• L’ouverture et l’exploitation de carrières, les affouillements et les exhaussements de sol sauf nécessaires à la 
+réalisation des occupations et utilisations du sol autorisées. 
+• Les constructions destinées à l’exploitation agricole ou forestière, 
+• Les dépôts de ferrailles, de matériaux (matériaux de démolition,...), de déchets de toute nature, tels que pneus, 
+chiffons, ordures, véhicules désaffectés ou à l’état d’épave. Les stockages extérieurs, même temporaires, non 
+destinés au commerce et activités de service visibles depuis le domaine public, 
+• Les constructions, leurs extensions et leurs annexes, à destination industrielle, 
+• Les constructions, leurs extensions et leurs annexes, à destination d’entrepôt, 
+• Les terrains aménagés, permanents ou saisonniers, pour l'accueil des campeurs et les aires naturelles de 
+camping, autre que l’aire d’accueil des gens du voyage.  
+• Les installations établies pour plus de trois mois susceptibles de servir d’habitation et constituées : 
+- soit par d’anciens véhicules désaffectés, 
+
+ 
+73 
+REGLEMENT 
+ZONE UC 
+VILLE DE SAINT-CYR-SUR-LOIRE 73 
+PLU 
+- soit par des roulottes, caravanes, camping-cars, bungalows (sauf installations de chantier), tiny house, 
+mobile-home. 
+• Les  installations  de  production  d’électricité  utilisant  l’énergie  mécanique  du  vent  dont  l’usage  est  lié  aux 
+besoins de la construction (éoliennes individuelles), 
+• Les abris précaires ou mobiles.  
+UC-ARTICLE  2  :  OCCUPATIONS  OU  UTILISATIONS  DU  SOL  SOUMISES  A  CONDITIONS 
+PARTICULIERES 
+A l'exception de celles interdites à l'article UC1, et sous réserve : 
+- que des précautions soient prises pour réduire les nuisances particulières ou les risques soit pour la commodité 
+du voisinage, soit pour la santé, la sécurité, la salubrité publique, soit pour la protection de l’environnement et 
+du paysage, 
+- d'être compatibles avec les équipements publics existants ou prévus. 
+Sont admises toutes les occupations et utilisations du sol suivantes, sous conditions particulières :  
+• Les extensions mineures d’installations existantes et les installations liées à l’activité urbaine pour permettre 
+les évolutions techniques nécessaires et l’adaptation aux règles de sécurité. 
+Elles obéiront à des dispositions particulières prises pour limiter les risques et les nuisances à un niveau 
+compatible avec le voisinage et seront adaptées aux infrastructures et réseaux existants. 
+• Les constructions, leurs extensions et leurs annexes (dans la limite de deux, piscine comprise), à destination 
+d’habitation. 
+• Il est précisé que les piscines sont autorisées dès lors que leur implantation ne génère pas de nuisances 
+définies par la réglementation existante. 
+• La  reconstruction  de  l’existant  après  sinistre  ou  démolition,  dans  le  cas  où  ces  bâtiments  ne  sont  plus 
+conformes au présent règlement, dans la limite des droits à construire de l’existant sinistré ou démoli. 
+• Les constructions liées à l’activité existante et rendues nécessaires par celle-ci (par exemple : contraintes 
+techniques, respect de la réglementation de sécurité). 
+• L’extension des constructions à destination d’habitation existantes et leurs annexes. 
+• Les constructions et installations nécessaires aux services publics ou d’intérêt collectif sont autorisées dans 
+l’ensemble  de  la  zone,  sous-secteurs  compris.  Les  travaux  de  maintenance  ou  de  modification  de  ces 
+ouvrages sont également autorisés pour des exigences fonctionnelles et/ou techniques.  
+• Concernant les bâtiments identifiés au titre de l'article L.151-19 du code de l'urbanisme, repérés aux 
+documents graphiques du PLU et inventoriés dans les annexes du PLU : la démolition des bâtiments identifiés 
+est interdite du fait de leur grand intérêt architectural et historique ; toutefois la démolition des annexes et des 
+extensions ne correspondant pas à l’architecture du bâtiment principal peut être autorisée lorsque leur état de 
+vétusté ou la nécessité d’évolution du bâti le justifie et/ou lorsque le projet de remplacement s’intègre dans la 
+séquence. 
+UC-ARTICLE 3 : ACCES ET VOIRIE 
+Pour être constructible, un terrain doit avoir accès à une voie carrossable publique ou privée, soit directement, soit 
+par l’intermédiaire d’une servitude de passage conformément à l’article 682 du code civil.  
+Le projet peut être refusé sur des terrains qui ne seraient pas desservis par des voies publiques ou privées dans 
+des  conditions  (dimensions,  formes,  caractéristiques  techniques,  sécurité  des  usagers,...)  répondant  à  son 
+importance  ou  à  la  destination  des  constructions  ou  des  aménagements  envisagés,  et  notamment  si  les 
+caractéristiques de ces voies rendent difficile la circulation ou l'utilisation des engins de lutte contre l'incendie et de 
+protection civile ainsi que la circulation des véhicules des services publics.  
+
+ 
+74 
+REGLEMENT 
+ZONE UC 
+VILLE DE SAINT-CYR-SUR-LOIRE 74 
+PLU 
+Les emprises des voies doivent tenir compte du caractère des lieux (environnement urbain,...), des exigences 
+techniques ou réglementaires liées aux différents types de transports (transports en commun, bandes ou pistes 
+cyclables,...)  et  des  composantes  paysagères  et  naturelles  environnantes.  L’emprise  d’une  voie  concerne 
+l’ensemble de la chaussée et ses accessoires (espaces verts, trottoirs, pistes cyclables, stationnement,...). 
+Les accès doivent répondre à l’importance et à la destination des constructions ou des aménagements envisagés. 
+Le projet peut également être refusé ou n'être accepté que sous réserve de prescriptions spéciales si les accès 
+présentent un risque pour la sécurité des usagers des voies publiques ou pour celle des personnes utilisant ces 
+accès. Cette sécurité doit être appréciée compte tenu, notamment, de la position des accès, de leur configuration 
+ainsi que de la nature et de l'intensité du trafic. 
+L’article vise les conditions de desserte des terrains par les voies publiques ou privées mais aussi l’accès 
+à ces voies. 
+ 
+ACCES 
+Les nouvelles constructions doivent respecter les règles suivantes :  
+- Les accès doivent être situés sur la voie la moins gênante pour la circulation.  
+- Ils doivent avoir une largeur d’emprise de 6m minimum pour les projets de moins de trois logements.  
+- Ils doivent avoir une largeur d’emprise de 7m minimum pour les projets de trois logements et plus. 
+- La voie d’accès est de 10m maximum de longueur.  
+ 
+VOIES  INTERNES  ET  EMPRISE  DES  SERVITUDES  DE  PASSAGE  DESSERVANT  LA 
+CONSTRUCTION 
+Les voies ou emprises doivent avoir une longueur maximum de 25m et une largeur sur toute la longueur du chemin 
+d’accès de 4m minimum pour les projets de moins de trois logements.  
+Les voies ou emprises doivent avoir une largeur sur toute la longueur du chemin de 5,50m minimum pour les 
+projets de trois logements et plus. 
+La création d’un chemin d’accès situé à 4m ou à moins de 4m de part et d’autre de constructions neuves ou 
+existantes est interdite. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+ 
+75 
+REGLEMENT 
+ZONE UC 
+VILLE DE SAINT-CYR-SUR-LOIRE 75 
+PLU 
+La création d’un chemin d’accès à côté d’un autre chemin d’accès est interdite. 
+   
+ 
+DESSERTE PAR LA VOIRIE 
+CES   
+
+[TRONQUÉ POUR LIMITES DE QUOTA]

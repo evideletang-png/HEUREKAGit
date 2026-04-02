@@ -1,0 +1,20 @@
+{
+  "rule_id": "art-10-hauteur",
+  "status": "uncertain",
+  "impact_level": "major",
+  "justification": "L'IA ne peut conclure car la hauteur totale n'est pas spécifiée dans le Cerfa ou les plans.",
+  "confidence": {
+    "score": 0.3,
+    "level": "low",
+    "reason": "Donnée manquante sur la coupe de terrain.",
+    "ambiguities": [
+      "Le plan de masse ne mentionne pas l'altitude du faîtage."
+    ],
+    "missing_critical_data": [
+      "coupe_batiment",
+      "hauteur_faitage"
+    ],
+    "review_status": "manual_required"
+  },
+  "sources": []
+}

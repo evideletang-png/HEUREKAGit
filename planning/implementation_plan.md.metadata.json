@@ -1,0 +1,6 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Updated implementation plan for HEUREKA Phase 11 & 12, focusing on a tabbed dossier view with horizontal document tabs, a new \"Synthèse Globale\" feature, and enhanced AI analysis for sketches and tables using GPT-4o's vision capabilities. Refines the mairie agent experience for complex multi-document submissions.",
+  "updatedAt": "2026-03-22T21:21:29.327414Z",
+  "version": "15"
+}

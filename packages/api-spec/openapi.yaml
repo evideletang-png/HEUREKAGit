@@ -1,0 +1,1359 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: HEUREKA Real Estate Analysis SaaS API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: analyses
+    description: Analysis operations
+  - name: parcels
+    description: Parcel data operations
+  - name: planning
+    description: Planning document operations
+  - name: reports
+    description: Report generation
+  - name: admin
+    description: Admin operations
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /analyses:
+    get:
+      operationId: listAnalyses
+      tags: [analyses]
+      summary: List user analyses
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of analyses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisList"
+    post:
+      operationId: createAnalysis
+      tags: [analyses]
+      summary: Create a new analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAnalysisRequest"
+      responses:
+        "201":
+          description: Analysis created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Analysis"
+
+  /analyses/{id}:
+    get:
+      operationId: getAnalysis
+      tags: [analyses]
+      summary: Get analysis details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Analysis details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAnalysis
+      tags: [analyses]
+      summary: Delete analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /analyses/{id}/run:
+    post:
+      operationId: runAnalysis
+      tags: [analyses]
+      summary: Run/restart analysis pipeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pipeline started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Analysis"
+
+  /documents:
+    get:
+      operationId: getApiDocuments
+      tags: [analyses]
+      summary: List all accessible document reviews
+      responses:
+        "200":
+          description: List of document reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DocumentReview"
+    post:
+      operationId: uploadDocuments
+      tags: [analyses]
+      summary: Upload and analyse document(s)
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                analysisId:
+                  type: string
+                address:
+                  type: string
+                commune:
+                  type: string
+      responses:
+        "201":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentReview"
+
+  /documents/{id}:
+    get:
+      operationId: getApiDocument
+      tags: [analyses]
+      summary: Get single document with full results
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Document details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  document:
+                     $ref: "#/components/schemas/DocumentReview"
+                  analysis:
+                     $ref: "#/components/schemas/Analysis"
+    delete:
+      operationId: deleteApiDocument
+      tags: [analyses]
+      summary: Delete document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /documents/{id}/timeline:
+    patch:
+      operationId: updateDossierTimeline
+      tags: [analyses]
+      summary: Update dossier timeline step
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timelineStep:
+                  type: string
+                  enum: [depot, analyse, instruction, pieces, decision]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /documents/{id}/messages:
+    get:
+      operationId: getDossierMessages
+      tags: [analyses]
+      summary: Get messages for a dossier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DossierMessage"
+    post:
+      operationId: postDossierMessage
+      tags: [analyses]
+      summary: Post a message to a dossier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        "201":
+          description: Message posted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    $ref: "#/components/schemas/DossierMessage"
+
+  /analyses/{id}/parcel:
+    get:
+      operationId: getParcel
+      tags: [parcels]
+      summary: Get parcel data for analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Parcel data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Parcel"
+
+  /analyses/{id}/buildings:
+    get:
+      operationId: getBuildings
+      tags: [parcels]
+      summary: Get buildings for analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Buildings list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Building"
+
+  /analyses/{id}/zone-analysis:
+    get:
+      operationId: getZoneAnalysis
+      tags: [planning]
+      summary: Get zone analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Zone analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZoneAnalysis"
+
+  /analyses/{id}/buildability:
+    get:
+      operationId: getBuildability
+      tags: [analyses]
+      summary: Get buildability result
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Buildability result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildabilityResult"
+
+  /analyses/{id}/report:
+    get:
+      operationId: getReport
+      tags: [reports]
+      summary: Get generated report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+    post:
+      operationId: generateReport
+      tags: [reports]
+      summary: Generate/regenerate report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+
+  /analyses/{id}/constraints:
+    get:
+      operationId: getConstraints
+      tags: [analyses]
+      summary: Get constraints for analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Constraints list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Constraint"
+
+  /analyses/{id}/logs:
+    get:
+      operationId: getAnalysisLogs
+      tags: [analyses]
+      summary: Get pipeline logs for analysis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Event logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EventLog"
+
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List all notifications for current user
+      responses:
+        "200":
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+  
+  /notifications/{id}/read:
+    patch:
+      operationId: markNotificationAsRead
+      tags: [notifications]
+      summary: Mark a single notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  
+  /notifications/read-all:
+    post:
+      operationId: markAllNotificationsAsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: OK
+
+  /geocode:
+    get:
+      operationId: geocodeAddress
+      tags: [analyses]
+      summary: Geocode an address
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Geocoding results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeocodeResult"
+
+  /admin/analyses:
+    get:
+      operationId: adminListAnalyses
+      tags: [admin]
+      summary: Admin - List all analyses
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: All analyses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAnalysisList"
+
+  /admin/users:
+    get:
+      operationId: adminListUsers
+      tags: [admin]
+      summary: Admin - List all users
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: commune
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: All users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+
+  /admin/users/{id}:
+    patch:
+      operationId: updateAdminUser
+      tags: [admin]
+      summary: Admin - Update user profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                email: { type: string }
+                password: { type: string }
+                role: { type: string }
+                communes: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+
+  /admin/communes:
+    get:
+      operationId: adminListCommunes
+      tags: [admin]
+      summary: Admin - List territories
+      responses:
+        "200":
+          description: List of communes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminCommune"
+    post:
+      operationId: createAdminCommune
+      tags: [admin]
+      summary: Admin - Add territory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                zipCode: { type: string }
+      responses:
+        "201":
+          description: Commune created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminCommune"
+
+  /admin/communes/{id}:
+    delete:
+      operationId: deleteAdminCommune
+      tags: [admin]
+      summary: Admin - Delete territory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        name:
+          type: string
+      required:
+        - email
+        - password
+        - name
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+      required:
+        - user
+        - token
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [user, admin, mairie]
+        communes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - email
+        - name
+        - role
+        - createdAt
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        communes:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        analysisCount:
+          type: integer
+      required:
+        - id
+        - email
+        - name
+        - role
+        - createdAt
+        - analysisCount
+
+    AdminCommune:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        zipCode:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - createdAt
+
+    CreateAnalysisRequest:
+      type: object
+      properties:
+        address:
+          type: string
+        parcelRef:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        title:
+          type: string
+      required:
+        - address
+
+    Analysis:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        title:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        postalCode:
+          type: string
+        parcelRef:
+          type: string
+        zoneCode:
+          type: string
+        zoningLabel:
+          type: string
+        status:
+          type: string
+          enum: [draft, collecting_data, parsing_documents, extracting_rules, calculating, completed, failed]
+        summary:
+          type: string
+        confidenceScore:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - userId
+        - address
+        - status
+        - createdAt
+        - updatedAt
+
+    AnalysisList:
+      type: object
+      properties:
+        analyses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Analysis"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - analyses
+        - total
+        - page
+        - limit
+
+    AdminAnalysisList:
+      type: object
+      properties:
+        analyses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Analysis"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - analyses
+        - total
+        - page
+        - limit
+
+    AnalysisDetail:
+      type: object
+      properties:
+        analysis:
+          $ref: "#/components/schemas/Analysis"
+        parcel:
+          $ref: "#/components/schemas/Parcel"
+        buildings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Building"
+        zoneAnalysis:
+          $ref: "#/components/schemas/ZoneAnalysis"
+        buildability:
+          $ref: "#/components/schemas/BuildabilityResult"
+        constraints:
+          type: array
+          items:
+            $ref: "#/components/schemas/Constraint"
+        report:
+          $ref: "#/components/schemas/Report"
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventLog"
+      required:
+        - analysis
+
+    Parcel:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        cadastralSection:
+          type: string
+        parcelNumber:
+          type: string
+        parcelSurfaceM2:
+          type: number
+        geometryJson:
+          type: object
+        centroidLat:
+          type: number
+        centroidLng:
+          type: number
+        roadFrontageLengthM:
+          type: number
+        sideBoundaryLengthM:
+          type: number
+        metadataJson:
+          type: object
+      required:
+        - id
+        - analysisId
+
+    Building:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        footprintM2:
+          type: number
+        estimatedFloorAreaM2:
+          type: number
+        avgHeightM:
+          type: number
+        avgFloors:
+          type: number
+        geometryJson:
+          type: object
+        metadataJson:
+          type: object
+      required:
+        - id
+        - analysisId
+
+    ZoneAnalysis:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        zoneCode:
+          type: string
+        zoneLabel:
+          type: string
+        rawPluText:
+          type: string
+        extractedRulesJson:
+          type: object
+      required:
+        - id
+        - analysisId
+
+    BuildabilityResult:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        maxFootprintM2:
+          type: number
+          nullable: true
+        remainingFootprintM2:
+          type: number
+          nullable: true
+        maxHeightM:
+          type: number
+          nullable: true
+        setbackRoadM:
+          type: number
+          nullable: true
+        setbackBoundaryM:
+          type: number
+          nullable: true
+        parkingRequirement:
+          type: string
+          nullable: true
+        greenSpaceRequirement:
+          type: string
+          nullable: true
+        assumptionsJson:
+          type: array
+          items:
+            type: string
+        confidenceScore:
+          type: number
+        resultSummary:
+          type: string
+      required:
+        - id
+        - analysisId
+        - confidenceScore
+    Constraint:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        category:
+          type: string
+          enum: [servitude, nuisance, protection, risque, autre]
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [high, medium, low, info]
+        source:
+          type: string
+      required:
+        - id
+        - analysisId
+        - category
+        - title
+        - severity
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        dossierId:
+          type: string
+          nullable: true
+        type:
+          type: string
+          description: 'Type of notification: MENTION, MESSAGE, NEW_DOSSIER, STATUS_CHANGE'
+        title:
+          type: string
+        message:
+          type: string
+        isRead:
+          type: boolean
+        priority:
+          type: string
+          description: 'LOW, MEDIUM, HIGH'
+        createdAt:
+          type: string
+      required:
+        - id
+        - userId
+        - type
+        - title
+        - message
+        - isRead
+
+    Report:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        htmlContent:
+          type: string
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - analysisId
+        - version
+        - createdAt
+
+    EventLog:
+      type: object
+      properties:
+        id:
+          type: string
+        analysisId:
+          type: string
+        step:
+          type: string
+        status:
+          type: string
+          enum: [started, completed, failed, skipped]
+        message:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - analysisId
+        - step
+        - status
+        - createdAt
+
+    GeocodeResult:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/GeocodeItem"
+      required:
+        - results
+
+    GeocodeItem:
+      type: object
+      properties:
+        label:
+          type: string
+        score:
+          type: number
+        housenumber:
+          type: string
+        street:
+          type: string
+        postcode:
+          type: string
+        city:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+      required:
+        - label
+        - lat
+        - lng
+
+    DocumentReview:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        analysisId:
+          type: string
+          nullable: true
+        title:
+          type: string
+        documentType:
+          type: string
+        commune:
+          type: string
+          nullable: true
+        status:
+          type: string
+        timelineStep:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, userId, title, status, createdAt, updatedAt]
+
+    DossierMessage:
+      type: object
+      properties:
+        id:
+          type: number
+        dossierId:
+          type: string
+        fromUserId:
+          type: string
+        fromRole:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, dossierId, fromUserId, fromRole, content, createdAt]
+
+    RuleArticleConfidence:
+      type: string
+      enum:
+        - high
+        - medium
+        - low
+        - unknown
+
+    AdminStats:
+      type: object
+      properties:
+        totalAnalyses: { type: integer }
+        totalUsers: { type: integer }
+        totalRevenue: { type: number }
+        analysesPerStatus: { type: object, additionalProperties: { type: integer } }
+        analysesPerCommune: { type: object, additionalProperties: { type: integer } }
+        activities:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              description: { type: string }
+              date: { type: string, format: date-time }
+
+    FinanceFormulas:
+      type: object
+      additionalProperties: { type: string }
+
+    AdminLearningOverride:
+      type: object
+      properties:
+        commune: { type: string }
+        category: { type: string }
+        originalRule: { type: string }
+        humanCorrection: { type: string }
+        reason: { type: string }
+        date: { type: string, format: date-time }
+        adminId: { type: string }

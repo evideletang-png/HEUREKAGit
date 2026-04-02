@@ -1,0 +1,219 @@
+[admin.ts] Router initialized
+Server listening on port 8080
+[prompts] Default prompts seeded.
+[API Server] 2026-04-01T08:40:55.246Z POST /api/auth/login
+[API Server] 2026-04-01T08:40:55.617Z GET /api/notifications
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[API Server] 2026-04-01T08:40:55.635Z GET /api/admin/users?search=&commune=
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T08:40:55.637Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T08:40:55.638Z GET /api/admin/prompts
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T08:40:55.639Z GET /api/admin/analyses?limit=100&search=
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T08:41:04.472Z POST /api/auth/login
+[API Server] 2026-04-01T08:50:45.696Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:50:45.713Z GET /api/auth/me
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[API Server] 2026-04-01T08:50:45.716Z GET /api/notifications
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[API Server] 2026-04-01T08:51:07.812Z GET /api/mairie/dossiers/1ed783f6-a47d-4c97-a35a-389d2ed7e3c9
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:51:11.458Z GET /api/mairie/dossiers/1ed783f6-a47d-4c97-a35a-389d2ed7e3c9/messages
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:51:44.252Z GET /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:52:14.039Z GET /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1/timeline
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:52:16.202Z GET /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1/messages
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:52:30.532Z POST /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1/messages
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+{"level":"info","message":"[Messaging] Message from admin on dossier 126ec3f7-09ab-4951-8c55-acb260d602c1","timestamp":"2026-04-01T08:52:30.544Z"}
+[API Server] 2026-04-01T08:52:30.605Z GET /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1/messages
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:52:32.707Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:52:32.707Z GET /api/notifications
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[API Server] 2026-04-01T08:52:40.062Z GET /api/notifications
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[API Server] 2026-04-01T08:52:40.065Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:52:43.390Z GET /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:53:03.499Z POST /api/mairie/dossiers/126ec3f7-09ab-4951-8c55-acb260d602c1/generate-decision
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775032855,"exp":1775637655}
+[requireMairie] User role: admin
+[API Server] 2026-04-01T08:54:00.455Z POST /api/auth/logout
+[API Server] 2026-04-01T08:54:00.470Z GET /api/auth/me
+[API Server] 2026-04-01T08:54:18.197Z POST /api/auth/login
+[API Server] 2026-04-01T08:54:18.544Z GET /api/notifications
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[API Server] 2026-04-01T08:54:18.546Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[requireMairie] User role: abf
+[API Server] 2026-04-01T08:54:19.558Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[requireMairie] User role: abf
+[API Server] 2026-04-01T08:54:22.395Z GET /api/notifications
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[API Server] 2026-04-01T08:54:22.398Z GET /api/analyses?limit=50
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[API Server] 2026-04-01T08:54:26.772Z GET /api/notifications
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[API Server] 2026-04-01T08:54:54.276Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[requireMairie] User role: abf
+[API Server] 2026-04-01T08:54:54.280Z GET /api/notifications
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[API Server] 2026-04-01T08:54:55.292Z GET /api/mairie/dossiers
+[authenticate] Payload: {"userId":"b4dc7a0a-8660-42ee-b9ec-8da519cd277f","email":"abf37@test.com","role":"abf","iat":1775033658,"exp":1775638458}
+[requireMairie] User role: abf
+[API Server] 2026-04-01T08:55:00.688Z POST /api/auth/logout
+[API Server] 2026-04-01T08:55:00.714Z GET /api/auth/me
+[API Server] 2026-04-01T08:55:08.718Z POST /api/auth/login
+[API Server] 2026-04-01T08:55:09.058Z GET /api/documents
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:58:34.402Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:58:34.410Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:58:35.503Z GET /api/documents/55c799ec-0ec4-4ab1-8a71-3ece288e2b25
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:58:37.495Z GET /api/documents/4138a758-d3fc-4786-b6b4-44a2da505aa9
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:58:49.456Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:59:04.500Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:59:19.542Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:59:34.584Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T08:59:49.632Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:00:04.687Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:00:19.728Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:00:34.776Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:00:49.822Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:01:04.865Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:01:19.914Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:01:34.964Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:01:50.026Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:02:05.064Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:02:20.102Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:02:35.161Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:02:50.219Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:03:05.266Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:03:20.327Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:03:35.396Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:03:50.487Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:04:05.552Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:04:20.603Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:04:35.646Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:04:50.704Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:05:05.748Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:05:20.791Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:05:35.838Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:05:50.884Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:06:05.927Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:06:20.980Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:06:36.037Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:06:51.078Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:07:06.126Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:07:21.167Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:07:36.204Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:07:51.251Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:08:06.290Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:08:21.318Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:08:36.356Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:08:51.389Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:09:06.439Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:25.867Z GET /api/auth/me
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:25.874Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9/messages
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:25.875Z GET /api/documents/4138a758-d3fc-4786-b6b4-44a2da505aa9
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:25.876Z GET /api/documents/c4c88ec3-0344-451d-ae2e-546f9a0a55b9
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:28.422Z GET /api/documents
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:31.125Z GET /api/notifications
+[authenticate] Payload: {"userId":"05a58135-bcbb-45e3-8ef3-18b4225e18d3","email":"citoyen@example.com","role":"user","iat":1775033709,"exp":1775638509}
+[API Server] 2026-04-01T09:29:33.692Z POST /api/auth/logout
+[API Server] 2026-04-01T09:29:33.721Z GET /api/auth/me
+[API Server] 2026-04-01T09:29:45.936Z POST /api/auth/login
+[API Server] 2026-04-01T09:29:46.278Z GET /api/notifications
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}
+[API Server] 2026-04-01T09:29:46.285Z GET /api/admin/communes
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T09:29:46.286Z GET /api/admin/prompts
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T09:29:46.288Z GET /api/admin/analyses?limit=100&search=
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T09:29:46.295Z GET /api/admin/users?search=&commune=
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}
+[requireAdmin] User role: admin
+[API Server] 2026-04-01T09:32:34.848Z GET /api/auth/me
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}
+[API Server] 2026-04-01T09:32:34.887Z GET /api/notifications
+[authenticate] Payload: {"userId":"206d7fd4-62c1-4377-8172-acfd060cdfb3","email":"admin@heureka.fr","role":"admin","iat":1775035786,"exp":1775640586}

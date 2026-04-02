@@ -1,0 +1,43 @@
+# Implementation Plan - Fix Empty AI Analysis Results
+
+The user wants to perform conformity analysis by comparing an uploaded document (e.g., CERFA) directly against a reference PLU document uploaded in the "Espace Conformité", instead of requiring a pre-existing property analysis.
+
+## Proposed Changes
+
+### Backend Improvements
+
+#### [MODIFY] [pluAnalysis.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/pluAnalysis.ts)
+- Upgrade the AI model from `gpt-4o-mini` to `gpt-4o` to ensure better extraction accuracy for complex PLU documents (like Étretat).
+
+#### [MODIFY] [documents.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/documents.ts)
+- Add logging to track why comparison might be skipped or fail.
+- Ensure that if `analysisId` is provided, the comparison is triggered.
+- Update [compare](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/documents.ts#130-197) endpoint to accept `referenceDocumentId`.
+- If `referenceDocumentId` is provided, fetch its extracted text and use it as the PLU context for comparison.
+- Maintain support for `analysisId` as an alternative context source.
+
+### Frontend - Espace Conformité
+
+#### [MODIFY] [mairie.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/mairie.tsx)
+- Add a selection dropdown in the "Déposer un document" (Upload) form to allow users to link the document to an existing property analysis.
+- Use the [useAdminListAnalyses](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/lib/api-client-react/src/generated/api.ts#1738-1760) or similar hook to fetch available analyses.
+- Update [handleUpload](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/mairie.tsx#111-143) to include the selected `analysisId` in the `FormData`.
+- Improve the UI for documents that have no linked analysis, allowing users to link them after the fact using the existing `compareMutation`.
+- Add "PLU (Référence)" (`plu_reference`) to the document types.
+- Update the comparison UI to allow selecting either an "Analyse de parcelle" OR a "Document de référence" from the list of uploaded documents.
+- Filter the "Document de référence" list to only show documents of type `plu_reference`.
+- Update `compareMutation` and [handleUpload](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/mairie.tsx#111-143) to support `referenceDocumentId`.
+
+## Verification Plan
+
+### Automated Tests
+- Upload a sample CERFA document via the "Espace Conformité" and verify that the `analysisId` is correctly sent in the request.
+- Upload a sample CERFA document via the "Espace Conformité" and verify that the `analysisId` is correctly sent in the request.
+- Check the database for the `document_reviews` table to ensure `comparison_result_json` is populated after upload.
+
+### Manual Verification
+1. Login as a Mairie/Admin user.
+2. Go to "Espace Conformité" (via the Navbar or `/conformite`).
+3. Select an existing analysis (e.g., Étretat).
+4. Upload a CU or Permis document.
+5. Verify that the "Analysé" badge appears and the comparison results (Conformités/Irrégularités) are displayed.

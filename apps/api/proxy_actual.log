@@ -1,0 +1,3 @@
+Site Proxy running at http://localhost:5173
+Serving static files from: /Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/dist/public
+Proxying /api to http://localhost:8080

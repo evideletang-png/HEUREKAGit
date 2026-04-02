@@ -1,0 +1,31 @@
+# 🏘️ Mairie Accounts Segmentation & Custom Prompts Plan
+  
+The objective is to segment Town Hall (Mairie) accounts so they can manage specific municipalities (communes). They will be able to upload PLUi/PLU documents associated with their city, and configure a custom AI Prompt used exclusively when HEUREKA analyzes properties within that city.
+
+## 1. Database Schema Updates (`packages/db`)
+- **`townHallDocumentsTable`**:
+  - [NEW] Add column `commune: text("commune")` indicating to which city the PDF document applies.
+- **[NEW] `townHallPromptsTable`**:
+  - Create a new Drizzle table to store custom prompts tailored per commune: [id](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/parcel.ts#281-299), `commune` (unique), `content` (custom instructions), `updatedAt`.
+- *Action:* Run `drizzle-kit push` to apply schema updates without losing existing users.
+
+## 2. Backend Routes (`api-server`)
+- **[routes/mairie.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/mairie.ts)**:
+  - Enhance `POST /documents`: Accept `commune` in the multipart form data and save it. Validate that the requesting Mairie's `usersTable.communes` includes this commune.
+  - Enhance `GET /documents`: Return documents matching `commune IN (...)` for the logged-in Mairie's assigned cities. 
+  - [NEW] Add `GET /prompts/:commune` to fetch custom system prompts.
+  - [NEW] Add `POST /prompts` to save/update custom system prompts per commune.
+
+## 3. Frontend Mairie Portal ([portail-mairie.tsx](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/heureka/src/pages/portail-mairie.tsx))
+- Parse the current user's `communes` list.
+- If the Mairie manages multiple communes, display a top-level dropdown/selector to switch context. (If only one, default to it).
+- **PLU Upload Tab**: Pass the selected `commune` in the upload FormData.
+- **[NEW] IA Configuration Tab**: A new text area in the UI where the Mairie can define their specific instructions ("Prompt Personnalisé") for their city.
+
+## 4. AI Pipeline Injection ([routes/documents.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/routes/documents.ts) / [pluAnalysis.ts](file:///Users/evideletang/Desktop/HEUREKA/Web-SaaS-Builder/artifacts/api-server/src/services/pluAnalysis.ts))
+- During CERFA analysis, the system already identifies the `city` from geocoding.
+- **PLU Documents Fetch**: Instead of fetching documents by `req.user.id` (which is the citizen uploader), the API will query `townHallDocumentsTable` where `commune = geocode.city`.
+- **System Prompt Fetch**: The API will query `townHallPromptsTable` for the corresponding `geocode.city`. If found, it will inject these *Mairie-defined* custom instructions into the OpenAI context, falling back to the default global prompt otherwise.
+
+> [!IMPORTANT]
+> User Review: Please confirm the approach of binding Documents and Prompts strictly to the `city` text matching the Geocoder. It's the most robust way to decouple the citizen who submits a file from the Mairie who configures the local urban rules!

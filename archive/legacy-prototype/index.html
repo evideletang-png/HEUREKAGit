@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HEUREKA - Analyse de potentiel foncier</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+          colors: {
+            primary: '#0a192f',
+            accent: '#3b82f6',
+            lightbg: '#f8fafc',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="font-sans text-gray-900 bg-white">
+
+  <!-- Navbar -->
+  <nav class="fixed top-0 w-full bg-white/80 backdrop-blur-md z-50 border-b border-gray-100">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center h-20">
+        <!-- Logo -->
+        <a href="index.html" class="flex items-center gap-2 group">
+          <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center group-hover:bg-accent transition-colors">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1v1H9V7zm5 0h1v1h-1V7zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1z"></path>
+            </svg>
+          </div>
+          <span class="font-bold text-xl tracking-tight text-primary">HEUREKA</span>
+        </a>
+        
+        <!-- Links -->
+        <div class="hidden md:flex items-center space-x-8">
+          <a href="login.html" class="text-gray-600 hover:text-primary font-medium transition-colors">Se connecter</a>
+          <a href="register.html" class="bg-primary text-white px-6 py-2.5 rounded-lg font-medium hover-lift transition-colors">Essai gratuit</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <main class="relative pt-32 pb-24 lg:pt-48 lg:pb-32 overflow-hidden bg-blueprint">
+    <!-- Gradient Overlay -->
+    <div class="absolute inset-0 bg-gradient-to-b from-white w-full from-10% to-white/70 to-90%"></div>
+    
+    <div class="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center fade-in-up">
+      <!-- Badge -->
+      <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 border border-blue-100 text-blue-600 text-sm font-medium mb-8">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+        </svg>
+        Nouveau : Analyse IA des PLU
+      </div>
+      
+      <!-- Heading -->
+      <h1 class="text-5xl md:text-7xl font-extrabold text-primary tracking-tight leading-tight mb-8">
+        Analysez le potentiel foncier<br/>en quelques <span class="text-accent">minutes</span>.
+      </h1>
+      
+      <!-- Subtitle -->
+      <p class="mt-4 max-w-2xl mx-auto text-xl text-gray-600 mb-10 leading-relaxed">
+        HEUREKA croise les données cadastrales, les documents d'urbanisme (PLU/PLUi) et l'intelligence artificielle pour vous délivrer une étude de constructibilité immédiate.
+      </p>
+      
+      <!-- CTA Buttons -->
+      <div class="flex flex-col sm:flex-row justify-center items-center gap-4">
+        <a href="register.html" class="w-full sm:w-auto px-8 py-4 bg-primary text-white rounded-xl font-semibold text-lg hover-lift flex items-center justify-center gap-2">
+          Démarrer l'essai gratuit
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+          </svg>
+        </a>
+        <a href="#features" class="w-full sm:w-auto px-8 py-4 bg-transparent text-primary rounded-xl font-semibold text-lg border-2 border-primary hover:bg-gray-50 transition-colors">
+          Comment ça marche
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Features Section -->
+  <section id="features" class="py-24 bg-white relative">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold text-primary mb-4">Une analyse complète, automatisée</h2>
+        <p class="text-xl text-gray-500">De l'adresse au rapport final, HEUREKA s'occupe de tout le processus</p>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <!-- Feature 1 -->
+        <div class="bg-gray-50 rounded-2xl p-8 border border-gray-100 hover:shadow-xl transition-all duration-300">
+          <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-accent mb-6">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-primary mb-3">Identification Parcellaire</h3>
+          <p class="text-gray-600">Recherche d'adresse et récupération immédiate de la géométrie cadastrale avec ses dimensions.</p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="bg-gray-50 rounded-2xl p-8 border border-gray-100 hover:shadow-xl transition-all duration-300">
+          <div class="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 mb-6">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-primary mb-3">Extraction PLU par IA</h3>
+          <p class="text-gray-600">Lecture et analyse automatique des documents d'urbanisme complexes en quelques secondes.</p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="bg-gray-50 rounded-2xl p-8 border border-gray-100 hover:shadow-xl transition-all duration-300">
+          <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center text-green-600 mb-6">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-primary mb-3">Calcul de Constructibilité</h3>
+          <p class="text-gray-600">Calcul automatisé de l'emprise au sol, hauteur maximale, et surface de plancher estimée.</p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="bg-gray-50 rounded-2xl p-8 border border-gray-100 hover:shadow-xl transition-all duration-300">
+          <div class="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600 mb-6">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path></svg>
+          </div>
+          <h3 class="text-xl font-bold text-primary mb-3">Rapport PDF Premium</h3>
+          <p class="text-gray-600">Génération d'un dossier sourcé et professionnel, prêt à être partagé avec vos clients.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Target Audience Section -->
+  <section class="py-24 bg-lightbg relative overflow-hidden">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col lg:flex-row items-center gap-16">
+        <div class="lg:w-1/2">
+          <h2 class="text-4xl font-bold text-primary mb-6">Pensé pour les professionnels de l'immobilier.</h2>
+          <p class="text-lg text-gray-600 mb-8 leading-relaxed">Que vous cherchiez de nouvelles opportunités de promotion ou que vous deviez valider la faisabilité d'un projet, HEUREKA vous donne un avantage décisif sur le marché.</p>
+          <ul class="space-y-4">
+            <li class="flex items-center gap-3">
+              <div class="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>
+              <span class="text-gray-800 font-medium">Promoteurs Immobiliers</span>
+            </li>
+            <li class="flex items-center gap-3">
+              <div class="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>
+              <span class="text-gray-800 font-medium">Architectes & Urbanistes</span>
+            </li>
+            <li class="flex items-center gap-3">
+              <div class="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>
+              <span class="text-gray-800 font-medium">Marchands de biens & Investisseurs</span>
+            </li>
+          </ul>
+        </div>
+        <div class="lg:w-1/2 relative w-full">
+          <!-- Example Card visual to represent the target audience section right side -->
+          <div class="bg-white rounded-2xl shadow-xl p-8 border border-gray-100 w-full hover:-translate-y-2 transition-transform duration-500 relative z-10">
+            <div class="flex items-center justify-between mb-6 border-b pb-4">
+              <div>
+                <p class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Analyse Foncier #8492</p>
+                <h4 class="text-2xl font-bold text-primary">Parcelle A-124</h4>
+              </div>
+              <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-bold border border-green-200">Score IA: 92%</span>
+            </div>
+            <div class="space-y-4">
+              <div class="flex justify-between items-center py-2">
+                <span class="text-gray-600">Surface Cadastrale</span>
+                <span class="font-bold text-gray-900">845 m²</span>
+              </div>
+              <div class="flex justify-between items-center py-2">
+                <span class="text-gray-600">Zone PLU</span>
+                <span class="font-bold text-blue-600">Ua (Urbaine)</span>
+              </div>
+              <div class="flex justify-between items-center py-2">
+                <span class="text-gray-600">Emprise au sol max.</span>
+                <span class="font-bold text-gray-900">40% (338 m²)</span>
+              </div>
+            </div>
+          </div>
+          <!-- Decorative element behind the card -->
+          <div class="absolute inset-0 bg-blue-500/10 rounded-3xl transform translate-x-6 translate-y-6 -z-10"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-gray-200 py-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center">
+      <div class="flex items-center gap-2 group mb-6">
+        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1v1H9V7zm5 0h1v1h-1V7zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1zm-5 4h1v1H9v-1zm5 0h1v1h-1v-1z"></path></svg>
+        </div>
+        <span class="font-bold text-lg text-primary">HEUREKA</span>
+      </div>
+      <p class="text-gray-500 text-sm">© 2026 HEUREKA SaaS. Tous droits réservés.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
