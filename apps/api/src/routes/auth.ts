@@ -102,6 +102,8 @@ router.get("/me", authenticate, async (req: AuthRequest, res) => {
   try {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     if (!user) {
+      // Token references a user that no longer exists — clear the cookie so the browser doesn't loop
+      res.clearCookie("heureka_token");
       res.status(401).json({ error: "UNAUTHORIZED", message: "Utilisateur non trouvé." });
       return;
     }
