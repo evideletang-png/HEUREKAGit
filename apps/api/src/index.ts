@@ -1,8 +1,6 @@
 import app from "./app";
 import { seedDefaultPrompts } from "./services/promptLoader.js";
 
-// Bypass SSL for GPU API (official government certificates issues with Node.js fetch)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 const rawPort = process.env["PORT"];
 
