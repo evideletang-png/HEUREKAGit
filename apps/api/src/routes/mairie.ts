@@ -1129,18 +1129,19 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
         // 5. Download the PDF via curl (adding -L to follow redirects)
         const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const destPath = path.join(uploadDir, safeFilename);
+        let downloadOk = false;
         try {
           const curlDownload = `curl -s -L -k --max-time 60 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -o "${destPath}" "${file.url}"`;
           execSync(curlDownload, { timeout: 65000 });
           const size = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
-          if (size > 5000) { // Increased threshold to avoid capturing tiny HTML redirect pages
-            logger.debug("[GPU] Downloaded file", { file: safeFilename });
+          if (size > 5000) {
+            downloadOk = true;
+            logger.debug("[GPU] Downloaded file", { file: safeFilename, bytes: size });
           } else {
-            logger.warn("[GPU] Download suspicious", { bytes: size, file: safeFilename });
+            logger.warn("[GPU] Download suspicious — file too small, skipping text extraction", { bytes: size, file: safeFilename });
           }
         } catch (downloadErr: any) {
           logger.error("[GPU] Download failed", downloadErr, { file: file.name });
-          // Continue anyway — we still catalog the document
         }
 
         // 6. Smart Classification for Frontend (matching KB_STRUCTURE in portail-mairie.tsx)
@@ -1169,7 +1170,25 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
           documentType = "Monuments historiques";
         }
 
-        // 7. Upsert into DB (skip if already exists for THIS user by filename+commune)
+        // 6b. Extract text from the downloaded file
+        let rawText = "";
+        if (downloadOk && fs.existsSync(destPath)) {
+          try {
+            rawText = await extractTextFromFile(destPath, "application/pdf");
+            logger.debug("[GPU] Text extracted", { file: safeFilename, chars: rawText.length });
+          } catch (textErr) {
+            logger.warn("[GPU] Text extraction failed", { file: safeFilename, err: textErr });
+          }
+        }
+
+        // 6c. File hash for dedup
+        let fileHash = "";
+        try {
+          const buf = fs.readFileSync(destPath);
+          fileHash = createHash("sha256").update(buf).digest("hex");
+        } catch {}
+
+        // 7. Upsert into townHallDocumentsTable (dedup by fileName + commune)
         const existing = await db.select({ id: townHallDocumentsTable.id })
           .from(townHallDocumentsTable)
           .where(and(
@@ -1180,24 +1199,138 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
           .limit(1);
 
         if (existing.length > 0) {
-          logger.debug("[GPU] Already in DB, skipping", { file: safeFilename });
+          logger.debug("[GPU] Already in townHallDocuments, skipping", { file: safeFilename });
           continue;
         }
 
-        await db.insert(townHallDocumentsTable).values({
+        const [insertedDoc] = await db.insert(townHallDocumentsTable).values({
           userId: req.user!.userId,
           commune: commune,
           title: file.name,
           fileName: safeFilename,
-          rawText: "",
-          category: category,
-          subCategory: subCategory,
-          documentType: documentType,
+          rawText,
+          category,
+          subCategory,
+          documentType,
           explanatoryNote: note,
-          tags: [], 
+          tags: [],
           isRegulatory: true,
-          isOpposable: true
-        });
+          isOpposable: true,
+        }).returning();
+
+        // 8. Register in baseIADocumentsTable and embed into base_ia_embeddings
+        //    All document types are registered — graphical/map files get a synthetic
+        //    description so the context builder can find and reference them.
+        if (insee) {
+          try {
+            // Determine document_type for Base IA metadata
+            let baseIADocType: "plu_reglement" | "oap" | "plu_annexe" | "other" = "other";
+            if (documentType === "Written regulation") baseIADocType = "plu_reglement";
+            else if (documentType === "OAP" || documentType === "PADD") baseIADocType = "oap";
+            else if (category === "ANNEXES") baseIADocType = "plu_annexe";
+
+            const isMapOrGraphic = documentType === "Zoning map" ||
+              safeFilename.toLowerCase().includes("graphique") ||
+              safeFilename.toLowerCase().includes("zonage") ||
+              safeFilename.toLowerCase().includes("carte");
+
+            const sourceAuthority =
+              baseIADocType === "plu_reglement" ? 9 :
+              baseIADocType === "oap"           ? 8 :
+              isMapOrGraphic                    ? 7 :   // Maps: high authority as spatial reference
+              baseIADocType === "plu_annexe"    ? 6 : 5;
+
+            const poolId = `${insee}-PLU-ACTIVE`;
+
+            // Check if already indexed in Base IA (by file hash)
+            const existingBaseIA = fileHash
+              ? await db.select({ id: baseIADocumentsTable.id })
+                  .from(baseIADocumentsTable)
+                  .where(eq(baseIADocumentsTable.fileHash, fileHash))
+                  .limit(1)
+              : [];
+
+            if (existingBaseIA.length === 0) {
+              // For graphical/map files with no extractable text: create a synthetic
+              // description chunk so the AI knows the document exists and can reference it.
+              let ingestText = rawText;
+              if (rawText.length < 200 && downloadOk) {
+                if (isMapOrGraphic) {
+                  ingestText = [
+                    `[Document graphique — Plan de zonage PLU]`,
+                    `Commune : ${commune} (INSEE: ${insee})`,
+                    `Fichier : ${file.name}`,
+                    `Type : ${documentType || "Plan graphique"}`,
+                    req.query.zone ? `Zone : ${req.query.zone}` : "",
+                    `Statut : Document opposable — Source officielle GPU`,
+                    note ? `Description : ${note}` : "",
+                    `Ce document est le plan graphique de zonage de la commune. Il délimite les zones (U, AU, N, A) et leurs sous-zones. Se référer au règlement écrit pour les règles applicables par zone.`,
+                  ].filter(Boolean).join("\n");
+                } else {
+                  // Non-graphic PDF with very little text — attempt Vision extraction
+                  try {
+                    const visionResult = await VisionService.extractTextFromPDF(destPath, 3);
+                    if (visionResult && visionResult.length > 100) {
+                      ingestText = visionResult;
+                      logger.info("[GPU] Vision extraction succeeded for low-text PDF", { file: safeFilename, chars: ingestText.length });
+                    }
+                  } catch (visionErr) {
+                    logger.warn("[GPU] Vision extraction failed for low-text PDF", { file: safeFilename });
+                  }
+                }
+              }
+
+              if (ingestText.length > 50) {
+                const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+                  municipalityId: insee,
+                  zoneCode: req.query.zone as string || null,
+                  category: "REGULATORY",
+                  subCategory: isMapOrGraphic ? "PLANS" : "PLU",
+                  type: baseIADocType === "plu_reglement" || baseIADocType === "plu_annexe" ? "plu" :
+                        baseIADocType === "oap" ? "oap" : "other",
+                  fileName: safeFilename,
+                  fileHash: fileHash || null,
+                  status: "parsing",
+                  rawText: ingestText,
+                }).returning();
+
+                await processDocumentForRAG(baseIADoc.id, insee, ingestText, {
+                  document_type: isMapOrGraphic ? "plu_annexe" : baseIADocType,
+                  pool_id: poolId,
+                  status: "active",
+                  commune: commune,
+                  zone: req.query.zone as string || undefined,
+                  source_authority: sourceAuthority,
+                } as any);
+
+                await db.update(baseIADocumentsTable)
+                  .set({ status: "indexed" })
+                  .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+
+                // Also update townHallDocuments with the text we have
+                if (ingestText !== rawText && insertedDoc) {
+                  await db.update(townHallDocumentsTable)
+                    .set({ rawText: ingestText })
+                    .where(eq(townHallDocumentsTable.id, insertedDoc.id));
+                }
+
+                logger.info("[GPU] ✅ Indexed into Base IA", {
+                  file: safeFilename, pool: poolId,
+                  type: isMapOrGraphic ? "map/graphic" : baseIADocType,
+                  chars: ingestText.length,
+                });
+              } else {
+                logger.warn("[GPU] Skipping embed — no usable text even after fallbacks", { file: safeFilename });
+              }
+            } else {
+              logger.debug("[GPU] Already in Base IA (hash match), skipping embed", { file: safeFilename });
+            }
+          } catch (ragErr) {
+            logger.error("[GPU] Base IA ingestion failed", ragErr, { file: safeFilename });
+            // Don't abort — townHallDocuments record already saved
+          }
+        }
+
         count++;
         results.push({ name: file.title || file.name, fileName: safeFilename });
       }
