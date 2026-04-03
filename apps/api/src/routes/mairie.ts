@@ -1645,4 +1645,261 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
   }
 });
 
+// ─── BASE IA BACKFILL & COVERAGE ─────────────────────────────────────────────
+
+/**
+ * POST /gpu/reindex?commune=xxx
+ * Backfills all existing town_hall_documents records that have no Base IA
+ * embeddings yet (rawText empty or never indexed). Runs in background.
+ * Accepts optional ?commune= to scope to a single commune.
+ */
+router.post("/gpu/reindex", async (req: AuthRequest, res) => {
+  try {
+    const commune = (req.query.commune as string || "").trim() || null;
+
+    // Resolve to a set of commune values to query by
+    const whereClause = commune
+      ? or(
+          eq(townHallDocumentsTable.commune, commune),
+          eq(sql`lower(${townHallDocumentsTable.commune})`, commune.toLowerCase())
+        )
+      : undefined;
+
+    const docs = await db.select({
+      id: townHallDocumentsTable.id,
+      commune: townHallDocumentsTable.commune,
+      fileName: townHallDocumentsTable.fileName,
+      rawText: townHallDocumentsTable.rawText,
+      documentType: townHallDocumentsTable.documentType,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+      isRegulatory: townHallDocumentsTable.isRegulatory,
+    }).from(townHallDocumentsTable)
+      .where(whereClause);
+
+    res.json({
+      message: `Reindex démarré en arrière-plan pour ${docs.length} documents.`,
+      total: docs.length,
+      commune: commune || "toutes",
+    });
+
+    setImmediate(() => { (async () => {
+      let indexed = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      for (const doc of docs) {
+        try {
+          if (!doc.commune) { skipped++; continue; }
+
+          // Resolve INSEE for this commune
+          let insee: string | null = null;
+          if (/^\d{5}$/.test(doc.commune)) {
+            insee = doc.commune;
+          } else {
+            const [settings] = await db.select({ inseeCode: municipalitySettingsTable.inseeCode })
+              .from(municipalitySettingsTable)
+              .where(or(
+                eq(municipalitySettingsTable.commune, doc.commune),
+                eq(sql`lower(${municipalitySettingsTable.commune})`, doc.commune.toLowerCase())
+              )).limit(1);
+            if (settings?.inseeCode) {
+              insee = settings.inseeCode;
+            } else {
+              // Geocoding fallback
+              const geo = await geocodeAddress(doc.commune, "municipality");
+              if (geo.length > 0) insee = geo[0].inseeCode || null;
+            }
+          }
+
+          if (!insee) {
+            logger.warn("[Reindex] Could not resolve INSEE for commune, skipping", { commune: doc.commune, docId: doc.id });
+            skipped++;
+            continue;
+          }
+
+          // Check if already indexed in Base IA
+          const alreadyIndexed = await db.select({ id: baseIADocumentsTable.id })
+            .from(baseIADocumentsTable)
+            .where(
+              // Match by fileName + municipalityId (no hash available for legacy records)
+              and(
+                eq(baseIADocumentsTable.municipalityId, insee),
+                eq(baseIADocumentsTable.fileName, doc.fileName || "")
+              )
+            ).limit(1);
+
+          if (alreadyIndexed.length > 0) {
+            skipped++;
+            continue;
+          }
+
+          // Get or re-extract raw text
+          let rawText = doc.rawText || "";
+          if (rawText.length < 100) {
+            const uploadDir = path.resolve(process.cwd(), "uploads");
+            const filePath = path.join(uploadDir, doc.fileName || "");
+            if (fs.existsSync(filePath)) {
+              try {
+                rawText = await extractTextFromFile(filePath, "application/pdf");
+                // Persist back to townHallDocuments
+                if (rawText.length > 0) {
+                  await db.update(townHallDocumentsTable)
+                    .set({ rawText })
+                    .where(eq(townHallDocumentsTable.id, doc.id));
+                }
+              } catch (e) {
+                logger.warn("[Reindex] Text extraction failed", { file: doc.fileName });
+              }
+            }
+          }
+
+          // Determine type metadata
+          const isMapOrGraphic = (doc.documentType || "").toLowerCase().includes("zoning") ||
+            (doc.fileName || "").toLowerCase().includes("graphique") ||
+            (doc.fileName || "").toLowerCase().includes("zonage");
+
+          let baseIADocType: "plu_reglement" | "oap" | "plu_annexe" | "other" = "other";
+          if ((doc.documentType || "").toLowerCase().includes("regulation") ||
+              (doc.documentType || "").toLowerCase().includes("reglement")) baseIADocType = "plu_reglement";
+          else if ((doc.documentType || "").toLowerCase().includes("oap") ||
+                   (doc.documentType || "").toLowerCase().includes("padd")) baseIADocType = "oap";
+          else if (doc.category === "ANNEXES") baseIADocType = "plu_annexe";
+
+          // Synthetic description for maps with no text
+          let ingestText = rawText;
+          if (rawText.length < 100 && isMapOrGraphic) {
+            ingestText = [
+              `[Document graphique — Plan de zonage PLU]`,
+              `Commune : ${doc.commune} (INSEE: ${insee})`,
+              `Fichier : ${doc.fileName}`,
+              `Type : ${doc.documentType || "Plan graphique"}`,
+              `Statut : Document opposable — Source officielle`,
+            ].join("\n");
+          }
+
+          if (ingestText.length < 50) { skipped++; continue; }
+
+          const sourceAuthority =
+            baseIADocType === "plu_reglement" ? 9 :
+            baseIADocType === "oap"           ? 8 :
+            isMapOrGraphic                    ? 7 :
+            baseIADocType === "plu_annexe"    ? 6 : 5;
+
+          const poolId = `${insee}-PLU-ACTIVE`;
+
+          const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+            municipalityId: insee,
+            category: "REGULATORY",
+            subCategory: isMapOrGraphic ? "PLANS" : "PLU",
+            type: baseIADocType === "plu_reglement" || baseIADocType === "plu_annexe" ? "plu" :
+                  baseIADocType === "oap" ? "oap" : "other",
+            fileName: doc.fileName || "",
+            status: "parsing",
+            rawText: ingestText,
+          }).returning();
+
+          await processDocumentForRAG(baseIADoc.id, insee, ingestText, {
+            document_type: isMapOrGraphic ? "plu_annexe" : baseIADocType,
+            pool_id: poolId,
+            status: "active",
+            commune: doc.commune,
+            source_authority: sourceAuthority,
+          } as any);
+
+          await db.update(baseIADocumentsTable)
+            .set({ status: "indexed" })
+            .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+
+          indexed++;
+          logger.info("[Reindex] ✅ Indexed", { docId: doc.id, file: doc.fileName, pool: poolId });
+        } catch (e) {
+          failed++;
+          logger.error("[Reindex] Failed to index doc", e, { docId: doc.id });
+        }
+      }
+
+      logger.info("[Reindex] Complete", { indexed, skipped, failed, total: docs.length });
+    })().catch((e: any) => logger.error("[Reindex] Unhandled rejection", e)); });
+
+    return;
+  } catch (err) {
+    logger.error("[mairie/gpu/reindex]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+/**
+ * GET /base-ia/coverage?commune=xxx
+ * Returns chunk counts per zone for a commune so you can verify
+ * the Base IA has enough content before running an analysis.
+ */
+router.get("/base-ia/coverage", async (req: AuthRequest, res) => {
+  try {
+    const commune = (req.query.commune as string || "").trim();
+    if (!commune) return res.status(400).json({ error: "commune requis" });
+
+    // Resolve INSEE
+    let insee: string | null = /^\d{5}$/.test(commune) ? commune : null;
+    if (!insee) {
+      const [settings] = await db.select({ inseeCode: municipalitySettingsTable.inseeCode })
+        .from(municipalitySettingsTable)
+        .where(or(
+          eq(municipalitySettingsTable.commune, commune),
+          eq(sql`lower(${municipalitySettingsTable.commune})`, commune.toLowerCase())
+        )).limit(1);
+      insee = settings?.inseeCode || null;
+    }
+    if (!insee) {
+      const geo = await geocodeAddress(commune, "municipality");
+      if (geo.length > 0) insee = geo[0].inseeCode || null;
+    }
+
+    if (!insee) {
+      return res.status(400).json({ error: "COMMUNE_NOT_RESOLVED", message: `Impossible de résoudre le code INSEE pour '${commune}'.` });
+    }
+
+    // Count Base IA documents and embeddings
+    const docs = await db.select({
+      id: baseIADocumentsTable.id,
+      fileName: baseIADocumentsTable.fileName,
+      type: baseIADocumentsTable.type,
+      status: baseIADocumentsTable.status,
+      zoneCode: baseIADocumentsTable.zoneCode,
+    }).from(baseIADocumentsTable)
+      .where(eq(baseIADocumentsTable.municipalityId, insee));
+
+    // Count embeddings per zone from base_ia_embeddings
+    const embeddingRows = await db.execute(
+      sql`SELECT metadata->>'zone' AS zone, COUNT(*) AS chunk_count
+          FROM base_ia_embeddings
+          WHERE municipality_id = ${insee}
+          GROUP BY metadata->>'zone'
+          ORDER BY chunk_count DESC`
+    );
+
+    const totalChunks = (embeddingRows.rows as any[]).reduce((sum, r) => sum + Number(r.chunk_count), 0);
+    const indexed = docs.filter(d => d.status === "indexed").length;
+    const failed  = docs.filter(d => d.status === "failed" || d.status === "vectorization_failed").length;
+
+    return res.json({
+      commune,
+      insee,
+      documents: { total: docs.length, indexed, failed },
+      embeddings: {
+        totalChunks,
+        byZone: (embeddingRows.rows as any[]).map(r => ({
+          zone: r.zone || "(global)",
+          chunks: Number(r.chunk_count),
+        })),
+      },
+      ready: totalChunks > 0,
+      documentList: docs,
+    });
+  } catch (err) {
+    logger.error("[mairie/base-ia/coverage]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 export default router;
