@@ -54,7 +54,15 @@ export class GPUProviderService {
         console.warn(`[GPU] Got HTML instead of JSON for: ${url} — likely WAF block`);
         return null;
       }
-      return JSON.parse(stdout);
+      const parsed = JSON.parse(stdout);
+      // Log response shape to help diagnose format issues
+      const shape = Array.isArray(parsed)
+        ? `array[${parsed.length}]`
+        : (typeof parsed === "object" && parsed !== null)
+          ? `object{${Object.keys(parsed).join(",")}}`
+          : typeof parsed;
+      console.log(`[GPU] Response shape for ${url}: ${shape} — raw preview: ${stdout.slice(0, 300)}`);
+      return parsed;
     } catch (e: any) {
       console.error(`[GPU] curlFetch failed for ${url}: ${e.message}`);
       return null;
