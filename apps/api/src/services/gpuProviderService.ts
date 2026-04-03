@@ -2,6 +2,12 @@ import { execSync } from "child_process";
 
 /**
  * Service d'interfaçage avec le Géoportail de l'Urbanisme (GPU)
+ *
+ * PRIMARY METHOD: INSPIRE ATOM feed
+ *   https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml?partition=DU_{inseeCode}
+ *   Returns an XML feed with direct PDF download links — no WAF issues.
+ *
+ * FALLBACK: REST JSON API (various endpoint variants)
  */
 
 export interface GPUDocument {
@@ -12,217 +18,202 @@ export interface GPUDocument {
   legalStatus: string;
   publicationDate?: string;
   originalName: string;
-  files?: any[];
+  files?: GPUFile[];
 }
 
 export interface GPUFile {
-  name: string;     // filename, e.g. "37203_reglement_20191125.pdf"
-  title: string;    // human label, e.g. "Règlement écrit"
-  path?: string;    // category path, e.g. "Règlements"
-  url: string;      // constructed download URL
+  name: string;
+  title: string;
+  path?: string;
+  url: string;
 }
 
-/**
- * Service d'interfaçage avec le Géoportail de l'Urbanisme (GPU)
- * Permet l'auto-ingestion des documents d'urbanisme officiels.
- *
- * IMPORTANT DISCOVERY (2025-03-30):
- * - The GPU /api/document/by-municipality/{inseeCode} endpoint is BLOCKED by WAF for automated requests.
- * - The /api/document?grid=... endpoint WORKS and returns document IDs.
- * - The /api/document/{docId}/files endpoint WORKS and returns {name, title, path} objects.
- * - Files do NOT have an 'id' field. Download URLs use the filename directly.
- * - CORRECT Download URL: /api/document/{docId}/files/{filename}  → 302 redirect to data.geopf.fr → real PDF
- * - WRONG formats: /document/telecharger?documentary=..., /api/document/{id}/download/{file} → 404
- */
 export class GPUProviderService {
   private static BASE_URL = "https://www.geoportail-urbanisme.gouv.fr/api";
+  private static ATOM_BASE = "https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml";
 
-  /**
-   * Simple curl fetch — the ONLY method that bypasses GPU's WAF.
-   * Node.js fetch / node-fetch / axios all get blocked.
-   */
-  private static curlFetch(url: string): any {
+  // Cache ATOM-derived files so getFilesByDocumentId() works unchanged
+  private static atomFilesCache: Map<string, GPUFile[]> = new Map();
+
+  private static curl(url: string, acceptXml = false): string | null {
     try {
-      const command = `curl -s -L -k --max-time 30 -H "Accept: application/json" -H "Accept-Language: fr-FR,fr;q=0.9" -H "Referer: https://www.geoportail-urbanisme.gouv.fr/" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
+      const accept = acceptXml ? "application/xml,text/xml,*/*" : "application/json";
+      const command = [
+        "curl", "-s", "-L", "-k", "--max-time", "30",
+        "-H", `"Accept: ${accept}"`,
+        "-H", '"Accept-Language: fr-FR,fr;q=0.9"',
+        "-H", '"Referer: https://www.geoportail-urbanisme.gouv.fr/"',
+        "-A", '"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"',
+        `"${url}"`,
+      ].join(" ");
       const stdout = execSync(command, { maxBuffer: 10 * 1024 * 1024 }).toString().trim();
-
-      if (!stdout) {
-        console.warn(`[GPU] Empty response for: ${url}`);
-        return null;
-      }
-      if (stdout.startsWith("<!") || stdout.startsWith("<html")) {
-        console.warn(`[GPU] Got HTML instead of JSON for: ${url} — likely WAF block`);
-        return null;
-      }
-      const parsed = JSON.parse(stdout);
-      // Log response shape to help diagnose format issues
-      const shape = Array.isArray(parsed)
-        ? `array[${parsed.length}]`
-        : (typeof parsed === "object" && parsed !== null)
-          ? `object{${Object.keys(parsed).join(",")}}`
-          : typeof parsed;
-      console.log(`[GPU] Response shape for ${url}: ${shape} — raw preview: ${stdout.slice(0, 300)}`);
-      return parsed;
+      if (!stdout) { console.warn(`[GPU] Empty response: ${url}`); return null; }
+      return stdout;
     } catch (e: any) {
-      console.error(`[GPU] curlFetch failed for ${url}: ${e.message}`);
+      console.error(`[GPU] curl failed for ${url}: ${e.message}`);
       return null;
     }
   }
 
-  /** Extract a docs array from any known GPU response shape */
+  // ─── ATOM feed parser ───────────────────────────────────────────────────────
+
+  private static parseAtomEntries(xml: string): GPUFile[] {
+    const files: GPUFile[] = [];
+    // Match <entry>...</entry> blocks (handles multiline, namespaced tags)
+    const entryRe = /<(?:\w+:)?entry[^>]*>([\s\S]*?)<\/(?:\w+:)?entry>/gi;
+    let m: RegExpExecArray | null;
+
+    while ((m = entryRe.exec(xml)) !== null) {
+      const block = m[1];
+
+      // title — handles CDATA and plain text
+      const titleMatch = block.match(/<(?:\w+:)?title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:\w+:)?title>/i);
+      const title = titleMatch ? titleMatch[1].replace(/&amp;/g, "&").trim() : "";
+
+      // link href — <link href="..." ...> or <link rel="..." href="...">
+      const linkMatch = block.match(/<(?:\w+:)?link[^>]+href=["']([^"']+)["'][^>]*\/?>/i);
+      const href = linkMatch ? linkMatch[1].trim() : "";
+
+      if (!href) continue;
+
+      // Derive filename from URL path
+      const urlPath = href.split("?")[0];
+      const name = decodeURIComponent(urlPath.split("/").pop() || title || href);
+
+      files.push({ name, title: title || name, url: href });
+    }
+
+    return files;
+  }
+
+  // ─── Public API ─────────────────────────────────────────────────────────────
+
+  static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
+    // 1. Try INSPIRE ATOM feed (primary — no WAF, direct PDFs)
+    const atomUrl = `${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`;
+    console.log(`[GPU] Trying ATOM feed: ${atomUrl}`);
+    const xml = GPUProviderService.curl(atomUrl, true);
+
+    if (xml && !xml.startsWith("{") && !xml.startsWith("<html") && !xml.startsWith("<!")) {
+      const files = GPUProviderService.parseAtomEntries(xml);
+      console.log(`[GPU] ATOM feed returned ${files.length} entries for INSEE ${inseeCode}`);
+      if (files.length > 0) {
+        const syntheticId = `atom-${inseeCode}`;
+        GPUProviderService.atomFilesCache.set(syntheticId, files);
+        return [{
+          id: syntheticId,
+          name: `PLU ${inseeCode}`,
+          type: "PLU",
+          status: "production",
+          legalStatus: "opposable",
+          originalName: `Documents d'urbanisme — ${inseeCode}`,
+        }];
+      }
+      // Log first 500 chars of the ATOM response for diagnosis
+      console.warn(`[GPU] ATOM feed returned 0 entries. Raw: ${xml.slice(0, 500)}`);
+    }
+
+    // 2. REST JSON fallback (multiple parameter variants)
+    const jsonUrls = [
+      `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
+      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
+      `${GPUProviderService.BASE_URL}/document/by-municipality/${inseeCode}`,
+    ];
+
+    for (const url of jsonUrls) {
+      console.log(`[GPU] Trying REST fallback: ${url}`);
+      const raw = GPUProviderService.curl(url, false);
+      if (!raw || raw.startsWith("<!") || raw.startsWith("<html")) continue;
+      try {
+        const data = JSON.parse(raw);
+        const docs = GPUProviderService.extractDocs(data);
+        if (docs.length > 0) {
+          console.log(`[GPU] ✅ REST fallback returned ${docs.length} docs via ${url}`);
+          return docs as GPUDocument[];
+        }
+        console.warn(`[GPU] REST 0 docs at ${url} — shape: ${raw.slice(0, 200)}`);
+      } catch {
+        console.warn(`[GPU] Non-JSON response at ${url}: ${raw.slice(0, 200)}`);
+      }
+    }
+
+    console.warn(`[GPU] No documents found for INSEE ${inseeCode} from ATOM or REST`);
+    return [];
+  }
+
+  static async getFilesByDocumentId(documentId: string): Promise<GPUFile[]> {
+    // Return ATOM-cached files if this is an ATOM synthetic document
+    if (GPUProviderService.atomFilesCache.has(documentId)) {
+      const files = GPUProviderService.atomFilesCache.get(documentId)!;
+      console.log(`[GPU] Returning ${files.length} ATOM-cached files for ${documentId}`);
+      return files;
+    }
+
+    // REST fallback for real document IDs
+    const url = `${GPUProviderService.BASE_URL}/document/${documentId}/files`;
+    console.log(`[GPU] Fetching REST file list for ${documentId}`);
+    const raw = GPUProviderService.curl(url, false);
+    if (!raw) return [];
+
+    try {
+      const data = JSON.parse(raw);
+      const files: any[] = Array.isArray(data) ? data
+        : Array.isArray(data?.content) ? data.content
+        : Array.isArray(data?.items) ? data.items
+        : [];
+
+      if (files.length === 0) {
+        console.warn(`[GPU] No files for document ${documentId}: ${raw.slice(0, 100)}`);
+        return [];
+      }
+
+      return files.map((f: any) => ({
+        name: f.name,
+        title: f.title || f.name,
+        path: f.path || "",
+        url: `${GPUProviderService.BASE_URL}/document/${documentId}/files/${encodeURIComponent(f.name)}`
+      }));
+    } catch {
+      console.warn(`[GPU] Non-JSON file list for ${documentId}: ${raw.slice(0, 100)}`);
+      return [];
+    }
+  }
+
+  static filterCriticalFiles(files: GPUFile[]): GPUFile[] {
+    return files;
+  }
+
+  /** Returns raw responses for each URL variant — included in sync response when 0 docs found */
+  static diagnose(inseeCode: string): Record<string, any> {
+    const urls: Record<string, boolean> = {
+      [`${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`]: true,
+      [`${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`]: false,
+      [`${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`]: false,
+    };
+    const results: Record<string, any> = {};
+    for (const [url, xml] of Object.entries(urls)) {
+      const raw = GPUProviderService.curl(url, xml);
+      results[url] = raw ? raw.slice(0, 600) : "(no response)";
+    }
+    return results;
+  }
+
   private static extractDocs(data: any): any[] {
     if (!data) return [];
     if (Array.isArray(data)) return data;
-    if (Array.isArray(data.content)) return data.content;
-    if (Array.isArray(data.items)) return data.items;
-    if (Array.isArray(data.documents)) return data.documents;
-    if (Array.isArray(data.results)) return data.results;
-    // Some endpoints wrap in a single-key object — pick the first array value
+    for (const key of ["content", "items", "documents", "results"]) {
+      if (Array.isArray(data[key])) return data[key];
+    }
     for (const v of Object.values(data)) {
       if (Array.isArray(v) && (v as any[]).length > 0) return v as any[];
     }
     return [];
   }
 
-  /**
-   * Récupère les documents pour un code INSEE.
-   * Essaie plusieurs variantes d'endpoint GPU en cas de blocage WAF.
-   */
-  static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
-    const urls = [
-      // Primary: codeMunicipalite is the canonical INSEE param on GPU
-      `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
-      // Alternate: grid-based (worked for some communes)
-      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee&active=true`,
-      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
-      // Alternate: by-municipality path (WAF sometimes allows it)
-      `${GPUProviderService.BASE_URL}/document/by-municipality/${inseeCode}`,
-      // Alternate: inseeCode query param
-      `${GPUProviderService.BASE_URL}/document?inseeCode=${inseeCode}`,
-      `${GPUProviderService.BASE_URL}/document?commune=${inseeCode}`,
-    ];
-
-    for (const url of urls) {
-      console.log(`[GPU] Trying: ${url}`);
-      const data = GPUProviderService.curlFetch(url);
-      if (!data) continue;
-
-      const docs = GPUProviderService.extractDocs(data);
-      if (docs.length > 0) {
-        console.log(`[GPU] ✅ Found ${docs.length} documents for INSEE ${inseeCode} via ${url}`);
-        return docs as GPUDocument[];
-      }
-
-      console.warn(`[GPU] 0 docs — shape: ${JSON.stringify(data).slice(0, 300)}`);
-    }
-
-    console.warn(`[GPU] No documents returned for INSEE ${inseeCode} from any endpoint`);
-    return [];
-  }
-
-  /**
-   * Récupère les documents par coordonnées GPS (fallback si INSEE ne fonctionne pas).
-   * Utilise une bbox de ~2km autour du point.
-   */
-  static async getDocumentsByCoords(lon: number, lat: number): Promise<GPUDocument[]> {
-    const delta = 0.02; // ~2km
-    const bbox = `${lon - delta},${lat - delta},${lon + delta},${lat + delta}`;
-    const urls = [
-      `${GPUProviderService.BASE_URL}/document?bbox=${bbox}`,
-      `${GPUProviderService.BASE_URL}/document?lon=${lon}&lat=${lat}`,
-    ];
-
-    for (const url of urls) {
-      console.log(`[GPU] Trying coords fallback: ${url}`);
-      const data = GPUProviderService.curlFetch(url);
-      if (!data) continue;
-      const docs = GPUProviderService.extractDocs(data);
-      if (docs.length > 0) {
-        console.log(`[GPU] ✅ Found ${docs.length} documents via coords ${lon},${lat}`);
-        return docs as GPUDocument[];
-      }
-    }
-    return [];
-  }
-
-  /**
-   * Récupère la liste des fichiers pour un document ID.
-   * Retour: [{name, title, path}] — PAS DE CHAMP 'id' !
-   * L'URL de téléchargement est construite à partir du 'name'.
-   */
-  static async getFilesByDocumentId(documentId: string): Promise<GPUFile[]> {
-    const url = `${GPUProviderService.BASE_URL}/document/${documentId}/files`;
-    console.log(`[GPU] Fetching file list for document ${documentId}...`);
-    const data = GPUProviderService.curlFetch(url);
-
-    // Handle plain array or paginated response
-    const files: any[] = Array.isArray(data) ? data
-      : Array.isArray(data?.content) ? data.content
-      : Array.isArray(data?.items) ? data.items
-      : [];
-
-    if (files.length === 0) {
-      console.warn(`[GPU] No files returned for document ${documentId}`, data ? JSON.stringify(data).slice(0, 100) : "(null)");
-      return [];
-    }
-
-    // Construct download URLs using the correct GPU API format:
-    // /api/document/{docId}/files/{filename} → 302 redirect → real PDF on data.geopf.fr
-    return files.map((f: any) => ({
-      name: f.name,
-      title: f.title || f.name,
-      path: f.path || "",
-      url: `${GPUProviderService.BASE_URL}/document/${documentId}/files/${encodeURIComponent(f.name)}`
-    }));
-  }
-
-  /**
-   * Returns raw API responses for every URL variant — used when sync returns 0 docs
-   * to expose the exact API behaviour without needing to read Railway logs.
-   */
-  static diagnose(inseeCode: string): Record<string, any> {
-    const urls = [
-      `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
-      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
-      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=municipality`,
-      `${GPUProviderService.BASE_URL}/document/by-municipality/${inseeCode}`,
-    ];
-    const results: Record<string, any> = {};
-    for (const url of urls) {
-      try {
-        const cmd = `curl -s -L -k --max-time 15 -H "Accept: application/json" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
-        const { execSync: exec } = require("child_process");
-        const raw = exec(cmd, { maxBuffer: 1024 * 1024 }).toString().trim();
-        let parsed: any;
-        try { parsed = JSON.parse(raw); } catch { parsed = raw.slice(0, 500); }
-        results[url] = {
-          type: Array.isArray(parsed) ? `array[${parsed.length}]` : (typeof parsed === "object" && parsed ? `object{${Object.keys(parsed).join(",")}}` : typeof parsed),
-          raw: typeof parsed === "string" ? parsed : JSON.stringify(parsed).slice(0, 600),
-        };
-      } catch (e: any) {
-        results[url] = { error: e.message };
-      }
-    }
-    return results;
-  }
-
-  /**
-   * Retourne tous les fichiers PDF fournis par le GPU.
-   * Suppression du filtrage restrictif pour garantir l'exhaustivité demandée par l'utilisateur.
-   */
-  static filterCriticalFiles(files: GPUFile[]): GPUFile[] {
-    console.log(`[GPU] Including all ${files.length} files as requested.`);
-    return files;
-  }
-
-  /**
-   * Génère une note explicative contextuelle basée sur le naming CNIG.
-   */
   static async generateExplanatoryNote(fileName: string, title?: string): Promise<string> {
     const name = fileName.toLowerCase();
     const t = (title || "").toLowerCase();
-
-    if (name.includes("reglement") && (name.includes("ecrit") || t.includes("écrit"))) 
+    if (name.includes("reglement") && (name.includes("ecrit") || t.includes("écrit")))
       return "Texte officiel détaillant les règles de construction, de gabarit et d'implantation par zone.";
     if (name.includes("reglement_graphique") || t.includes("graphique"))
       return "Plan graphique cartographiant les limites des zones (U, AU, N, A) de la commune.";
@@ -233,8 +224,7 @@ export class GPUProviderService {
     if (name.includes("rapport"))
       return "Rapport de présentation justifiant les choix retenus pour le PLU.";
     if (name.includes("ppri") || name.includes("risques"))
-      return "Servitude d'utilité publique relative aux risques naturels (Inondation, Mouvement de terrain).";
-
+      return "Servitude d'utilité publique relative aux risques naturels.";
     return "Document réglementaire d'urbanisme complétant la base de connaissances communale.";
   }
 }
