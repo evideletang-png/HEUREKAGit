@@ -58,7 +58,7 @@ RUN pnpm --filter "@workspace/api-server" run build
 # ── Production image ────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
-RUN apk add --no-cache pixman cairo pango libpng libjpeg-turbo poppler-utils
+RUN apk add --no-cache pixman cairo pango libpng libjpeg-turbo poppler-utils curl
 
 WORKDIR /app
 
