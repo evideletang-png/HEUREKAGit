@@ -11,6 +11,7 @@ import {
   ruleArticlesTable,
   buildabilityResultsTable,
   parcelsTable,
+  buildingsTable,
   townHallPromptsTable,
   geocodingCacheTable
 } from "@workspace/db";
@@ -345,12 +346,47 @@ export async function orchestrateDossierAnalysis(
         if (parcelData) {
           buildingData = await getBuildingsByParcel(parcelData);
           const totalFootprint = buildingData.buildings.reduce((sum: number, b: any) => sum + b.footprintM2, 0);
-          
+
           fieldCandidates["surface"] = fieldCandidates["surface"] || [];
           fieldCandidates["surface"].push({ source: "cadastre", value: parcelData.parcelSurfaceM2, confidence: 1.0 });
 
           fieldCandidates["emprise"] = fieldCandidates["emprise"] || [];
           fieldCandidates["emprise"].push({ source: "cadastre", value: totalFootprint, confidence: 0.95 });
+
+          // ── Persist parcel + buildings to DB ──────────────────────────────
+          if (analysisId) {
+            try {
+              await db.delete(parcelsTable).where(eq(parcelsTable.analysisId, analysisId));
+              await db.insert(parcelsTable).values({
+                analysisId,
+                cadastralSection: parcelData.cadastralSection ?? null,
+                parcelNumber: parcelData.parcelNumber ?? null,
+                parcelSurfaceM2: parcelData.parcelSurfaceM2 ?? null,
+                geometryJson: parcelData.geometryJson ? JSON.stringify(parcelData.geometryJson) : null,
+                centroidLat: parcelData.centroidLat ?? null,
+                centroidLng: parcelData.centroidLng ?? null,
+                roadFrontageLengthM: parcelData.roadFrontageLengthM ?? null,
+                sideBoundaryLengthM: parcelData.sideBoundaryLengthM ?? null,
+              });
+
+              if (buildingData?.buildings?.length > 0) {
+                await db.delete(buildingsTable).where(eq(buildingsTable.analysisId, analysisId));
+                await db.insert(buildingsTable).values(
+                  buildingData.buildings.map((b: any) => ({
+                    analysisId,
+                    footprintM2: b.footprintM2 ?? null,
+                    estimatedFloorAreaM2: b.estimatedFloorAreaM2 ?? null,
+                    avgHeightM: b.avgHeightM ?? null,
+                    avgFloors: b.avgFloors ?? null,
+                    geometryJson: b.geometryJson ? JSON.stringify(b.geometryJson) : null,
+                  }))
+                );
+              }
+              logger.info(`[Orchestrator] Parcel + buildings persisted for analysis ${analysisId}`);
+            } catch (persistErr) {
+              logger.warn("[Orchestrator] Could not persist parcel/buildings:", persistErr);
+            }
+          }
         }
 
         const zoningInfo = await getZoningByCoords(bestMatch.lat, bestMatch.lng, currentCommune);
