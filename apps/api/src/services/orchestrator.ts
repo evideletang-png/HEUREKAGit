@@ -455,18 +455,32 @@ export async function orchestrateDossierAnalysis(
   // 8b. PERSIST BUILDABILITY RESULTS
   if (analysisId && calculations) {
     try {
+      // TunnelResult uses snake_case keys; normalizedParams has numeric arrays
+      const maxFootprint = calculations.max_authorized_footprint_m2 ?? null;
+      const remainingFootprint = calculations.remaining_footprint_m2 ?? null;
+      const maxHeight = normalizedParams.max_height?.[0] ?? null;
+      const roadSetback = normalizedParams.road_setback?.[0] ?? null;
+      const boundarySetback = normalizedParams.boundary_setback?.[0] ?? null;
+      const parkingReq = normalizedParams.parking_requirements?.[0] ?? null;
+      const greenSpaceReq = normalizedParams.landscaping_requirements?.[0] ?? null;
+      const assumptions = [
+        ...(calculations.blocking_constraints ?? []),
+        ...(calculations.uncertainties ?? []),
+      ];
+
       const buildabilityData = {
         analysisId,
-        maxFootprintM2: calculations?.footprint?.max ?? calculations?.footprint?.authorized ?? null,
-        remainingFootprintM2: calculations?.footprint?.remaining ?? null,
-        maxHeightM: calculations?.height?.max ?? null,
-        setbackRoadM: calculations?.setbacks?.road ?? null,
-        setbackBoundaryM: calculations?.setbacks?.boundary ?? null,
-        parkingRequirement: calculations?.parking?.requirement != null ? String(calculations.parking.requirement) : null,
-        greenSpaceRequirement: calculations?.greenSpace?.requirement != null ? String(calculations.greenSpace.requirement) : null,
-        assumptionsJson: JSON.stringify(Array.isArray(calculations?.assumptions) ? calculations.assumptions : []),
-        confidenceScore: calculations?.confidence ?? 0.5,
-        resultSummary: calculations?.summary ?? `Zone ${finalZone}: emprise max ${calculations?.footprint?.max ?? "?"}m², hauteur max ${calculations?.height?.max ?? "?"}m`,
+        maxFootprintM2: maxFootprint,
+        remainingFootprintM2: remainingFootprint,
+        maxHeightM: maxHeight,
+        setbackRoadM: roadSetback,
+        setbackBoundaryM: boundarySetback,
+        parkingRequirement: parkingReq ? String(parkingReq) : null,
+        greenSpaceRequirement: greenSpaceReq ? String(greenSpaceReq) : null,
+        assumptionsJson: JSON.stringify(assumptions),
+        confidenceScore: (maxFootprint != null && maxFootprint > 0) ? 0.75 : 0.4,
+        resultSummary: calculations.theoretical_potential_synthesis
+          ?? `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m`,
       };
       const [existingBuildability] = await db.select({ id: buildabilityResultsTable.id })
         .from(buildabilityResultsTable).where(eq(buildabilityResultsTable.analysisId, analysisId)).limit(1);
@@ -608,8 +622,25 @@ export async function orchestrateDossierAnalysis(
         avg_floors: buildingData?.buildings?.[0]?.avgFloors ?? null,
         estimated_floor_area_m2: buildingData?.buildings?.reduce((s: number, b: any) => s + (b.estimatedFloorAreaM2 || 0), 0) || null,
       },
-      neighbour_context: {},
-      roads: {},
+      neighbour_context: {
+        buildings: buildingData?.buildings ?? [],
+        avg_neighbour_height_m: buildingData?.buildings?.length
+          ? buildingData.buildings.reduce((s: number, b: any) => s + (b.avgHeightM || 0), 0) / buildingData.buildings.length
+          : null,
+        urban_typology: parcelSurface > 2000 ? "pavillonnaire_diffus" : parcelSurface > 500 ? "urbain_dense" : "centre_bourg",
+        dominant_alignment: normalizedParams.road_setback?.[0] === 0 ? "alignement_obligatoire" : "retrait",
+      },
+      roads: {
+        nearest_road_name: parcelData?.metadata?.section ? `Voie cadastrale ${parcelData.metadata.section}` : null,
+        distance_to_road_m: roadFrontage > 0 ? 0 : null,
+        road_width_m: null,
+        access_possible: roadFrontage > 0,
+      },
+      topography: {
+        elevation_min: null,
+        elevation_max: null,
+        slope_percent: null,
+      },
       plu: strictPluAnalysis?.zoneRules ?? {},
       market_data: marketData ?? null,
       admin_guide: adminGuide ?? null,
