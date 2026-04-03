@@ -53,13 +53,17 @@ export class CalculationTunnel {
        uncertainties.push("Pas de règle d'emprise au sol (Art. 9) détectée ou interprétée.");
     }
 
-    const remainingFootprint = Math.max(0, maxAuthorizedFootprint - existingFootprint);
+    // Use null when no rule found — 0 is falsy in the frontend and hides the field
+    const hasFootprintRule = maxAuthorizedFootprint > 0;
+    const remainingFootprint = hasFootprintRule
+      ? Math.max(0, maxAuthorizedFootprint - existingFootprint)
+      : null;
 
     // 2. Setbacks & Heights (Summaries)
-    const roadRule = normalizedRules.road_setback.length > 0 
+    const roadRule = normalizedRules.road_setback.length > 0
       ? `Retrait minimum de ${normalizedRules.road_setback.join("/")}m par rapport à l'alignement.`
       : "Règle non spécifiée (Article 6).";
-      
+
     const boundaryRule = normalizedRules.boundary_setback.length > 0
       ? `Recul de ${normalizedRules.boundary_setback.join("/")}m par rapport aux limites séparatives.`
       : "Règle non spécifiée (Article 7).";
@@ -70,21 +74,23 @@ export class CalculationTunnel {
 
     // C. Buildable Potential Synthesis
     let synthesis = "";
-    if (maxAuthorizedFootprint > 0) {
-      synthesis = `La parcelle de ${surface}m² autorise théoriquement une emprise totale de ${maxAuthorizedFootprint}m². `;
-      synthesis += `L'emprise existante étant de ${existingFootprint}m², il reste un potentiel de ${remainingFootprint}m² constructible au sol.`;
+    if (hasFootprintRule) {
+      synthesis = `La parcelle de ${surface}m² autorise théoriquement une emprise totale de ${Math.round(maxAuthorizedFootprint)}m². `;
+      synthesis += `L'emprise existante étant de ${Math.round(existingFootprint)}m², il reste un potentiel de ${Math.round(remainingFootprint!)}m² constructible au sol.`;
+    } else if (surface > 0) {
+      synthesis = `Parcelle de ${surface}m² identifiée. Les règles d'emprise (Art. 9), hauteur (Art. 10) et reculs ne sont pas encore indexées — synchronisez le GPU depuis le portail mairie pour obtenir le calcul complet.`;
     } else {
-      synthesis = "Potentiel constructible indéterminé : Absence de règle d'emprise au sol.";
+      synthesis = "Données parcellaires insuffisantes pour calculer le potentiel constructible.";
     }
 
-    if (existingFootprint > maxAuthorizedFootprint && maxAuthorizedFootprint > 0) {
+    if (hasFootprintRule && existingFootprint > maxAuthorizedFootprint) {
       blocking.push("SUR-EMPRISE : L'emprise existante dépasse déjà le maximum réglementaire.");
     }
 
     return {
       parcel_surface_m2: surface,
       existing_footprint_m2: existingFootprint,
-      max_authorized_footprint_m2: maxAuthorizedFootprint,
+      max_authorized_footprint_m2: hasFootprintRule ? maxAuthorizedFootprint : null,
       remaining_footprint_m2: remainingFootprint,
       road_setback_rule: roadRule,
       boundary_setback_rule: boundaryRule,

@@ -841,6 +841,16 @@ export default function AnalysisDetailPage() {
                   </div>
                 )}
 
+                {(!((zoneAnalysis as any)?.articles?.length > 0)) && (
+                  <div className="flex flex-col items-center justify-center py-12 text-center bg-amber-50/60 rounded-xl border border-amber-200/60 mb-4">
+                    <AlertTriangle className="w-8 h-8 text-amber-500 mb-3" />
+                    <h4 className="font-semibold text-amber-800 mb-1">Aucun document PLU indexé</h4>
+                    <p className="text-sm text-amber-700 max-w-sm">
+                      Les articles du règlement de zone seront disponibles après la synchronisation GPU depuis le portail mairie.
+                    </p>
+                  </div>
+                )}
+
                 <Accordion type="single" collapsible className="w-full">
                   {(zoneAnalysis as any)?.articles?.map((article: any) => {
                     const extra = JSON.parse(article.structuredJson || "{}");
@@ -1064,7 +1074,9 @@ export default function AnalysisDetailPage() {
                     Bilan de l'étude
                   </h4>
                   <p className="text-primary-foreground/80 text-sm leading-relaxed">
-                    {buildability?.resultSummary || "Le calcul a permis d'estimer un droit à bâtir résiduel positif, sous réserve du respect strict des prospectives de gabarit et d'ensoleillement prévus à l'article 10."}
+                    {buildability?.resultSummary || (parcel?.parcelSurfaceM2
+                      ? `Parcelle de ${parcel.parcelSurfaceM2}m² identifiée. Synchronisez le GPU pour obtenir les règles d'emprise et de hauteur.`
+                      : "Relancez l'analyse pour calculer le potentiel constructible.")}
                   </p>
                 </CardContent>
               </Card>

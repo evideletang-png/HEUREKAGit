@@ -346,10 +346,35 @@ export async function analyzePLUZone(
           const embText = fallbackChunks.map(c => c.content).join("\n\n---\n\n");
           relevantText = relevantText.length > 0 ? `${relevantText}\n\n---\n\n${embText}` : embText;
           console.log(`[pluAnalysis/analyzePLUZone] ✅ ${fallbackChunks.length} Base IA chunks used for ${cityName} zone ${zoneCode}`);
+        } else {
+          console.warn(`[pluAnalysis/analyzePLUZone] No PLU content found for ${cityName} zone ${zoneCode} — skipping AI call`);
+          return {
+            zoneCode,
+            zoneLabel: `Zone ${zoneCode} — aucun document PLU indexé`,
+            articles: [],
+            digest: null,
+            calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
+            globalConstraints: [],
+            issues: [{ type: "NO_PLU_DATA", message: `Aucun document PLU indexé pour ${cityName}. Lancez une synchronisation GPU depuis le portail mairie.` }],
+          };
         }
       } catch (embErr) {
         console.warn("[pluAnalysis/analyzePLUZone] Embedding fallback failed:", embErr);
       }
+    }
+
+    // Guard: if still no meaningful text after all fallbacks, skip AI entirely
+    if (relevantText.trim().length < 200) {
+      console.warn(`[pluAnalysis/analyzePLUZone] relevantText too short (${relevantText.length} chars) after all fallbacks — no AI call`);
+      return {
+        zoneCode,
+        zoneLabel: `Zone ${zoneCode} — aucun document PLU indexé`,
+        articles: [],
+        digest: null,
+        calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
+        globalConstraints: [],
+        issues: [{ type: "NO_PLU_DATA", message: `Aucun document PLU indexé pour ${cityName || zoneCode}. Lancez une synchronisation GPU depuis le portail mairie.` }],
+      };
     }
 
     // 1. New Triage Pass: Generate Digest
