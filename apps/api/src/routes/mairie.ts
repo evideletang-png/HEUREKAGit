@@ -34,6 +34,7 @@ import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { geocodeAddress } from "../services/geocoding.js";
+import { recordDecision } from "../services/learningService.js";
 
 // dossierEventsTable is now imported above
 
@@ -371,16 +372,66 @@ router.post("/dossiers/:id/abf-avis", async (req: AuthRequest, res) => {
     if (user?.role !== "abf" && user?.role !== "admin") return res.status(403).json({ error: "FORBIDDEN" });
 
     await WorkflowService.transitionStatus(
-      id as string, 
-      DOSSIER_STATUS.AVIS_ABF_RECU, 
-      req.user!.userId, 
+      id as string,
+      DOSSIER_STATUS.AVIS_ABF_RECU,
+      req.user!.userId,
       `Avis ABF rendu : ${decision}. ${motivation}`,
       { decision, motivation }
     );
-    
+
+    // Feed learning loop with ABF opinion
+    const [dossier] = await db.select({ commune: dossiersTable.commune })
+      .from(dossiersTable).where(eq(dossiersTable.id, id as string)).limit(1);
+    if (dossier?.commune) {
+      recordDecision(dossier.commune, decision === "favorable", [])
+        .catch(e => logger.warn("[abf-avis] recordDecision failed:", e));
+    }
+
     return res.json({ success: true });
   } catch (err) {
     return res.status(500).json({ error: "ABF_ACTION_FAILED" });
+  }
+});
+
+// POST /dossiers/:id/decision — render a final ACCEPTE or REFUSE decision and feed the learning loop
+router.post("/dossiers/:id/decision", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { decision, motivation, rejectedCategories } = req.body as {
+      decision: "ACCEPTE" | "REFUSE";
+      motivation?: string;
+      rejectedCategories?: string[];
+    };
+
+    if (decision !== "ACCEPTE" && decision !== "REFUSE") {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "decision doit être ACCEPTE ou REFUSE." });
+    }
+
+    const [dossier] = await db.select({ commune: dossiersTable.commune, status: dossiersTable.status })
+      .from(dossiersTable).where(eq(dossiersTable.id, id as string)).limit(1);
+    if (!dossier) return res.status(404).json({ error: "NOT_FOUND" });
+
+    const newStatus = decision === "ACCEPTE" ? DOSSIER_STATUS.ACCEPTE : DOSSIER_STATUS.REFUSE;
+    await WorkflowService.transitionStatus(
+      id as string,
+      newStatus,
+      req.user!.userId,
+      motivation || `Décision rendue : ${decision}`
+    );
+
+    // Feed learning loop — non-blocking
+    if (dossier.commune) {
+      recordDecision(
+        dossier.commune,
+        decision === "ACCEPTE",
+        rejectedCategories ?? []
+      ).catch(e => logger.warn("[decision] recordDecision failed:", e));
+    }
+
+    return res.json({ success: true, status: newStatus });
+  } catch (err) {
+    logger.error("[mairie/dossiers/:id/decision]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
 
@@ -855,6 +906,43 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
     return;
   } catch (err) {
     logger.error("[mairie/documents/batch POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+// GET /documents/batch/:id — poll batch ingestion progress
+router.get("/documents/batch/:id", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const [batch] = await db.select().from(baseIABatchesTable)
+      .where(eq(baseIABatchesTable.id, id))
+      .limit(1);
+    if (!batch) return res.status(404).json({ error: "NOT_FOUND", message: "Batch introuvable." });
+
+    // Count per-document statuses
+    const docs = await db.select({
+      id: baseIADocumentsTable.id,
+      fileName: baseIADocumentsTable.fileName,
+      status: baseIADocumentsTable.status,
+      errorMessage: baseIADocumentsTable.errorMessage,
+    }).from(baseIADocumentsTable)
+      .where(eq(baseIADocumentsTable.batchId, id));
+
+    const total   = docs.length;
+    const indexed = docs.filter(d => d.status === "indexed").length;
+    const failed  = docs.filter(d => d.status === "failed" || d.status === "vectorization_failed").length;
+    const pending = total - indexed - failed;
+
+    return res.json({
+      batchId: batch.id,
+      status: batch.status,
+      createdAt: batch.createdAt,
+      updatedAt: batch.updatedAt,
+      progress: { total, indexed, failed, pending },
+      documents: docs,
+    });
+  } catch (err) {
+    logger.error("[mairie/documents/batch GET]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });

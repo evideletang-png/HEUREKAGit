@@ -449,6 +449,51 @@ export default function AnalysisDetailPage() {
         </div>
       </div>
 
+      {/* ── Analysis progress stepper ── */}
+      {(['collecting_data', 'parsing_documents', 'extracting_rules', 'calculating'] as const).includes(analysis.status as any) && (() => {
+        const STEPS: { key: string; label: string }[] = [
+          { key: 'collecting_data',    label: 'Contexte & géocodage' },
+          { key: 'parsing_documents',  label: 'Lecture des pièces' },
+          { key: 'extracting_rules',   label: 'Extraction des règles' },
+          { key: 'calculating',        label: 'Calcul de constructibilité' },
+        ];
+        const currentIdx = STEPS.findIndex(s => s.key === analysis.status);
+        return (
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Loader2 className="w-5 h-5 text-primary animate-spin" />
+              <span className="font-medium text-primary text-sm">Analyse en cours…</span>
+            </div>
+            <ol className="flex flex-col sm:flex-row gap-2 sm:gap-0">
+              {STEPS.map((step, idx) => {
+                const isDone    = idx < currentIdx;
+                const isActive  = idx === currentIdx;
+                const isPending = idx > currentIdx;
+                return (
+                  <li key={step.key} className="flex items-center flex-1 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+                        isDone   ? 'bg-emerald-500 text-white' :
+                        isActive ? 'bg-primary text-white' :
+                                   'bg-muted text-muted-foreground'
+                      }`}>
+                        {isDone ? <CheckCircle2 className="w-4 h-4" /> : idx + 1}
+                      </span>
+                      <span className={`text-xs truncate ${isActive ? 'text-primary font-semibold' : isPending ? 'text-muted-foreground' : 'text-foreground'}`}>
+                        {step.label}
+                      </span>
+                    </div>
+                    {idx < STEPS.length - 1 && (
+                      <ChevronRight className="flex-shrink-0 w-4 h-4 text-muted-foreground mx-1 hidden sm:block" />
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        );
+      })()}
+
       {/* ── Failure banner ── */}
       {analysis.status === 'failed' && (() => {
         const failedLog = [...(logs ?? [])].reverse().find(l => l.status === 'failed');
