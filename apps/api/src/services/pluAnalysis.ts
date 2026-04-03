@@ -2,7 +2,7 @@ import { z } from "zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { loadPrompt } from "./promptLoader.js";
-import { SYSTEM_PROMPTS, CerfaExtractionSchema, EvidenceBundle, EvidenceChunk, JurisdictionContext } from "@workspace/ai-core";
+import { SYSTEM_PROMPTS, CerfaExtractionSchema, EvidenceBundle, EvidenceChunk, JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
 import { logger } from "../utils/logger.js";
 import fs from "fs";
@@ -325,8 +325,33 @@ export async function analyzePLUZone(
   });
 
   try {
-    const relevantText = extractRelevantPLUSections(rawText, zoneCode);
-    
+    let relevantText = extractRelevantPLUSections(rawText, zoneCode);
+
+    // Fallback: if rawText is absent or too short (<300 chars), query Base IA embeddings directly
+    if (relevantText.length < 300 && cityName) {
+      try {
+        const fallbackQuery = `Zone ${zoneCode} règlement emprise hauteur recul stationnement implantation`;
+        let fallbackChunks = await queryRelevantChunks(fallbackQuery, {
+          municipalityId: cityName,
+          zoneCode,
+          limit: 20,
+        });
+        if (fallbackChunks.length === 0) {
+          fallbackChunks = await queryRelevantChunks(fallbackQuery, {
+            municipalityId: GLOBAL_POOL_ID,
+            limit: 10,
+          });
+        }
+        if (fallbackChunks.length > 0) {
+          const embText = fallbackChunks.map(c => c.content).join("\n\n---\n\n");
+          relevantText = relevantText.length > 0 ? `${relevantText}\n\n---\n\n${embText}` : embText;
+          console.log(`[pluAnalysis/analyzePLUZone] ✅ ${fallbackChunks.length} Base IA chunks used for ${cityName} zone ${zoneCode}`);
+        }
+      } catch (embErr) {
+        console.warn("[pluAnalysis/analyzePLUZone] Embedding fallback failed:", embErr);
+      }
+    }
+
     // 1. New Triage Pass: Generate Digest
     console.log(`[pluAnalysis] Generating Structured Digest for ${zoneCode}...`);
     const digest = await generateZoneDigest(relevantText, zoneCode, cityName);
@@ -617,36 +642,56 @@ export async function extractRelevantRules(
   const { zoneCode, cityName, topics = [], docTypes = [] } = context;
   
   let combinedText = "";
+  const { jurisdictionContext } = context;
 
-  // V2: RAG / Vector Search execution if we have a cityName indicating a real targeted town
-  if (cityName && rawText.length === 0) { // Indicates we rely entirely on Base IA
+  // Primary: Base IA semantic search — always run for any identified commune
+  // This is the canonical PLU knowledge source; rawText is supplementary
+  if (cityName) {
     try {
-      const { queryRelevantChunks } = await import("./embeddingService.js");
-      const queryStr = `Règles d'urbanisme pour la zone ${zoneCode}. Thématiques prioritaires: ${topics.join(", ")}`;
-      console.log(`[pluAnalysis] Executing Semantic Vector Search for: ${queryStr}`);
-      
-      const chunks = await queryRelevantChunks(queryStr, { 
-        municipalityId: cityName, 
-        limit: 20, 
-        docTypes: docTypes.length > 0 ? docTypes : undefined 
+      const queryStr = `Règles d'urbanisme zone ${zoneCode}${topics.length > 0 ? `. Thématiques: ${topics.join(", ")}` : ""}`;
+      console.log(`[pluAnalysis] Base IA semantic search: "${queryStr}" (${cityName})`);
+
+      let chunks = await queryRelevantChunks(queryStr, {
+        municipalityId: cityName,
+        limit: 25,
+        docTypes: docTypes.length > 0 ? docTypes : undefined,
+        jurisdictionContext,
       });
-      
+
+      // Fallback: GLOBAL_POOL_ID if the commune isn't yet indexed in Base IA
+      if (chunks.length === 0) {
+        console.warn(`[pluAnalysis] No Base IA chunks for ${cityName} zone ${zoneCode} — retrying with global pool`);
+        chunks = await queryRelevantChunks(queryStr, {
+          municipalityId: GLOBAL_POOL_ID,
+          limit: 15,
+          jurisdictionContext,
+        });
+      }
+
       if (chunks.length > 0) {
-        combinedText = chunks.map(c => `[Extrait pertinent - Score: ${typeof c.similarity === 'number' ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`).join("\n\n---\n\n");
+        combinedText = chunks
+          .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)
+          .join("\n\n---\n\n");
+        console.log(`[pluAnalysis] ✅ ${chunks.length} Base IA chunks retrieved for ${cityName} zone ${zoneCode}`);
       } else {
-        console.warn(`[pluAnalysis] RAG Search found no relevant chunks for ${cityName} zone ${zoneCode}`);
-        return "Aucune règle trouvée dans la Base IA communale.";
+        console.warn(`[pluAnalysis] ⚠️  Base IA has no indexed content for ${cityName} zone ${zoneCode}`);
       }
     } catch (err) {
-      console.error("[pluAnalysis] Vector Search Errored, falling back to rawText parsing if available:", err);
+      console.error("[pluAnalysis] Base IA search failed — will fall back to raw document text:", err);
     }
   }
 
-  // V1: Legacy Regex Windowing Fallback
-  if (!combinedText && rawText.length > 0) {
-    // SCAN CIBLÉ : On utilise des mots-clés adaptés au projet
+  // Supplement / fallback: regex windowing on full raw document text
+  if (rawText.length > 0) {
     const relevantWindows = findRelevantWindows(rawText, zoneCode, topics);
-    combinedText = relevantWindows.join("\n\n--- NOUVEAU SEGMENT DE RECHERCHE ---\n\n");
+    const windowText = relevantWindows.join("\n\n--- NOUVEAU SEGMENT ---\n\n");
+    if (!combinedText) {
+      // No embedding results — use raw text only
+      combinedText = windowText;
+    } else if (windowText.length > 0) {
+      // Enrich embedding results with raw sections (first 3 windows to avoid token bloat)
+      combinedText += "\n\n--- DOCUMENTS BRUTS ---\n\n" + relevantWindows.slice(0, 3).join("\n\n---\n\n");
+    }
   }
 
   const systemContent = `Tu es l'Expert-Documentaliste en Urbanisme. Ton rôle est de LIRE des extraits d'un règlement PLU complet (potentiellement issu de recherche sémantique) et d'en EXTRAIRE les règles applicables d'articles de la zone **${zoneCode}**${cityName ? ` pour la commune de **${cityName}**` : ""}.

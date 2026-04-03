@@ -1,6 +1,7 @@
 import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable } from "@workspace/db";
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
+import { queryRelevantChunks } from "./embeddingService.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -61,8 +62,51 @@ export async function buildAnalysisContext(
       )
     );
 
-  // Combine sources
+  // Combine static document sources
   const relevantDocs = [...baseIADocs, ...townHallDocs];
+
+  // 3b. ALWAYS run semantic search against base_ia_embeddings for zone-specific PLU chunks.
+  // This is the primary knowledge source — it returns the most relevant indexed PLU text
+  // even when no full-document record exists for the commune.
+  const embeddingQuery = `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`;
+  try {
+    let chunks = await queryRelevantChunks(embeddingQuery, {
+      municipalityId: commune,
+      zoneCode,
+      jurisdictionContext,
+      limit: 30,
+    });
+
+    // Fallback: try with commune name (some documents are indexed by name, not INSEE)
+    if (chunks.length === 0 && communeName) {
+      chunks = await queryRelevantChunks(embeddingQuery, {
+        municipalityId: communeName,
+        zoneCode,
+        jurisdictionContext,
+        limit: 30,
+      });
+    }
+
+    if (chunks.length > 0) {
+      const embeddingText = chunks
+        .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)
+        .join("\n\n---\n\n");
+      // Prepend as the highest-priority synthetic document
+      relevantDocs.unshift({
+        id: `BASE_IA_${commune}_${zoneCode}`,
+        rawText: embeddingText,
+        municipalityId: commune,
+        status: "indexed",
+        documentType: "plu",
+        title: `Base IA — Zone ${zoneCode} — ${jurisdictionContext.name || commune}`,
+      });
+      console.log(`[ContextBuilder] ✅ ${chunks.length} Base IA embedding chunks injected for zone ${zoneCode} in ${jurisdictionContext.name || commune}`);
+    } else {
+      console.warn(`[ContextBuilder] ⚠️  No Base IA chunks found for zone ${zoneCode} in ${commune} / ${communeName || "?"} — analysis will rely on static documents only.`);
+    }
+  } catch (embErr) {
+    console.error("[ContextBuilder] Embedding search failed — continuing without Base IA chunks:", embErr);
+  }
 
   // 4. Fetch relevant formal rules (Structured DB rules)
   const relevantRules = await db.select().from(rulesTable)
