@@ -90,22 +90,6 @@ export default function AnalysisDetailPage() {
   const { toast } = useToast();
   const reportIframeRef = useRef<HTMLIFrameElement>(null);
 
-  const simulatedFinance = useMemo(() => {
-    const d = data as any;
-    const analysis = d?.analysis;
-    const gcJson = analysis?.geoContextJson;
-    const gc = (() => {
-      try {
-        if (!gcJson) return null;
-        return typeof gcJson === "string" ? JSON.parse(gcJson) : gcJson;
-      } catch (e) {
-        return null;
-      }
-    })();
-    
-    // The engine results are stored in financial_analysis
-    return gc?.financial_analysis as any | null;
-  }, [data]);
 
   const [simCost, setSimCost] = useState("");
   const [simTARate, setSimTARate] = useState("");
@@ -1115,189 +1099,145 @@ export default function AnalysisDetailPage() {
           )}
         </TabsContent>
 
-        {/* TAB 5: MARCHÉ & DOSSIER (CALCUL DES TAXES) */}
+        {/* TAB: CALCUL DES TAXES */}
         <TabsContent value="marche" className="space-y-6 focus-visible:outline-none">
-          {!simulatedFinance ? (
-            <div className="flex flex-col items-center justify-center p-12 text-center bg-muted/20 rounded-2xl border-2 border-dashed border-border/60">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-                <Zap className="w-8 h-8 text-primary animate-pulse" />
+          {/* Tax summary cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="border-border/60 overflow-hidden relative shadow-sm">
+              <div className="absolute top-0 right-0 p-4 opacity-10"><Calculator className="w-12 h-12" /></div>
+              <CardHeader className="pb-2 px-6 pt-6">
+                <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Taxe d'Aménagement (TA)</CardTitle>
+              </CardHeader>
+              <CardContent className="px-6 pb-6">
+                <p className="text-3xl font-black text-primary">{Math.round(simulatedBilan.ta).toLocaleString()} €</p>
+                <p className="text-[10px] text-muted-foreground mt-2 font-bold uppercase tracking-tight">
+                  {simulatedBilan.hasRate ? `Taux: ${(simulatedBilan.appliedRate * 100).toFixed(1)}% commune + 2.5% dépt` : "Renseignez le taux ci-dessous"}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/60 overflow-hidden relative shadow-sm">
+              <div className="absolute top-0 right-0 p-4 opacity-10"><RefreshCw className="w-12 h-12" /></div>
+              <CardHeader className="pb-2 px-6 pt-6">
+                <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest">RAP (Redevance Archéo)</CardTitle>
+              </CardHeader>
+              <CardContent className="px-6 pb-6">
+                <p className="text-3xl font-black text-primary">{Math.round(simulatedBilan.rap).toLocaleString()} €</p>
+                <p className="text-[10px] text-muted-foreground mt-2 font-bold uppercase tracking-tight">Taux national 0.4%</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/60 overflow-hidden relative shadow-sm">
+              <div className="absolute top-0 right-0 p-4 opacity-10"><Home className="w-12 h-12" /></div>
+              <CardHeader className="pb-2 px-6 pt-6">
+                <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Total Taxes</CardTitle>
+              </CardHeader>
+              <CardContent className="px-6 pb-6">
+                <p className="text-3xl font-black text-primary">{Math.round(simulatedBilan.totalTaxes).toLocaleString()} €</p>
+                <p className="text-[10px] text-muted-foreground mt-2 font-bold uppercase tracking-tight">Surface: {buildability?.remainingFootprintM2 || 0} m²</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Simulator inputs */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Settings className="w-4 h-4 text-primary" /> Simulateur de Taxes
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase text-muted-foreground">Taux TA Commune (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="Ex: 5.0"
+                    value={simTARate}
+                    onChange={e => setSimTARate(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase text-muted-foreground">Coût de Construction (€/m²)</label>
+                  <input
+                    type="number"
+                    step="100"
+                    placeholder="Ex: 2000"
+                    value={simCost}
+                    onChange={e => setSimCost(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-primary">Analyse Financière non disponible</h3>
-              <p className="text-muted-foreground mt-2 max-w-md">Cette analyse doit être relancée pour bénéficier du nouveau moteur de calcul dynamique Boost MCP.</p>
-              <Button className="mt-6 gap-2" variant="outline" onClick={() => window.location.reload()}>
-                <RefreshCw className="w-4 h-4" /> Relancer l'analyse
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              {/* TOP HEADER: RESULTS SUMMARY */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Card className="border-border/60 overflow-hidden relative shadow-sm">
-                   <div className="absolute top-0 right-0 p-4 opacity-10"><Calculator className="w-12 h-12" /></div>
-                   <CardHeader className="pb-2 px-6 pt-6">
-                     <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Calcul Taxes d'Urbanisme</CardTitle>
-                   </CardHeader>
-                   <CardContent className="px-6 pb-6">
-                     <p className="text-3xl font-black text-primary">{(simulatedFinance.taxes?.taxe_amenagement as number || 0).toLocaleString()} €</p>
-                     <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1 font-bold uppercase tracking-tight">
-                        <Lock className="w-3 h-3" /> Basé sur les formules de la Mairie
-                     </p>
-                   </CardContent>
-                </Card>
 
-                <Card className="border-border/60 overflow-hidden relative shadow-sm">
-                   <div className="absolute top-0 right-0 p-4 opacity-10"><RefreshCw className="w-12 h-12" /></div>
-                   <CardHeader className="pb-2 px-6 pt-6">
-                     <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest">RAP (Redevance Archéo)</CardTitle>
-                   </CardHeader>
-                   <CardContent className="px-6 pb-6">
-                     <p className="text-3xl font-black text-primary">{(simulatedFinance.taxes?.rap as number || 0).toLocaleString()} €</p>
-                     <p className="text-[10px] text-muted-foreground mt-2 font-bold uppercase tracking-tight">Redevance Archéologie Préventive</p>
-                   </CardContent>
-                </Card>
-
-                <Card className="border-border/60 overflow-hidden relative bg-blue-50/50 shadow-sm">
-                   <div className="absolute top-0 right-0 p-4 opacity-10"><Home className="w-12 h-12" /></div>
-                   <CardHeader className="pb-2 px-6 pt-6">
-                     <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest">Taxe Foncière (Est.)</CardTitle>
-                   </CardHeader>
-                   <CardContent className="px-6 pb-6">
-                     <p className="text-3xl font-black text-blue-800">{(simulatedFinance.taxes?.taxe_fonciere as number || 0).toLocaleString()} €</p>
-                     <p className="text-[10px] text-blue-600 mt-2 font-bold uppercase tracking-tight">Estimation annuelle</p>
-                   </CardContent>
-                </Card>
-              </div>
-
-              {/* CENTER: DETAILED CALCULATION TRACEABILITY */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold flex items-center gap-2">
-                      <ScrollText className="w-5 h-5 text-primary" /> Détail des Taxes (Mairie de {analysis.city || 'Rochecorbon'})
-                    </h3>
-                    <Badge variant="outline" className="bg-muted text-[10px] uppercase font-bold">Moteur Déterministe v3.5</Badge>
+              {simulatedBilan.hasCost && simulatedBilan.hasRate && (
+                <div className="grid grid-cols-3 gap-4 pt-4 border-t">
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground uppercase font-bold">CA Estimé</p>
+                    <p className="text-xl font-black text-emerald-600">{Math.round(simulatedBilan.ca / 1000)}k€</p>
                   </div>
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground uppercase font-bold">Coûts Totaux</p>
+                    <p className="text-xl font-black text-destructive">{Math.round((simulatedBilan.totalCosts + simulatedBilan.totalTaxes) / 1000)}k€</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground uppercase font-bold">Marge</p>
+                    <p className={`text-xl font-black ${simulatedBilan.margin >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
+                      {simulatedBilan.marginPct.toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-                  <div className="space-y-4">
-                    {simulatedFinance.detail_calculs && simulatedFinance.detail_calculs.map((calc: any, i: number) => (
-                      <div key={i} className="group p-4 rounded-xl border border-border/60 bg-card hover:border-primary/40 transition-all shadow-sm">
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="text-[10px] font-black uppercase text-muted-foreground tracking-tighter bg-muted px-2 py-0.5 rounded">{calc.nom.replace(/_/g, " ")}</span>
-                          <span className="font-mono text-xs text-primary font-bold">Res: {Number(calc.resultat).toLocaleString()} €</span>
-                        </div>
-                        <p className="text-xs font-mono text-muted-foreground mb-3 break-all bg-muted/20 p-2 rounded border border-dashed leading-relaxed">{calc.formule}</p>
-                        
-                        <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-border/40">
-                          {Object.entries(calc.valeurs || {}).map(([k, v]) => (
-                            <div key={k} className="flex justify-between items-center px-2 py-1 bg-muted/10 rounded">
-                              <span className="text-[9px] text-muted-foreground font-mono">{k}</span>
-                              <span className="text-[10px] font-bold text-primary">{typeof v === 'number' && v < 1 ? `${(v * 100).toFixed(1)}%` : Number(v).toLocaleString()}</span>
-                            </div>
-                          ))}
-                        </div>
+          {/* Market data & CERFA */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {md?.last_transactions && md.last_transactions.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3 px-6 pt-6">
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-500" /> Dernières Transactions (DVF)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-6 pb-6">
+                  <div className="space-y-2">
+                    {md.last_transactions.map((t: any, i: number) => (
+                      <div key={i} className="flex justify-between items-center text-xs p-2 rounded bg-muted/20">
+                        <span>{t.type} · {t.surface}m²</span>
+                        <span className="font-bold">{(t.price / 1000).toFixed(0)}k€</span>
                       </div>
                     ))}
                   </div>
-                </div>
+                </CardContent>
+              </Card>
+            )}
 
-                <div className="space-y-6">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <Settings className="w-5 h-5 text-primary" /> Paramètres Taxes & Fiscalité
-                  </h3>
-                  
-                  <div className="grid grid-cols-1 gap-4">
-                    <Card className="shadow-none border-border/40 bg-muted/20">
-                      <CardHeader className="p-4 pb-2">
-                        <CardTitle className="text-xs font-bold uppercase text-muted-foreground">Paramètres Territoriaux</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-4 pt-0 space-y-2">
-                        <div className="flex justify-between text-xs py-1 border-b border-border/30">
-                          <span>Taux TA Commune</span>
-                          <span className="font-bold">{(simulatedFinance.parametres_utilises.fiscalite_locale?.taux_taxe_amenagement_commune * 100 || 5).toFixed(1)}%</span>
-                        </div>
-                        <div className="flex justify-between text-xs py-1 border-b border-border/30">
-                          <span>Taxe Foncière TFPB</span>
-                          <span className="font-bold">{(simulatedFinance.parametres_utilises.fiscalite_locale?.taux_taxe_fonciere * 100 || 40).toFixed(1)}%</span>
-                        </div>
-                        <div className="flex justify-between text-xs py-1">
-                          <span>Valeur Forfaitaire TA</span>
-                          <span className="font-bold">{simulatedFinance.parametres_utilises.valeurs_forfaitaires?.valeur_forfaitaire_ta_m2 || 914} €/m²</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="shadow-none border-border/40 bg-yellow-50/30">
-                      <CardHeader className="p-4 pb-2">
-                        <CardTitle className="text-xs font-bold uppercase text-yellow-800">Alertes & Hypothèses</CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-4 pt-0 space-y-2">
-                        {simulatedFinance.hypotheses?.filter((h: string) => !h.includes("Erreur de calcul")).length > 0 ? (
-                          simulatedFinance.hypotheses.filter((h: string) => !h.includes("Erreur de calcul")).map((h: string, i: number) => (
-                            <div key={i} className="flex gap-2 items-start text-xs text-yellow-700">
-                              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                              <span>{h}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="flex gap-2 items-start text-xs text-emerald-700">
-                             <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                             <span>Toutes les variables projet ont été correctement identifiées.</span>
-                          </div>
-                        )}
-                        <p className="text-[10px] text-muted-foreground mt-2 italic">
-                          L'estimation est basée sur les données extraites du PLU et les paramètres territoriaux fournis par la municipalité.
-                        </p>
-                      </CardContent>
-                    </Card>
+            {ag && (
+              <Card>
+                <CardHeader className="pb-3 px-6 pt-6">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-amber-500" /> Dossier CERFA {ag?.cerfa_number}
+                    </CardTitle>
+                    <Badge variant="outline" className="text-[10px]">Délai: {ag?.deadlines}</Badge>
                   </div>
-                </div>
-              </div>
-
-              {/* MARKET DATA & CERFA */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 border-t pt-8">
-                <Card>
-                  <CardHeader className="pb-3 px-6 pt-6">
-                    <div className="flex justify-between items-center">
-                      <CardTitle className="text-sm font-bold flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-emerald-500" />
-                        Dernières Transactions (DVF)
-                      </CardTitle>
-                      <Badge variant="outline" className="text-[10px]">Locale</Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-6 pb-6">
-                    <div className="space-y-2">
-                      {md?.last_transactions?.map((t: any, i: number) => (
-                        <div key={i} className="flex justify-between items-center text-xs p-2 rounded bg-muted/20">
-                          <span>{t.type} · {t.surface}m²</span>
-                          <span className="font-bold">{(t.price / 1000).toFixed(0)}k€</span>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-3 px-6 pt-6">
-                    <div className="flex justify-between items-center">
-                      <CardTitle className="text-sm font-bold flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-amber-500" />
-                        Dossier CERFA {ag?.cerfa_number}
-                      </CardTitle>
-                      <Badge variant="outline" className="text-[10px]">Délai: {ag?.deadlines}</Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-6 pb-6 space-y-3">
-                    <p className="text-xs text-muted-foreground">{ag?.procedure_name}</p>
-                    <a href={ag?.cerfa_url} target="_blank" rel="noreferrer">
+                </CardHeader>
+                <CardContent className="px-6 pb-6 space-y-3">
+                  <p className="text-xs text-muted-foreground">{ag?.procedure_name}</p>
+                  {ag?.cerfa_url && (
+                    <a href={ag.cerfa_url} target="_blank" rel="noreferrer">
                       <Button variant="outline" className="w-full text-[10px] h-8">Télécharger le formulaire</Button>
                     </a>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          )}
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </TabsContent>
+
 
 
         {/* TAB IMPLANTATION */}
