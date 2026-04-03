@@ -69,46 +69,79 @@ export class GPUProviderService {
     }
   }
 
+  /** Extract a docs array from any known GPU response shape */
+  private static extractDocs(data: any): any[] {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.content)) return data.content;
+    if (Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data.documents)) return data.documents;
+    if (Array.isArray(data.results)) return data.results;
+    // Some endpoints wrap in a single-key object — pick the first array value
+    for (const v of Object.values(data)) {
+      if (Array.isArray(v) && (v as any[]).length > 0) return v as any[];
+    }
+    return [];
+  }
+
   /**
    * Récupère les documents pour un code INSEE.
-   * Utilise le endpoint grid (fiable) plutôt que by-municipality (bloqué WAF).
+   * Essaie plusieurs variantes d'endpoint GPU en cas de blocage WAF.
    */
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
-    // Try multiple GPU endpoint variants — the WAF behaviour varies by endpoint/param
     const urls = [
-      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee&active=true&sort=-publicationDate`,
+      // Primary: codeMunicipalite is the canonical INSEE param on GPU
       `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
+      // Alternate: grid-based (worked for some communes)
+      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee&active=true`,
       `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
+      // Alternate: by-municipality path (WAF sometimes allows it)
+      `${GPUProviderService.BASE_URL}/document/by-municipality/${inseeCode}`,
+      // Alternate: inseeCode query param
+      `${GPUProviderService.BASE_URL}/document?inseeCode=${inseeCode}`,
+      `${GPUProviderService.BASE_URL}/document?commune=${inseeCode}`,
     ];
 
     for (const url of urls) {
-      console.log(`[GPU] Fetching documents: ${url}`);
+      console.log(`[GPU] Trying: ${url}`);
       const data = GPUProviderService.curlFetch(url);
-
       if (!data) continue;
 
-      // GPU may return a plain array OR a paginated Spring response { content: [...], totalElements: N }
-      let docs: any[] = [];
-      if (Array.isArray(data)) {
-        docs = data;
-      } else if (data.content && Array.isArray(data.content)) {
-        docs = data.content;
-      } else if (data.items && Array.isArray(data.items)) {
-        docs = data.items;
-      } else if (data.documents && Array.isArray(data.documents)) {
-        docs = data.documents;
-      }
-
+      const docs = GPUProviderService.extractDocs(data);
       if (docs.length > 0) {
-        console.log(`[GPU] Found ${docs.length} documents for INSEE ${inseeCode} via ${url}`);
+        console.log(`[GPU] ✅ Found ${docs.length} documents for INSEE ${inseeCode} via ${url}`);
         return docs as GPUDocument[];
       }
 
-      // Log what we actually received to aid debugging
-      console.warn(`[GPU] Unexpected response shape for ${url}:`, JSON.stringify(data).slice(0, 200));
+      console.warn(`[GPU] 0 docs — shape: ${JSON.stringify(data).slice(0, 300)}`);
     }
 
     console.warn(`[GPU] No documents returned for INSEE ${inseeCode} from any endpoint`);
+    return [];
+  }
+
+  /**
+   * Récupère les documents par coordonnées GPS (fallback si INSEE ne fonctionne pas).
+   * Utilise une bbox de ~2km autour du point.
+   */
+  static async getDocumentsByCoords(lon: number, lat: number): Promise<GPUDocument[]> {
+    const delta = 0.02; // ~2km
+    const bbox = `${lon - delta},${lat - delta},${lon + delta},${lat + delta}`;
+    const urls = [
+      `${GPUProviderService.BASE_URL}/document?bbox=${bbox}`,
+      `${GPUProviderService.BASE_URL}/document?lon=${lon}&lat=${lat}`,
+    ];
+
+    for (const url of urls) {
+      console.log(`[GPU] Trying coords fallback: ${url}`);
+      const data = GPUProviderService.curlFetch(url);
+      if (!data) continue;
+      const docs = GPUProviderService.extractDocs(data);
+      if (docs.length > 0) {
+        console.log(`[GPU] ✅ Found ${docs.length} documents via coords ${lon},${lat}`);
+        return docs as GPUDocument[];
+      }
+    }
     return [];
   }
 

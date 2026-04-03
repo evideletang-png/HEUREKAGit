@@ -1128,12 +1128,16 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     }
 
     // D. Dynamic Geocoding Resolution (FINAL FALLBACK)
+    let geocodedLon: number | null = null;
+    let geocodedLat: number | null = null;
     if (!insee) {
       logger.debug("[GPU] Dynamic resolution via geocoding", { commune });
       const geocodeResults = await geocodeAddress(commune, "municipality");
       if (geocodeResults.length > 0) {
         insee = geocodeResults[0].inseeCode || null;
-        logger.info("[GPU] Geocoding resolved INSEE", { commune, insee });
+        geocodedLon = geocodeResults[0].lng ?? null;
+        geocodedLat = geocodeResults[0].lat ?? null;
+        logger.info("[GPU] Geocoding resolved INSEE", { commune, insee, lon: geocodedLon, lat: geocodedLat });
         // Cache in municipalitySettings for future lookups
         if (insee) {
           await db.insert(municipalitySettingsTable).values({ commune, inseeCode: insee })
@@ -1151,8 +1155,12 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
 
     logger.debug("[GPU] Final INSEE code resolved", { insee });
 
-    // 1. Fetch all documents for this commune
-    const allDocs = await GPUProviderService.getDocumentsByInsee(insee);
+    // 1. Fetch all documents — try INSEE first, fall back to coordinates if available
+    let allDocs = await GPUProviderService.getDocumentsByInsee(insee);
+    if (allDocs.length === 0 && geocodedLon !== null && geocodedLat !== null) {
+      logger.warn("[GPU] INSEE search returned 0 docs — trying coordinate fallback", { lon: geocodedLon, lat: geocodedLat });
+      allDocs = await GPUProviderService.getDocumentsByCoords(geocodedLon, geocodedLat);
+    }
 
     // 2. Keep approved/active documents — GPU uses multiple status values for "in force"
     const ACTIVE_STATUSES = ["document.production", "document.opposable", "document.approuve", "document.en_vigueur", "production", "opposable", "approuve"];
