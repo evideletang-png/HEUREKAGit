@@ -66,17 +66,25 @@ export class GPUProviderService {
    * Utilise le endpoint grid (fiable) plutôt que by-municipality (bloqué WAF).
    */
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
-    const url = `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee&active=true&sort=-publicationDate`;
-    console.log(`[GPU] Fetching documents for INSEE ${inseeCode}...`);
-    const data = GPUProviderService.curlFetch(url);
+    // Try multiple GPU endpoint variants — the WAF behaviour varies by endpoint/param
+    const urls = [
+      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee&active=true&sort=-publicationDate`,
+      `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
+      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
+    ];
 
-    if (!data || !Array.isArray(data)) {
-      console.warn(`[GPU] No documents returned for INSEE ${inseeCode}`);
-      return [];
+    for (const url of urls) {
+      console.log(`[GPU] Fetching documents: ${url}`);
+      const data = GPUProviderService.curlFetch(url);
+
+      if (data && Array.isArray(data) && data.length > 0) {
+        console.log(`[GPU] Found ${data.length} documents for INSEE ${inseeCode} via ${url}`);
+        return data as GPUDocument[];
+      }
     }
 
-    console.log(`[GPU] Found ${data.length} total documents for INSEE ${inseeCode}`);
-    return data as GPUDocument[];
+    console.warn(`[GPU] No documents returned for INSEE ${inseeCode} from any endpoint`);
+    return [];
   }
 
   /**

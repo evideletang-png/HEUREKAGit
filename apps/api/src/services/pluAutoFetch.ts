@@ -80,7 +80,9 @@ async function fetchFromGPU(inseeCode: string): Promise<FetchedPLUDoc[]> {
 
   try {
     const docs = await GPUProviderService.getDocumentsByInsee(inseeCode);
-    const active = docs.filter(d => d.status === "document.production").slice(0, 3);
+    const ACTIVE_STATUSES = ["production", "opposable", "approuve", "en_vigueur"];
+    let active = docs.filter(d => d.status && ACTIVE_STATUSES.some(s => d.status.toLowerCase().includes(s))).slice(0, 3);
+    if (active.length === 0 && docs.length > 0) active = docs.slice(0, 3); // fallback: take whatever GPU returns
     if (active.length === 0) {
       logger.warn(`[PLUAutoFetch] GPU: no active document for ${inseeCode}`);
       return [];

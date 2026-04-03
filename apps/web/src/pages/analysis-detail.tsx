@@ -236,9 +236,15 @@ export default function AnalysisDetailPage() {
     ? (typeof (zoneAnalysis as any).extractedRulesJson === "string" ? JSON.parse((zoneAnalysis as any).extractedRulesJson as string) : (zoneAnalysis as any).extractedRulesJson)
     : null;
 
-  const parsedAssumptions: string[] = buildability?.assumptionsJson
-    ? (typeof buildability.assumptionsJson === "string" ? JSON.parse(buildability.assumptionsJson as string) : buildability.assumptionsJson)
-    : [];
+  const parsedAssumptions: string[] = (() => {
+    try {
+      if (!buildability?.assumptionsJson) return [];
+      const raw = typeof buildability.assumptionsJson === "string"
+        ? JSON.parse(buildability.assumptionsJson as string)
+        : buildability.assumptionsJson;
+      return Array.isArray(raw) ? raw : [];
+    } catch { return []; }
+  })();
 
   // Parse GeoContext JSON
   const gc = (analysis as any).geoContextJson

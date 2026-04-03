@@ -1099,12 +1099,18 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     // 1. Fetch all documents for this commune
     const allDocs = await GPUProviderService.getDocumentsByInsee(insee);
 
-    // 2. Keep only the active document(s)
-    const activeDocs = allDocs.filter(d => d.status === "document.production");
+    // 2. Keep approved/active documents — GPU uses multiple status values for "in force"
+    const ACTIVE_STATUSES = ["document.production", "document.opposable", "document.approuve", "document.en_vigueur", "production", "opposable", "approuve"];
+    let activeDocs = allDocs.filter(d => d.status && ACTIVE_STATUSES.some(s => d.status.toLowerCase().includes(s.replace("document.", ""))));
+    // If nothing matches known statuses, take all documents (the API `active=true` param already filters)
+    if (activeDocs.length === 0 && allDocs.length > 0) {
+      logger.warn("[GPU] No docs matched known active statuses — ingesting all returned docs", { statuses: allDocs.map(d => d.status) });
+      activeDocs = allDocs;
+    }
     logger.info("[GPU] Active documents", { active: activeDocs.length, total: allDocs.length });
 
     if (activeDocs.length === 0) {
-      return res.json({ success: true, count: 0, documents: [], message: "Aucun document actif trouvé (document.production) pour cette commune." });
+      return res.json({ success: true, count: 0, documents: [], message: `Aucun document trouvé sur le GPU pour INSEE ${insee}. Essayez d'importer manuellement.` });
     }
 
     let count = 0;

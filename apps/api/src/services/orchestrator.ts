@@ -428,7 +428,7 @@ export async function orchestrateDossierAnalysis(
         setbackBoundaryM: calculations?.setbacks?.boundary ?? null,
         parkingRequirement: calculations?.parking?.requirement != null ? String(calculations.parking.requirement) : null,
         greenSpaceRequirement: calculations?.greenSpace?.requirement != null ? String(calculations.greenSpace.requirement) : null,
-        assumptionsJson: JSON.stringify(calculations?.assumptions || {}),
+        assumptionsJson: JSON.stringify(Array.isArray(calculations?.assumptions) ? calculations.assumptions : []),
         confidenceScore: calculations?.confidence ?? 0.5,
         resultSummary: calculations?.summary ?? `Zone ${finalZone}: emprise max ${calculations?.footprint?.max ?? "?"}m², hauteur max ${calculations?.height?.max ?? "?"}m`,
       };
