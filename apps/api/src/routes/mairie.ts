@@ -9,13 +9,14 @@ import {
   dossierMessagesTable, 
   townHallDocumentsTable, 
   townHallPromptsTable, 
-  baseIABatchesTable, 
-  baseIADocumentsTable, 
+  baseIABatchesTable,
+  baseIADocumentsTable,
   baseIAEmbeddingsTable,
   municipalitySettingsTable,
   dossierEventsTable,
   ruleArticlesTable,
-  zoneAnalysesTable
+  zoneAnalysesTable,
+  communesTable
 } from "@workspace/db";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
@@ -1067,7 +1068,7 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       else if (lowerInput === "nogent-sur-marne" || lowerInput === "nogent sur marne") insee = "94052";
     }
 
-    // C. DB Resolution
+    // C. DB Resolution — check municipalitySettings and communesTable
     if (!insee) {
       const [settings] = await db.select().from(municipalitySettingsTable)
         .where(or(
@@ -1077,13 +1078,30 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       insee = settings?.inseeCode || null;
     }
 
+    // C2. communesTable lookup (used by admin to register communes with INSEE)
+    if (!insee) {
+      const [communeRow] = await db.select({ inseeCode: communesTable.inseeCode })
+        .from(communesTable)
+        .where(or(
+          eq(communesTable.name, commune),
+          eq(sql`lower(${communesTable.name})`, commune.toLowerCase())
+        )).limit(1);
+      insee = communeRow?.inseeCode || null;
+      if (insee) logger.debug("[GPU] Resolved INSEE from communesTable", { commune, insee });
+    }
+
     // D. Dynamic Geocoding Resolution (FINAL FALLBACK)
     if (!insee) {
-      logger.debug("[GPU] Dynamic resolution", { commune });
+      logger.debug("[GPU] Dynamic resolution via geocoding", { commune });
       const geocodeResults = await geocodeAddress(commune, "municipality");
       if (geocodeResults.length > 0) {
         insee = geocodeResults[0].inseeCode || null;
-        logger.debug("[GPU] Geocoding resolved", { commune, insee });
+        logger.info("[GPU] Geocoding resolved INSEE", { commune, insee });
+        // Cache in municipalitySettings for future lookups
+        if (insee) {
+          await db.insert(municipalitySettingsTable).values({ commune, inseeCode: insee })
+            .onConflictDoUpdate({ target: municipalitySettingsTable.commune, set: { inseeCode: insee } });
+        }
       }
     }
 
@@ -1288,7 +1306,9 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
               }
 
               if (ingestText.length > 50) {
+                const syncBatchId = crypto.randomUUID();
                 const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+                  batchId: syncBatchId,
                   municipalityId: insee,
                   zoneCode: req.query.zone as string || null,
                   category: "REGULATORY",
@@ -1302,10 +1322,11 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
                 }).returning();
 
                 await processDocumentForRAG(baseIADoc.id, insee, ingestText, {
+                  document_id: baseIADoc.id,
                   document_type: isMapOrGraphic ? "plu_annexe" : baseIADocType,
                   pool_id: poolId,
                   status: "active",
-                  commune: commune,
+                  commune: insee,          // always store INSEE code, not display name
                   zone: req.query.zone as string || undefined,
                   source_authority: sourceAuthority,
                 } as any);
@@ -1712,9 +1733,20 @@ router.post("/gpu/reindex", async (req: AuthRequest, res) => {
             if (settings?.inseeCode) {
               insee = settings.inseeCode;
             } else {
-              // Geocoding fallback
-              const geo = await geocodeAddress(doc.commune, "municipality");
-              if (geo.length > 0) insee = geo[0].inseeCode || null;
+              // communesTable fallback
+              const [communeRow] = await db.select({ inseeCode: communesTable.inseeCode })
+                .from(communesTable)
+                .where(or(
+                  eq(communesTable.name, doc.commune),
+                  eq(sql`lower(${communesTable.name})`, doc.commune.toLowerCase())
+                )).limit(1);
+              if (communeRow?.inseeCode) {
+                insee = communeRow.inseeCode;
+              } else {
+                // Geocoding fallback
+                const geo = await geocodeAddress(doc.commune, "municipality");
+                if (geo.length > 0) insee = geo[0].inseeCode || null;
+              }
             }
           }
 
@@ -1794,7 +1826,9 @@ router.post("/gpu/reindex", async (req: AuthRequest, res) => {
 
           const poolId = `${insee}-PLU-ACTIVE`;
 
+          const reindexBatchId = crypto.randomUUID();
           const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+            batchId: reindexBatchId,
             municipalityId: insee,
             category: "REGULATORY",
             subCategory: isMapOrGraphic ? "PLANS" : "PLU",
@@ -1806,10 +1840,11 @@ router.post("/gpu/reindex", async (req: AuthRequest, res) => {
           }).returning();
 
           await processDocumentForRAG(baseIADoc.id, insee, ingestText, {
+            document_id: baseIADoc.id,
             document_type: isMapOrGraphic ? "plu_annexe" : baseIADocType,
             pool_id: poolId,
             status: "active",
-            commune: doc.commune,
+            commune: insee,          // always store INSEE code, not display name
             source_authority: sourceAuthority,
           } as any);
 

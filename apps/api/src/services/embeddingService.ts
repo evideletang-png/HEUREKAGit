@@ -90,7 +90,8 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
     )
   ];
 
-  const whereClause = and(...baseConditions, filters.zoneCode ? sql`${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode}` : undefined);
+  // Zone filter is NULL-inclusive: docs without zone metadata match any zone query
+  const whereClause = and(...baseConditions, filters.zoneCode ? sql`(${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode} OR ${baseIAEmbeddingsTable.metadata}->>'zone' IS NULL)` : undefined);
 
   // 6. EXECUTE SEARCH
   const rawResults = await db

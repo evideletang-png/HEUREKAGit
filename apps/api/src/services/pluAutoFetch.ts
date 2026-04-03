@@ -11,6 +11,7 @@
  */
 
 import { execSync } from "child_process";
+import crypto from "crypto";
 import path from "path";
 import fs from "fs";
 import { db, townHallDocumentsTable, baseIADocumentsTable } from "@workspace/db";
@@ -223,7 +224,9 @@ export async function autoFetchPLU(
 
         if (existing.length > 0) continue;
 
+        const autoFetchBatchId = crypto.randomUUID();
         const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+          batchId: autoFetchBatchId,
           municipalityId: inseeCode,
           category: "REGULATORY",
           subCategory: "PLU",
@@ -234,10 +237,11 @@ export async function autoFetchPLU(
         }).returning();
 
         await processDocumentForRAG(baseIADoc.id, inseeCode, doc.rawText, {
+          document_id: baseIADoc.id,
           document_type: doc.docType,
           pool_id: poolId,
           status: "active",
-          commune: communeName,
+          commune: inseeCode,    // always store INSEE code for consistent lookup
           source_authority: authorityFor(doc.docType),
         } as any);
 
