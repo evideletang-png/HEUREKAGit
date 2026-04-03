@@ -31,8 +31,6 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-app.use("/api", router);
-
 // Serve built frontend (co-hosted deployment)
 const frontendDist = path.resolve(__dirname, "../../web/dist/public");
 
@@ -49,6 +47,9 @@ app.get("/api/debug/frontend", (_req, res) => {
     res.json({ frontendDist, exists, files, assets, indexHtml });
   });
 });
+
+app.use("/api", router);
+
 // Hashed assets (JS/CSS) → long-lived cache; index.html → no cache (prevents blank screen after deploy)
 app.use(express.static(frontendDist, {
   setHeaders(res, filePath) {
