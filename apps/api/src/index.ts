@@ -1,7 +1,7 @@
 import app from "./app";
 import { runMigrations, db } from "@workspace/db";
 import { analysesTable } from "@workspace/db";
-import { inArray, lt, sql } from "drizzle-orm";
+import { and, inArray, lt } from "drizzle-orm";
 import { seedDefaultPrompts } from "./services/promptLoader.js";
 import { seedAdminUser } from "./services/seedAdminUser.js";
 
@@ -28,7 +28,10 @@ async function recoverStuckAnalyses() {
     .update(analysesTable)
     .set({ status: "draft", updatedAt: new Date() })
     .where(
-      sql`${analysesTable.status} = ANY(${stuckStatuses}) AND ${analysesTable.updatedAt} < ${tenMinutesAgo}`
+      and(
+        inArray(analysesTable.status, [...stuckStatuses]),
+        lt(analysesTable.updatedAt, tenMinutesAgo)
+      )
     )
     .returning({ id: analysesTable.id });
 

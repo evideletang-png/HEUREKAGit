@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { analysesTable, usersTable, aiPromptsTable, communesTable, municipalityLearningsTable, globalConfigsTable } from "@workspace/db";
+import { analysesTable, usersTable, aiPromptsTable, communesTable, municipalityLearningsTable, globalConfigsTable, municipalitySettingsTable } from "@workspace/db";
 import { desc, count, eq, ilike, or, and, sql } from "drizzle-orm";
 import { authenticate, requireAdmin, type AuthRequest } from "../middlewares/authenticate.js";
 import { DEFAULT_PROMPTS } from "../services/promptLoader.js";
@@ -294,11 +294,10 @@ router.get("/mairie/:userId/communes", async (req, res) => {
 router.put("/mairie/:userId/communes", async (req: AuthRequest, res) => {
   try {
     const { userId } = req.params;
-    const { communes } = req.body as { communes?: string[] };
+    const { communes, inseeMapping } = req.body as { communes?: string[]; inseeMapping?: Record<string, string> };
 
     if (!Array.isArray(communes)) {
-    return res.status(400).json({ error: "BAD_REQUEST", message: "communes doit être un tableau de chaînes." });
-      return;
+      return res.status(400).json({ error: "BAD_REQUEST", message: "communes doit être un tableau de chaînes." });
     }
     const cleaned = communes.map(c => c.trim()).filter(c => c.length > 0);
 
@@ -306,6 +305,20 @@ router.put("/mairie/:userId/communes", async (req: AuthRequest, res) => {
     await db.update(usersTable)
       .set({ communes: JSON.stringify(cleaned), updatedAt: new Date() })
       .where(eq(usersTable.id, userIdStr));
+
+    // Persist inseeMapping to municipalitySettings so GPU sync can resolve without geocoding
+    if (inseeMapping && typeof inseeMapping === "object") {
+      for (const [communeName, inseeCode] of Object.entries(inseeMapping)) {
+        if (communeName && inseeCode) {
+          await db.insert(municipalitySettingsTable)
+            .values({ commune: communeName.trim(), inseeCode: inseeCode.trim() })
+            .onConflictDoUpdate({
+              target: municipalitySettingsTable.commune,
+              set: { inseeCode: inseeCode.trim() }
+            });
+        }
+      }
+    }
 
     return res.json({ success: true, communes: cleaned });
   } catch (err) {

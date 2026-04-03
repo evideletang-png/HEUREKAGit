@@ -52,6 +52,7 @@ async function updateUserRole(userId: string, role: string) {
 function CommunesEditor({ userId, initialCommunes, onSaved }: { userId: string; initialCommunes: string[]; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [communes, setCommunes] = useState<string[]>(initialCommunes);
+  const [inseeMapping, setInseeMapping] = useState<Record<string, string>>({});
   const [newCommune, setNewCommune] = useState("");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -68,12 +69,12 @@ function CommunesEditor({ userId, initialCommunes, onSaved }: { userId: string; 
     }
   );
   const saveMutation = useMutation({
-    mutationFn: async (list: string[]) => {
+    mutationFn: async ({ list, mapping }: { list: string[]; mapping: Record<string, string> }) => {
       const r = await fetch(`/api/admin/mairie/${userId}/communes`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ communes: list }),
+        body: JSON.stringify({ communes: list, inseeMapping: mapping }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
@@ -89,10 +90,11 @@ function CommunesEditor({ userId, initialCommunes, onSaved }: { userId: string; 
     },
   });
 
-  const addCommune = (v: string) => {
+  const addCommune = (v: string, inseeCode?: string) => {
     const term = v.trim();
     if (!term || communes.includes(term)) return;
     setCommunes(prev => [...prev, term]);
+    if (inseeCode) setInseeMapping(prev => ({ ...prev, [term]: inseeCode }));
     setSearch("");
   };
 
@@ -158,13 +160,17 @@ function CommunesEditor({ userId, initialCommunes, onSaved }: { userId: string; 
                 key={idx}
                 type="button"
                 className="w-full text-left px-3 py-2 hover:bg-muted flex flex-col gap-0.5 transition-colors border-b border-border/50 last:border-0"
-                onClick={() => addCommune(item.city || item.label)}
+                onClick={() => addCommune(item.city || item.label, item.inseeCode)}
               >
                 <div className="flex items-center gap-2">
                   <MapPin className="w-3 h-3 text-primary shrink-0" />
                   <span className="text-xs font-medium text-foreground">{item.city || item.label}</span>
                 </div>
-                {item.postcode && <span className="text-[10px] text-muted-foreground ml-5">{item.postcode}</span>}
+                {(item.inseeCode || item.postcode) && (
+                  <span className="text-[10px] text-muted-foreground ml-5">
+                    {item.postcode}{item.inseeCode ? ` — INSEE ${item.inseeCode}` : ""}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -175,7 +181,7 @@ function CommunesEditor({ userId, initialCommunes, onSaved }: { userId: string; 
         <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setOpen(false); setSearch(""); setCommunes(initialCommunes); }}>
           Annuler
         </Button>
-        <Button size="sm" className="h-7 text-xs gap-1" onClick={() => saveMutation.mutate(communes)} disabled={saveMutation.isPending}>
+        <Button size="sm" className="h-7 text-xs gap-1" onClick={() => saveMutation.mutate({ list: communes, mapping: inseeMapping })} disabled={saveMutation.isPending}>
           <Save className="w-3 h-3" />
           Enregistrer
         </Button>
