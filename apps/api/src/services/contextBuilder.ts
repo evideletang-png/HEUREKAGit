@@ -2,6 +2,7 @@ import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesT
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
+import { autoFetchPLU } from "./pluAutoFetch.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -102,7 +103,29 @@ export async function buildAnalysisContext(
       });
       console.log(`[ContextBuilder] ✅ ${chunks.length} Base IA embedding chunks injected for zone ${zoneCode} in ${jurisdictionContext.name || commune}`);
     } else {
-      console.warn(`[ContextBuilder] ⚠️  No Base IA chunks found for zone ${zoneCode} in ${commune} / ${communeName || "?"} — analysis will rely on static documents only.`);
+      console.warn(`[ContextBuilder] ⚠️  No Base IA chunks for zone ${zoneCode} in ${commune} — triggering auto-fetch from GPU / data.gouv.fr`);
+
+      // Tier 3: On-demand fetch from GPU → data.gouv.fr
+      // Returns text immediately for THIS analysis; also triggers background embedding for next time.
+      try {
+        const autoDocs = await autoFetchPLU(commune, communeName || jurisdictionContext.name || commune);
+        if (autoDocs.length > 0) {
+          const autoText = autoDocs.map(d => `[Auto-fetch ${d.source.toUpperCase()} — ${d.docType}]\n${d.rawText}`).join("\n\n===\n\n");
+          relevantDocs.unshift({
+            id: `AUTO_FETCH_${commune}`,
+            rawText: autoText,
+            municipalityId: commune,
+            status: "indexed",
+            documentType: "plu",
+            title: `PLU auto-récupéré — ${jurisdictionContext.name || commune}`,
+          });
+          console.log(`[ContextBuilder] ✅ Auto-fetch retrieved ${autoDocs.length} doc(s) for ${commune} from ${autoDocs.map(d => d.source).join(", ")}`);
+        } else {
+          console.warn(`[ContextBuilder] ⚠️  Auto-fetch found nothing for ${commune}. Analysis will proceed with no PLU context.`);
+        }
+      } catch (autoErr) {
+        console.error("[ContextBuilder] Auto-fetch failed:", autoErr);
+      }
     }
   } catch (embErr) {
     console.error("[ContextBuilder] Embedding search failed — continuing without Base IA chunks:", embErr);
