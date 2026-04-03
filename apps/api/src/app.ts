@@ -35,6 +35,20 @@ app.use("/api", router);
 
 // Serve built frontend (co-hosted deployment)
 const frontendDist = path.resolve(__dirname, "../../web/dist/public");
+
+// Temporary debug — visit /api/debug/frontend to see what files are on disk
+app.get("/api/debug/frontend", (_req, res) => {
+  import("fs").then((fs) => {
+    const exists = fs.existsSync(frontendDist);
+    const files = exists ? fs.readdirSync(frontendDist) : [];
+    const assetsDir = path.join(frontendDist, "assets");
+    const assets = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir).slice(0, 20) : [];
+    const indexHtml = (exists && files.includes("index.html"))
+      ? fs.readFileSync(path.join(frontendDist, "index.html"), "utf-8")
+      : "(not found)";
+    res.json({ frontendDist, exists, files, assets, indexHtml });
+  });
+});
 // Hashed assets (JS/CSS) → long-lived cache; index.html → no cache (prevents blank screen after deploy)
 app.use(express.static(frontendDist, {
   setHeaders(res, filePath) {
