@@ -77,10 +77,27 @@ export class GPUProviderService {
       console.log(`[GPU] Fetching documents: ${url}`);
       const data = GPUProviderService.curlFetch(url);
 
-      if (data && Array.isArray(data) && data.length > 0) {
-        console.log(`[GPU] Found ${data.length} documents for INSEE ${inseeCode} via ${url}`);
-        return data as GPUDocument[];
+      if (!data) continue;
+
+      // GPU may return a plain array OR a paginated Spring response { content: [...], totalElements: N }
+      let docs: any[] = [];
+      if (Array.isArray(data)) {
+        docs = data;
+      } else if (data.content && Array.isArray(data.content)) {
+        docs = data.content;
+      } else if (data.items && Array.isArray(data.items)) {
+        docs = data.items;
+      } else if (data.documents && Array.isArray(data.documents)) {
+        docs = data.documents;
       }
+
+      if (docs.length > 0) {
+        console.log(`[GPU] Found ${docs.length} documents for INSEE ${inseeCode} via ${url}`);
+        return docs as GPUDocument[];
+      }
+
+      // Log what we actually received to aid debugging
+      console.warn(`[GPU] Unexpected response shape for ${url}:`, JSON.stringify(data).slice(0, 200));
     }
 
     console.warn(`[GPU] No documents returned for INSEE ${inseeCode} from any endpoint`);
@@ -97,14 +114,20 @@ export class GPUProviderService {
     console.log(`[GPU] Fetching file list for document ${documentId}...`);
     const data = GPUProviderService.curlFetch(url);
 
-    if (!data || !Array.isArray(data)) {
-      console.warn(`[GPU] No files returned for document ${documentId}`);
+    // Handle plain array or paginated response
+    const files: any[] = Array.isArray(data) ? data
+      : Array.isArray(data?.content) ? data.content
+      : Array.isArray(data?.items) ? data.items
+      : [];
+
+    if (files.length === 0) {
+      console.warn(`[GPU] No files returned for document ${documentId}`, data ? JSON.stringify(data).slice(0, 100) : "(null)");
       return [];
     }
 
     // Construct download URLs using the correct GPU API format:
     // /api/document/{docId}/files/{filename} → 302 redirect → real PDF on data.geopf.fr
-    return data.map((f: any) => ({
+    return files.map((f: any) => ({
       name: f.name,
       title: f.title || f.name,
       path: f.path || "",
