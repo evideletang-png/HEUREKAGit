@@ -36,7 +36,7 @@ export const baseIAEmbeddingsTable = pgTable("base_ia_embeddings", {
   chunkIndex: integer("chunk_index").notNull().default(0),
   pageNumber: integer("page_number"),
   content: text("content").notNull(), // The text chunk
-  embedding: text("embedding").array().notNull(), // FALLBACK: stored as float-strings or jsonb-like 
+  embedding: vector("embedding").notNull(), // pgvector(1536) — requires 0001_pgvector_embeddings migration
   metadata: jsonb("metadata").default({}), // Stores doc type (plu, oap), pool_id, status, etc.
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => {

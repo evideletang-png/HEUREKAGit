@@ -23,6 +23,16 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: unknown, info: { componentStack: string }) {
     console.error("[ErrorBoundary] Uncaught render error:", error, info.componentStack);
+    // Chunk load failures (after a new deploy) → force a full page reload once
+    const msg = error instanceof Error ? error.message : String(error);
+    const isChunkError = msg.includes("Failed to fetch dynamically imported module")
+      || msg.includes("Importing a module script failed")
+      || msg.includes("ChunkLoadError")
+      || msg.toLowerCase().includes("loading chunk");
+    if (isChunkError && !sessionStorage.getItem("chunk_reload_attempted")) {
+      sessionStorage.setItem("chunk_reload_attempted", "1");
+      window.location.reload();
+    }
   }
 
   render() {

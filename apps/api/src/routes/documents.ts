@@ -45,6 +45,43 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
 
   if (mimetype === "application/pdf") {
     try {
+      // PCMI2/3/5 are architectural plans — always use Vision first for precision
+      const isPCMIPlan = documentType && ["PCMI2", "PCMI3", "PCMI5"].some(t => documentType.toUpperCase().includes(t));
+      if (isPCMIPlan) {
+        logger.info(`[Vision First] ${documentType} is an architectural plan — running Vision before PDF text extraction.`);
+        try {
+          let pdfImgConvert: any = null;
+          try { pdfImgConvert = await import("pdf-img-convert"); } catch(e) { logger.warn("[canvas] pdf-img-convert not available for Vision-first."); }
+          if (pdfImgConvert) {
+            const images = await pdfImgConvert.convert(filePath, { width: 2000, page_numbers: [1, 2, 3] });
+            if (images && images.length > 0) {
+              let visionText = "";
+              for (const img of images) {
+                const base64 = Buffer.from(img).toString("base64");
+                const pcmiPromptMap: Record<string, string> = {
+                  "PCMI2": "Ce plan est un PLAN DE MASSE (PCMI2). 1) Identifie l'emprise au sol exacte du bâtiment (m²). 2) Extrais TOUTES les cotes de reculs (distances par rapport aux limites séparatives et à la voie). 3) Localise les accès et stationnements. 4) Calcule le pourcentage d'emprise au sol. Sois EXTRÊMEMENT PRÉCIS sur chaque cote.",
+                  "PCMI3": "Ce plan est une COUPE TRANSVERSALE (PCMI3). 1) Extrais la hauteur totale du bâtiment (en m). 2) Identifie la hauteur à l'égout et au faîtage. 3) Note les niveaux NGF si visibles. 4) Mesure la pente de toiture. Sois EXTRÊMEMENT PRÉCIS.",
+                  "PCMI5": "Ce document est une FAÇADE ARCHITECTURALE (PCMI5). 1) Identifie tous les matériaux et couleurs de façade. 2) Compte les ouvertures (fenêtres, portes). 3) Note le type de toiture et sa couleur. 4) Extrais toutes les hauteurs visibles. Sois EXTRÊMEMENT PRÉCIS.",
+                };
+                const prompt = Object.entries(pcmiPromptMap).find(([k]) => documentType.toUpperCase().includes(k))?.[1]
+                  ?? "Ce document est un PLAN ARCHITECTURAL. Extrais TOUTES les cotes, surfaces, matériaux et dimensions visibles avec une précision extrême.";
+                const response = await openai.chat.completions.create({
+                  model: "gpt-4o",
+                  max_completion_tokens: 8192,
+                  messages: [{ role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:image/png;base64,${base64}` } }] }],
+                });
+                visionText += (response.choices[0]?.message?.content ?? "") + "\n\n";
+              }
+              if (visionText.trim().length > 50) {
+                return `--- ANALYSE VISUELLE DU PLAN (VISION IA - ${documentType}) ---\n${visionText}`;
+              }
+            }
+          }
+        } catch (vErr) {
+          logger.error("[Vision First Error]", vErr);
+        }
+      }
+
       // Dynamic import to avoid ESM issues
       const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
       const buffer = fs.readFileSync(filePath);
@@ -117,7 +154,8 @@ async function extractTextFromFile(filePath: string, mimetype: string, documentT
 
       // If it's an architectural plan AND we have enough text, still consider adding Vision for details if it wasn't done yet
       const fileNameLower = path.basename(filePath).toLowerCase() + (documentType || "").toLowerCase();
-      const isPlan = fileNameLower.includes("plan") || fileNameLower.includes("coupe") || fileNameLower.includes("façade") || fileNameLower.includes("facade");
+      const isPlan = fileNameLower.includes("plan") || fileNameLower.includes("coupe") || fileNameLower.includes("façade") || fileNameLower.includes("facade")
+        || (documentType && ["PCMI1", "PCMI2", "PCMI3", "PCMI4", "PCMI5"].some(t => documentType.toUpperCase().includes(t)));
       if (isPlan && !extractedText.includes("ANALYSE VISUELLE DU PLAN")) {
         try {
           logger.debug(`[Vision] Converting PDF plan to image for: ${documentType}`);

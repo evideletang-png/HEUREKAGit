@@ -395,6 +395,44 @@ export async function analyzePLUZone(
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Classifies a document using SYSTEM_PROMPTS.CLASSIFIER.
+ * Returns the detected class (e.g. "PCMI2", "cerfa_form", "plu_reglement", "other").
+ */
+export async function classifyDocument(text: string): Promise<{ document_class: string; sub_type?: string; is_ambiguous: boolean }> {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPTS.CLASSIFIER },
+        { role: "user", content: text.substring(0, 4000) }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+    });
+    const result = JSON.parse(completion.choices[0]?.message?.content || "{}");
+    return {
+      document_class: result.document_class || "other",
+      sub_type: result.sub_type,
+      is_ambiguous: result.is_ambiguous ?? true,
+    };
+  } catch (err) {
+    logger.error("[classifyDocument] Error:", err);
+    return { document_class: "other", is_ambiguous: true };
+  }
+}
+
+/** Map documentType to the appropriate SYSTEM_PROMPTS key */
+const PCMI_PROMPT_MAP: Record<string, string> = {
+  PCMI1: "PCMI1_EXTRACTOR",
+  PCMI2: "PCMI2_EXTRACTOR",
+  PCMI3: "PCMI3_EXTRACTOR",
+  PCMI4: "PCMI4_EXTRACTOR",
+  PCMI5: "PCMI5_EXTRACTOR",
+  cerfa: "CERFA_EXTRACTOR",
+  CERFA: "CERFA_EXTRACTOR",
+};
+
+/**
  * Multi-source Document Extraction.
  * Cross-references current document with dossier context and regulatory KB.
  */
@@ -410,10 +448,13 @@ export async function extractDocumentData(
   } = {}
 ): Promise<EngineResponse<ExtractedDocumentData>> {
   const { dossierDocs = [], regulatoryRules = [], commune = "", zoneCode = "" } = context;
-  
-  // Resolve prompt: Check ai-core first, then fallback to loadPrompt (DB/legacy)
+
+  // Resolve prompt: 1) PCMI/CERFA routing, 2) ai-core prompts, 3) DB/legacy fallback
   let systemPrompt: string;
-  if (piecePromptKey in SYSTEM_PROMPTS) {
+  const pcmiKey = Object.keys(PCMI_PROMPT_MAP).find(k => documentType.toUpperCase().includes(k));
+  if (pcmiKey) {
+    systemPrompt = (SYSTEM_PROMPTS as any)[PCMI_PROMPT_MAP[pcmiKey]];
+  } else if (piecePromptKey in SYSTEM_PROMPTS) {
     systemPrompt = (SYSTEM_PROMPTS as any)[piecePromptKey];
   } else {
     systemPrompt = await loadPrompt(piecePromptKey);

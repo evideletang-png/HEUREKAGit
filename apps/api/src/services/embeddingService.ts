@@ -41,7 +41,7 @@ export async function insertChunk(
     content,
     chunkIndex,
     pageNumber,
-    embedding: embedding.map(String), // Fallback: storing as text array
+    embedding: embedding, // pgvector number[] — stored as vector(1536)
     metadata
   });
 }
@@ -54,8 +54,9 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
   const limit = filters.limit || 15;
   const { jurisdictionContext, includeTrace } = filters;
 
-  // 1. Vector Similarity Score (FALLBACK: Disabled as pgvector is missing on host)
-  const similarityScore = sql<number>`0`; // Vector search disabled, relying on metadata grounding
+  // 1. Vector Similarity Score using pgvector cosine distance (<=>)
+  const vectorLiteral = `[${queryEmbedding.join(",")}]`;
+  const similarityScore = sql<number>`1 - (${baseIAEmbeddingsTable.embedding} <=> ${vectorLiteral}::vector)`;
   
   // 2. Lexical / Keyword matching for Grounding (BOOSTED)
   const lexicalMatchWeight = 5.0; 
@@ -69,11 +70,11 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
   // 3. Authority Score
   const authorityScoreJson = sql<number>`COALESCE((${baseIAEmbeddingsTable.metadata}->>'source_authority')::numeric, 1)`;
 
-  // 4. Combined Score
+  // 4. Combined Score (semantic 50% + authority 30% + lexical boost 20%)
   const finalScore = sql<number>`
-    (${similarityScore} * 0.4) + 
-    ((${authorityScoreJson} / 10.0) * 0.6) + 
-    ${lexicalScore}
+    (${similarityScore} * 0.5) +
+    ((${authorityScoreJson} / 10.0) * 0.3) +
+    (${lexicalScore} * 0.2)
   `;
 
   // 5. BOUNDARY FILTERING

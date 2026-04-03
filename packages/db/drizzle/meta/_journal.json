@@ -8,6 +8,13 @@
       "when": 1775168678667,
       "tag": "0000_modern_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775200000000,
+      "tag": "0001_pgvector_embeddings",
+      "breakpoints": true
     }
   ]
 }

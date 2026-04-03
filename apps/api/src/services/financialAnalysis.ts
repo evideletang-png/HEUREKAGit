@@ -6,11 +6,16 @@ import { evaluateFinanceModule, ProjectVariables, MairieParameters, FormulaOutpu
  * Removed: Profitability, Yields, Market Price ROI.
  */
 export const DEFAULT_FORMULAS: Record<string, string> = {
+  // Regulatory taxes
   "taxe_amenagement_commune": "surface_taxable_creee * valeur_forfaitaire_ta_m2 * taux_taxe_amenagement_commune",
   "taxe_amenagement_dept": "surface_taxable_creee * valeur_forfaitaire_ta_m2 * taux_taxe_amenagement_departement",
   "redevance_archeologie_preventive": "surface_taxable_creee * valeur_forfaitaire_ta_m2 * taux_rap",
   "taxe_amenagement_totale": "taxe_amenagement_commune + taxe_amenagement_dept + redevance_archeologie_preventive",
-  "estimation_taxe_fonciere_annuelle": "(surface_taxable_creee + surface_taxable_existante) * 45 * 0.5 * taux_taxe_fonciere" // Base forfaitaire estimée
+  "estimation_taxe_fonciere_annuelle": "(surface_taxable_creee + surface_taxable_existante) * 45 * 0.5 * taux_taxe_fonciere", // Base forfaitaire estimée
+  // Construction cost estimates
+  "cout_construction_total": "surface_habitable * cout_construction",          // cout_construction = €/m² (e.g. 1500)
+  "cout_vrd": "surface_habitable * cout_vrd_m2",                               // VRD: voiries, réseaux, divers
+  "cout_total_projet": "cout_construction_total + cout_vrd + taxe_amenagement_totale", // All-in project cost
 };
 
 /**
@@ -37,8 +42,12 @@ export function mapSettingsToParams(settings: any): MairieParameters {
     // We keep these for formula context but they are no longer the primary focus
     marché_local: {
       prix_m2: settings?.prixM2Maison ?? 2500,
-      rendement_locatif_maison: 0, 
+      rendement_locatif_maison: 0,
       rendement_locatif_collectif: 0,
+    },
+    // Construction cost parameters (used in DEFAULT_FORMULAS)
+    couts_construction: {
+      cout_vrd_m2: settings?.coutVrdM2 ?? 200, // Default: 200€/m² for VRD
     }
   };
 }

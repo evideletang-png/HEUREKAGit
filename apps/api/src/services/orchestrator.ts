@@ -1,14 +1,17 @@
-import { 
-  db, 
-  dossiersTable, 
-  documentReviewsTable, 
-  rulesTable, 
-  baseIADocumentsTable, 
-  globalConfigsTable, 
+import {
+  db,
+  dossiersTable,
+  documentReviewsTable,
+  rulesTable,
+  baseIADocumentsTable,
+  globalConfigsTable,
   municipalitySettingsTable,
   analysesTable,
   zoneAnalysesTable,
-  ruleArticlesTable
+  ruleArticlesTable,
+  buildabilityResultsTable,
+  parcelsTable,
+  townHallPromptsTable
 } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import { createHash } from "crypto";
@@ -234,8 +237,26 @@ export async function orchestrateDossierAnalysis(
     resolvedProjectData[k] = (v as any).value;
   }
 
-  // 6. SMART CADASTRE & ZONE ENRICHMENT
-  if (initialAddress) {
+  // 6. SMART CADASTRE & ZONE ENRICHMENT (skip if analysis already has parcel + zone data)
+  let skipGeocoding = false;
+  if (analysisId) {
+    try {
+      const [existingParcel] = await db.select().from(parcelsTable)
+        .where(eq(parcelsTable.analysisId, analysisId)).limit(1);
+      const [existingAnalysis] = await db.select({ zoneCode: analysesTable.zoneCode })
+        .from(analysesTable).where(eq(analysesTable.id, analysisId)).limit(1);
+      if (existingParcel && existingAnalysis?.zoneCode) {
+        skipGeocoding = true;
+        parcelData = existingParcel;
+        finalZone = existingAnalysis.zoneCode;
+        logger.info(`[Orchestrator] Skipping geocoding — analysis ${analysisId} already has zone ${finalZone} and parcel data.`);
+      }
+    } catch (e) {
+      logger.warn("[Orchestrator] Could not check existing parcel:", e);
+    }
+  }
+
+  if (!skipGeocoding && initialAddress) {
     try {
       const geoResults = await geocodeAddress(initialAddress);
       if (geoResults && geoResults.length > 0) {
@@ -310,6 +331,35 @@ export async function orchestrateDossierAnalysis(
   // 8. CALCULATION TUNNEL (Step 6)
   const { CalculationTunnel } = await import("./calculationTunnel.js");
   calculations = await CalculationTunnel.runTunnel(parcelData || {}, resolvedProjectData, normalizedParams);
+
+  // 8b. PERSIST BUILDABILITY RESULTS
+  if (analysisId && calculations) {
+    try {
+      const buildabilityData = {
+        analysisId,
+        maxFootprintM2: calculations?.footprint?.max ?? calculations?.footprint?.authorized ?? null,
+        remainingFootprintM2: calculations?.footprint?.remaining ?? null,
+        maxHeightM: calculations?.height?.max ?? null,
+        setbackRoadM: calculations?.setbacks?.road ?? null,
+        setbackBoundaryM: calculations?.setbacks?.boundary ?? null,
+        parkingRequirement: calculations?.parking?.requirement != null ? String(calculations.parking.requirement) : null,
+        greenSpaceRequirement: calculations?.greenSpace?.requirement != null ? String(calculations.greenSpace.requirement) : null,
+        assumptionsJson: JSON.stringify(calculations?.assumptions || {}),
+        confidenceScore: calculations?.confidence ?? 0.5,
+        resultSummary: calculations?.summary ?? `Zone ${finalZone}: emprise max ${calculations?.footprint?.max ?? "?"}m², hauteur max ${calculations?.height?.max ?? "?"}m`,
+      };
+      const [existingBuildability] = await db.select({ id: buildabilityResultsTable.id })
+        .from(buildabilityResultsTable).where(eq(buildabilityResultsTable.analysisId, analysisId)).limit(1);
+      if (!existingBuildability) {
+        await db.insert(buildabilityResultsTable).values(buildabilityData);
+      } else {
+        await db.update(buildabilityResultsTable).set(buildabilityData).where(eq(buildabilityResultsTable.id, existingBuildability.id));
+      }
+      logger.info(`[Orchestrator] Buildability results persisted for analysis ${analysisId}`);
+    } catch (bErr) {
+      logger.warn("[Orchestrator] Could not persist buildability results:", bErr);
+    }
+  }
 
   // 9. MCP ENRICHMENT
   try {
@@ -430,7 +480,22 @@ export async function orchestrateDossierAnalysis(
     // Persist Zone Analysis & Articles for "Urbanisme" tab
     console.log(`[Orchestrator] Running AI Triage & Digest for Zone ${finalZone}...`);
     const projectDescription = (typeof currentMeta.pièces?.CERFA === 'object' ? currentMeta.pièces.CERFA.description_projet : "") || initialAddress || "";
-    
+
+    // Phase 2b: Load commune-specific custom prompt from town hall prompts table
+    let communeCustomPrompt: string | undefined;
+    try {
+      const [promptRow] = await db.select({ content: townHallPromptsTable.content })
+        .from(townHallPromptsTable)
+        .where(sql`lower(${townHallPromptsTable.commune}) = ${communeName.toLowerCase()}`)
+        .limit(1);
+      if (promptRow) {
+        communeCustomPrompt = promptRow.content;
+        logger.info(`[Orchestrator] Loaded custom prompt for commune ${communeName}`);
+      }
+    } catch (e) {
+      logger.warn("[Orchestrator] Could not load commune custom prompt:", e);
+    }
+
     // Call the new analyzePLUZone with Triage & Scoring
     const { analyzePLUZone } = await import("./pluAnalysis.js");
     const fullZoneAnalysis = await analyzePLUZone(
@@ -438,7 +503,7 @@ export async function orchestrateDossierAnalysis(
       finalZone,
       `${finalZone} : Zone identifiée`,
       communeName,
-      undefined,
+      communeCustomPrompt,
       projectDescription,
       parcelData
     );
