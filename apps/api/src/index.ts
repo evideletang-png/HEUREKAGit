@@ -38,13 +38,21 @@ async function recoverStuckAnalyses() {
 }
 
 async function start() {
-  // Run DB migrations before accepting traffic
+  // Listen FIRST so Railway's health check gets a response immediately
+  await new Promise<void>((resolve) => {
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Server listening on port ${port}`);
+      resolve();
+    });
+  });
+
+  // Run DB migrations after port is open (health check already passing)
   try {
     await runMigrations();
     console.log("[db] Migrations applied.");
   } catch (err) {
-    console.error("[db] Migration failed — aborting startup.", err);
-    process.exit(1);
+    console.error("[db] Migration failed — server will continue but may be degraded.", err);
+    // Do not process.exit — Railway would loop-restart; log and keep serving
   }
 
   // Recover any analyses left in-flight by a previous process
@@ -54,20 +62,17 @@ async function start() {
     console.warn("[recovery] Stuck analysis recovery skipped:", err);
   }
 
-  app.listen(port, "0.0.0.0", async () => {
-    console.log(`Server listening on port ${port}`);
-    try {
-      await seedDefaultPrompts();
-      console.log("[prompts] Default prompts seeded.");
-    } catch (err) {
-      console.warn("[prompts] Seeding skipped:", err);
-    }
-    try {
-      await seedAdminUser();
-    } catch (err) {
-      console.warn("[seed] Admin user seed skipped:", err);
-    }
-  });
+  try {
+    await seedDefaultPrompts();
+    console.log("[prompts] Default prompts seeded.");
+  } catch (err) {
+    console.warn("[prompts] Seeding skipped:", err);
+  }
+  try {
+    await seedAdminUser();
+  } catch (err) {
+    console.warn("[seed] Admin user seed skipped:", err);
+  }
 }
 
 process.on("unhandledRejection", (reason) => {
