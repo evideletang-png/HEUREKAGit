@@ -35,9 +35,19 @@ app.use("/api", router);
 
 // Serve built frontend (co-hosted deployment)
 const frontendDist = path.resolve(__dirname, "../../web/dist/public");
-app.use(express.static(frontendDist));
+// Hashed assets (JS/CSS) → long-lived cache; index.html → no cache (prevents blank screen after deploy)
+app.use(express.static(frontendDist, {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith("index.html")) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+    }
+  },
+}));
 // SPA fallback — serve index.html for all non-API routes
 app.use((_req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
   res.sendFile(path.join(frontendDist, "index.html"));
 });
 

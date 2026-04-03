@@ -8,6 +8,17 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Reload once on chunk load failure (stale cache after new deploy) -->
+    <script>
+      window.addEventListener('unhandledrejection', function(e) {
+        var msg = (e.reason && (e.reason.message || String(e.reason))) || '';
+        var isChunkError = msg.includes('Failed to fetch') || msg.includes('Importing a module') || msg.includes('Loading chunk') || msg.includes('dynamically imported');
+        if (isChunkError && !sessionStorage.getItem('heureka_chunk_reload')) {
+          sessionStorage.setItem('heureka_chunk_reload', '1');
+          window.location.reload();
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
