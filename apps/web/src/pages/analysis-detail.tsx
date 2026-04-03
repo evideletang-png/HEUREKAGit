@@ -41,7 +41,8 @@ import {
   ShieldCheck,
   MoreVertical,
   ChevronRight,
-  History
+  History,
+  Sparkles
 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";

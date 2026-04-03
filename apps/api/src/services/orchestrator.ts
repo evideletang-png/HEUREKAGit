@@ -11,7 +11,8 @@ import {
   ruleArticlesTable,
   buildabilityResultsTable,
   parcelsTable,
-  townHallPromptsTable
+  townHallPromptsTable,
+  geocodingCacheTable
 } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import { createHash } from "crypto";
@@ -34,6 +35,59 @@ import { geocodeAddress } from "./geocoding.js";
 import { getZoningByCoords } from "./planning.js";
 import { getParcelByCoords, getBuildingsByParcel } from "./parcel.js";
 import { DVFService } from "./dvfService.js";
+
+// ─── Geocoding cache helpers ────────────────────────────────────────────────
+
+const GEOCODING_CACHE_TTL_DAYS = 90;
+
+function normalizeAddressKey(address: string): string {
+  return address.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function getCachedGeocode(address: string) {
+  try {
+    const key = normalizeAddressKey(address);
+    const [row] = await db.select().from(geocodingCacheTable)
+      .where(eq(geocodingCacheTable.addressKey, key))
+      .limit(1);
+    if (!row) return null;
+    // Respect TTL
+    if (row.expiresAt && row.expiresAt < new Date()) {
+      await db.delete(geocodingCacheTable).where(eq(geocodingCacheTable.addressKey, key));
+      return null;
+    }
+    return row;
+  } catch {
+    return null;
+  }
+}
+
+async function cacheGeocode(address: string, result: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string; cityName?: string; score?: number }) {
+  try {
+    const key = normalizeAddressKey(address);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + GEOCODING_CACHE_TTL_DAYS);
+    await db.insert(geocodingCacheTable).values({
+      addressKey: key,
+      originalAddress: address,
+      lat: result.lat,
+      lng: result.lng,
+      label: result.label,
+      banId: result.banId,
+      inseeCode: result.inseeCode,
+      cityName: result.cityName,
+      score: result.score,
+      expiresAt,
+    }).onConflictDoUpdate({
+      target: geocodingCacheTable.addressKey,
+      set: { lat: result.lat, lng: result.lng, label: result.label, banId: result.banId, inseeCode: result.inseeCode, cityName: result.cityName, score: result.score, expiresAt },
+    });
+  } catch (e) {
+    logger.warn("[GeocodeCache] Write failed:", e);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Knowledge Routing Rules: Mapping piece codes to search priorities
@@ -135,6 +189,17 @@ export async function orchestrateDossierAnalysis(
 ): Promise<OrchestrationResult> {
   logger.info(`>>> [8-Step Tunnel] Starting Orchestration. Dossier: ${dossierId || "N/A"}, Analysis: ${analysisId || "N/A"}`);
 
+  // Helper: update analyses.status for progress tracking
+  async function setAnalysisStatus(s: "collecting_data" | "parsing_documents" | "extracting_rules" | "calculating" | "completed" | "failed") {
+    if (!analysisId) return;
+    try {
+      await db.update(analysesTable).set({ status: s, updatedAt: new Date() }).where(eq(analysesTable.id, analysisId));
+      logger.info(`[Orchestrator] Analysis ${analysisId} status → ${s}`);
+    } catch (e) {
+      logger.warn("[Orchestrator] Could not update analysis status:", e);
+    }
+  }
+
   const metrics = new MetricsTracker();
   let score = 100;
   let finalZone = "UA";
@@ -174,6 +239,9 @@ export async function orchestrateDossierAnalysis(
     initialCommune = analysis.postalCode || "00000"; // Fallback to postal code if city hidden
   }
 
+  try {
+  await setAnalysisStatus("collecting_data");
+
   // 1. IDENTIFY THE ANALYSIS CONTEXT (Step 1)
   const contextIdentification = await identifyAnalysisContext(initialCommune, initialAddress || undefined);
   const currentCommune = contextIdentification.commune;
@@ -187,6 +255,8 @@ export async function orchestrateDossierAnalysis(
 
   // 3. Build Regulatory Context (RAG)
   const context = await buildAnalysisContext(currentCommune, finalZone, jurisdictionContext);
+
+  await setAnalysisStatus("parsing_documents");
 
   // 4. PARSE DOSSIER DOCUMENTS
   const fieldCandidates: Record<string, CandidateValue<any>[]> = {};
@@ -258,9 +328,19 @@ export async function orchestrateDossierAnalysis(
 
   if (!skipGeocoding && initialAddress) {
     try {
-      const geoResults = await geocodeAddress(initialAddress);
-      if (geoResults && geoResults.length > 0) {
-        const bestMatch = geoResults[0];
+      // Check cache first
+      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string } | null =
+        await getCachedGeocode(initialAddress);
+      if (bestMatch) {
+        logger.info(`[Orchestrator] Geocoding cache hit for "${initialAddress}"`);
+      } else {
+        const geoResults = await geocodeAddress(initialAddress);
+        if (geoResults && geoResults.length > 0) {
+          bestMatch = geoResults[0];
+          await cacheGeocode(initialAddress, { lat: bestMatch.lat, lng: bestMatch.lng, label: bestMatch.label, banId: bestMatch.banId, inseeCode: bestMatch.inseeCode, score: (bestMatch as any).score });
+        }
+      }
+      if (bestMatch) {
         parcelData = await getParcelByCoords(bestMatch.lat, bestMatch.lng, bestMatch.banId, bestMatch.label);
         if (parcelData) {
           buildingData = await getBuildingsByParcel(parcelData);
@@ -296,6 +376,8 @@ export async function orchestrateDossierAnalysis(
     resolvedProjectData[k] = (v as any).value;
   }
 
+  await setAnalysisStatus("extracting_rules");
+
   // 7. RULE EXTRACTION & NORMALIZATION (Step 3, 4, 5)
   // Resolve commune name for AI extraction (mismatch fix for 37203 vs Rochecorbon)
   let communeName = currentCommune;
@@ -327,6 +409,8 @@ export async function orchestrateDossierAnalysis(
 
   const { NormalizationService } = await import("./normalizationService.js");
   const normalizedParams = await NormalizationService.normalizeRules(parsedRules);
+
+  await setAnalysisStatus("calculating");
 
   // 8. CALCULATION TUNNEL (Step 6)
   const { CalculationTunnel } = await import("./calculationTunnel.js");
@@ -560,6 +644,8 @@ export async function orchestrateDossierAnalysis(
     }
   }
 
+  await setAnalysisStatus("completed");
+
   return {
     dossierId: dossierId || "ANALYSIS_ONLY",
     status: "completed",
@@ -579,6 +665,10 @@ export async function orchestrateDossierAnalysis(
     pieceChecklist,
     results: [{ task: "orchestration", result: "completed" }]
   };
+  } catch (err) {
+    await setAnalysisStatus("failed");
+    throw err;
+  }
 }
 /**
  * Step 1: Identify Analysis Context (MCP-First)
@@ -591,24 +681,34 @@ async function identifyAnalysisContext(communeInsee: string, address?: string) {
   let lat = 0;
   let lng = 0;
 
-  // 1. MCP Geocoding First
-  try {
-    const { callMcpTool } = await import("./mcpClient.js");
-    const geocodeResult = await callMcpTool("https://mcp.data.gouv.fr/mcp", "geocode", { q: address });
-    if (geocodeResult && geocodeResult.lat) {
-       lat = geocodeResult.lat;
-       lng = geocodeResult.lng;
-       detectedCommune = geocodeResult.citycode || communeInsee;
-       logger.info(`[MCP Step 1] Geocoding successful: ${lat}, ${lng} (INSEE: ${detectedCommune})`);
-    }
-  } catch (err) {
-     logger.warn("[MCP Step 1] Geocoding MCP failed, falling back to legacy fetch.");
-     const gResults = await geocodeAddress(address || "");
-     if (gResults.length > 0) {
+  // 1. MCP Geocoding First (with DB cache)
+  const cachedStep1 = address ? await getCachedGeocode(address) : null;
+  if (cachedStep1) {
+    lat = cachedStep1.lat;
+    lng = cachedStep1.lng;
+    detectedCommune = cachedStep1.inseeCode || communeInsee;
+    logger.info(`[Step 1] Geocoding cache hit for "${address}"`);
+  } else {
+    try {
+      const { callMcpTool } = await import("./mcpClient.js");
+      const geocodeResult = await callMcpTool("https://mcp.data.gouv.fr/mcp", "geocode", { q: address });
+      if (geocodeResult && geocodeResult.lat) {
+        lat = geocodeResult.lat;
+        lng = geocodeResult.lng;
+        detectedCommune = geocodeResult.citycode || communeInsee;
+        logger.info(`[MCP Step 1] Geocoding successful: ${lat}, ${lng} (INSEE: ${detectedCommune})`);
+        if (address) await cacheGeocode(address, { lat, lng, label: address, inseeCode: detectedCommune });
+      }
+    } catch (err) {
+      logger.warn("[MCP Step 1] Geocoding MCP failed, falling back to legacy fetch.");
+      const gResults = await geocodeAddress(address || "");
+      if (gResults.length > 0) {
         lat = gResults[0].lat;
         lng = gResults[0].lng;
         detectedCommune = gResults[0].inseeCode || communeInsee;
-     }
+        if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score });
+      }
+    }
   }
 
   // 2. Planning (Zone Identification)

@@ -18,3 +18,4 @@ export * from "./baseIAEmbeddings";
 export * from "./dossierEvents";
 export * from "./communes";
 export * from "./notifications";
+export * from "./geocodingCache";
