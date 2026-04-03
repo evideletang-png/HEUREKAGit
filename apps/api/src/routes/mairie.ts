@@ -1046,6 +1046,37 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
   } catch(err) { res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
 
+/**
+ * GET /gpu/probe?insee=37112
+ * Returns the raw GPU API response for debugging response format issues.
+ */
+router.get("/gpu/probe", async (req: AuthRequest, res) => {
+  const insee = (req.query.insee as string || "").trim();
+  if (!insee) return res.status(400).json({ error: "insee param required" });
+
+  const { execSync: exec } = await import("child_process");
+  const urls = [
+    `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&gridType=insee&active=true&sort=-publicationDate`,
+    `https://www.geoportail-urbanisme.gouv.fr/api/document?codeMunicipalite=${insee}`,
+    `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&gridType=insee`,
+  ];
+
+  const results: any[] = [];
+  for (const url of urls) {
+    try {
+      const cmd = `curl -s -k --max-time 15 -H "Accept: application/json" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
+      const raw = exec(cmd, { maxBuffer: 2 * 1024 * 1024 }).toString().trim();
+      let parsed: any = null;
+      try { parsed = JSON.parse(raw); } catch { parsed = raw.slice(0, 500); }
+      results.push({ url, type: Array.isArray(parsed) ? "array" : typeof parsed, keys: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : null, length: Array.isArray(parsed) ? parsed.length : null, sample: Array.isArray(parsed) ? parsed.slice(0, 2) : parsed });
+    } catch (e: any) {
+      results.push({ url, error: e.message });
+    }
+  }
+
+  return res.json({ insee, results });
+});
+
 router.post("/gpu/sync", async (req: AuthRequest, res) => {
   try {
     // 1. Resolve INSEE logic (Dynamic & Robust)
