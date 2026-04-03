@@ -43,7 +43,7 @@ export class GPUProviderService {
    */
   private static curlFetch(url: string): any {
     try {
-      const command = `curl -s -k --max-time 30 -H "Accept: application/json" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
+      const command = `curl -s -L -k --max-time 30 -H "Accept: application/json" -H "Accept-Language: fr-FR,fr;q=0.9" -H "Referer: https://www.geoportail-urbanisme.gouv.fr/" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
       const stdout = execSync(command, { maxBuffer: 10 * 1024 * 1024 }).toString().trim();
 
       if (!stdout) {
@@ -174,6 +174,36 @@ export class GPUProviderService {
       path: f.path || "",
       url: `${GPUProviderService.BASE_URL}/document/${documentId}/files/${encodeURIComponent(f.name)}`
     }));
+  }
+
+  /**
+   * Returns raw API responses for every URL variant — used when sync returns 0 docs
+   * to expose the exact API behaviour without needing to read Railway logs.
+   */
+  static diagnose(inseeCode: string): Record<string, any> {
+    const urls = [
+      `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
+      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
+      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=municipality`,
+      `${GPUProviderService.BASE_URL}/document/by-municipality/${inseeCode}`,
+    ];
+    const results: Record<string, any> = {};
+    for (const url of urls) {
+      try {
+        const cmd = `curl -s -L -k --max-time 15 -H "Accept: application/json" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
+        const { execSync: exec } = require("child_process");
+        const raw = exec(cmd, { maxBuffer: 1024 * 1024 }).toString().trim();
+        let parsed: any;
+        try { parsed = JSON.parse(raw); } catch { parsed = raw.slice(0, 500); }
+        results[url] = {
+          type: Array.isArray(parsed) ? `array[${parsed.length}]` : (typeof parsed === "object" && parsed ? `object{${Object.keys(parsed).join(",")}}` : typeof parsed),
+          raw: typeof parsed === "string" ? parsed : JSON.stringify(parsed).slice(0, 600),
+        };
+      } catch (e: any) {
+        results[url] = { error: e.message };
+      }
+    }
+    return results;
   }
 
   /**

@@ -1173,7 +1173,9 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     logger.info("[GPU] Active documents", { active: activeDocs.length, total: allDocs.length });
 
     if (activeDocs.length === 0) {
-      return res.json({ success: true, count: 0, documents: [], message: `Aucun document trouvé sur le GPU pour INSEE ${insee}. Essayez d'importer manuellement.` });
+      // Return diagnostic info so the caller can see what the GPU API actually returned
+      const diagnostic = await GPUProviderService.diagnose(insee);
+      return res.json({ success: true, count: 0, documents: [], insee, message: `Aucun document trouvé sur le GPU pour INSEE ${insee}.`, diagnostic });
     }
 
     let count = 0;
