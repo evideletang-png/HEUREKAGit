@@ -9,7 +9,8 @@ RUN apk add --no-cache \
     libjpeg-turbo-dev \
     python3 \
     make \
-    g++
+    g++ \
+    poppler-utils
 
 RUN npm install -g pnpm@9.15.9
 
@@ -57,7 +58,7 @@ RUN pnpm --filter "@workspace/api-server" run build
 # ── Production image ────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
-RUN apk add --no-cache pixman cairo pango libpng libjpeg-turbo
+RUN apk add --no-cache pixman cairo pango libpng libjpeg-turbo poppler-utils
 
 WORKDIR /app
 

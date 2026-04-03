@@ -18,6 +18,7 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
 import { GPUProviderService } from "./gpuProviderService.js";
 import { processDocumentForRAG } from "./baseIAIngestion.js";
+import { VisionService } from "./visionService.js";
 
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 
@@ -104,8 +105,13 @@ async function fetchFromGPU(inseeCode: string): Promise<FetchedPLUDoc[]> {
         const ok = curlDownload(file.url, destPath);
         if (!ok) { logger.warn(`[PLUAutoFetch] GPU download failed: ${file.name}`); continue; }
 
-        const rawText = await extractPDFText(destPath);
-        if (rawText.length < 200) { logger.warn(`[PLUAutoFetch] GPU: no text in ${file.name}`); continue; }
+        let rawText = await extractPDFText(destPath);
+        // Scanned PDF fallback: use Vision OCR if pdf-parse returned nothing
+        if (rawText.length < 200) {
+          logger.info(`[PLUAutoFetch] PDF has little text, trying Vision OCR: ${file.name}`);
+          rawText = await VisionService.extractTextFromScannedPDF(destPath, 5);
+        }
+        if (rawText.length < 200) { logger.warn(`[PLUAutoFetch] GPU: no text even after OCR in ${file.name}`); continue; }
 
         logger.info(`[PLUAutoFetch] GPU ✅ ${file.name} (${rawText.length} chars)`);
         results.push({ rawText, fileName: safeFilename, docType: classifyDocType(file.name), source: "gpu" });

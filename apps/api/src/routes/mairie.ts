@@ -1267,16 +1267,16 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
                     `Ce document est le plan graphique de zonage de la commune. Il délimite les zones (U, AU, N, A) et leurs sous-zones. Se référer au règlement écrit pour les règles applicables par zone.`,
                   ].filter(Boolean).join("\n");
                 } else {
-                  // Non-graphic PDF with very little text — retry pdf-parse with a different approach
+                  // Non-graphic PDF with little text — try Vision OCR (pdftoppm → GPT-4o)
                   try {
-                    ingestText = await extractTextFromFile(destPath, "application/pdf");
+                    ingestText = await VisionService.extractTextFromScannedPDF(destPath, 5);
                     if (ingestText.length > 100) {
-                      logger.info("[GPU] Second pdf-parse attempt succeeded for low-text PDF", { file: safeFilename, chars: ingestText.length });
+                      logger.info("[GPU] Vision OCR succeeded for scanned PDF", { file: safeFilename, chars: ingestText.length });
                     } else {
                       ingestText = "";
                     }
-                  } catch (retryErr) {
-                    logger.warn("[GPU] Second pdf-parse attempt failed", { file: safeFilename });
+                  } catch (visionErr) {
+                    logger.warn("[GPU] Vision OCR failed for low-text PDF", { file: safeFilename });
                   }
                 }
               }
