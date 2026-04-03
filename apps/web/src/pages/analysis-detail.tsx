@@ -39,6 +39,8 @@ import {
   LayoutList,
   TrendingUp,
   ShieldCheck,
+  ShieldAlert,
+  FileCheck,
   MoreVertical,
   ChevronRight,
   History,
@@ -821,7 +823,7 @@ export default function AnalysisDetailPage() {
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                                 <div>
                                   <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
-                                    <Maximize className="w-3 h-3" /> Dimensions Clés
+                                    <Maximize2 className="w-3 h-3" /> Dimensions Clés
                                   </h5>
                                   <ul className="text-xs space-y-1.5 font-medium">
                                     {digest.dimensions?.maxFootprint && <li>Emprise: {digest.dimensions.maxFootprint}</li>}
