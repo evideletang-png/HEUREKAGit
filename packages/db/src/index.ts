@@ -21,6 +21,19 @@ export const db = drizzle(pool, { schema });
  * works both in local dev (/repo root) and in the Docker runner (/app).
  */
 export async function runMigrations() {
+  // Enable pgvector before running migrations — idempotent, safe to run every time.
+  // This removes the need for any manual `CREATE EXTENSION` step in the database.
+  const client = await pool.connect();
+  try {
+    await client.query("CREATE EXTENSION IF NOT EXISTS vector;");
+    console.log("[db] pgvector extension enabled.");
+  } catch (err) {
+    // pgvector not installed on this host — vector similarity will be disabled.
+    console.warn("[db] pgvector not available — semantic search disabled:", (err as Error).message);
+  } finally {
+    client.release();
+  }
+
   const migrationsFolder = path.resolve(process.cwd(), "packages/db/drizzle");
   await migrate(db, { migrationsFolder });
 }
