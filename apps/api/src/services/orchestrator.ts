@@ -574,6 +574,12 @@ export async function orchestrateDossierAnalysis(
     conflicts: detailedResolvedFields.filter(f => f.status === "conflict")
   };
 
+  // Build geoContextJson using keys the frontend expects
+  const totalBuildingFootprint = buildingData?.buildings?.reduce((s: number, b: any) => s + (b.footprintM2 || 0), 0) ?? 0;
+  const parcelSurface = parcelData?.parcelSurfaceM2 ?? 0;
+  const roadFrontage = parcelData?.roadFrontageLengthM ?? 0;
+  const sideLength = parcelData?.sideBoundaryLengthM ?? 0;
+
   const finalUpdate = {
     metadata: currentMeta,
     globalScore: score,
@@ -583,7 +589,30 @@ export async function orchestrateDossierAnalysis(
       zone: finalZone,
       financial_analysis: financialAnalysis,
       plu_trace: strictPluAnalysis,
-      mcp_context: { marketData, adminGuide }
+      // Keys the frontend reads directly
+      parcel_metrics: {
+        perimeter_m: parcelSurface > 0 ? Math.round(4 * Math.sqrt(parcelSurface)) : null,
+        depth_m: roadFrontage > 0 && parcelSurface > 0 ? Math.round(parcelSurface / roadFrontage) : null,
+        is_corner_plot: sideLength > 0 && roadFrontage > 0 && sideLength / roadFrontage > 0.6,
+      },
+      parcel_boundaries: {
+        road_length_m: roadFrontage || null,
+        side_length_m: sideLength || null,
+        front_road_name: null,
+      },
+      buildings_on_parcel: {
+        count: buildingData?.buildings?.length ?? 0,
+        footprint_m2: totalBuildingFootprint || null,
+        coverage_ratio: parcelSurface > 0 && totalBuildingFootprint > 0 ? totalBuildingFootprint / parcelSurface : null,
+        avg_height_m: buildingData?.buildings?.[0]?.avgHeightM ?? null,
+        avg_floors: buildingData?.buildings?.[0]?.avgFloors ?? null,
+        estimated_floor_area_m2: buildingData?.buildings?.reduce((s: number, b: any) => s + (b.estimatedFloorAreaM2 || 0), 0) || null,
+      },
+      neighbour_context: {},
+      roads: {},
+      plu: strictPluAnalysis?.zoneRules ?? {},
+      market_data: marketData ?? null,
+      admin_guide: adminGuide ?? null,
     }),
     updatedAt: new Date()
   };
@@ -617,16 +646,21 @@ export async function orchestrateDossierAnalysis(
     }
 
     // Call the new analyzePLUZone with Triage & Scoring
-    const { analyzePLUZone } = await import("./pluAnalysis.js");
-    const fullZoneAnalysis = await analyzePLUZone(
-      regulatoryContext,
-      finalZone,
-      `${finalZone} : Zone identifiée`,
-      communeName,
-      communeCustomPrompt,
-      projectDescription,
-      parcelData
-    );
+    let fullZoneAnalysis: any = { zoneLabel: `Zone ${finalZone}`, digest: {}, issues: [], articles: [] };
+    try {
+      const { analyzePLUZone } = await import("./pluAnalysis.js");
+      fullZoneAnalysis = await analyzePLUZone(
+        regulatoryContext,
+        finalZone,
+        `${finalZone} : Zone identifiée`,
+        communeName,
+        communeCustomPrompt,
+        projectDescription,
+        parcelData
+      );
+    } catch (pluErr) {
+      logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data:", pluErr);
+    }
 
     const [existingZone] = await db.select().from(zoneAnalysesTable)
       .where(eq(zoneAnalysesTable.analysisId, analysisId)).limit(1);
