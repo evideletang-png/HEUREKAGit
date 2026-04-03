@@ -31,6 +31,12 @@ export interface GPUFile {
 export class GPUProviderService {
   private static BASE_URL = "https://www.geoportail-urbanisme.gouv.fr/api";
   private static ATOM_BASE = "https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml";
+  // WFS endpoints that return GeoJSON with gpu_doc_id per feature
+  private static WFS_URLS = [
+    "https://data.geopf.fr/wfs/ows",
+    "https://www.geoportail-urbanisme.gouv.fr/wfs/",
+    "https://wxs.ign.fr/essentiels/geoportail/wfs",
+  ];
 
   // Cache ATOM-derived files so getFilesByDocumentId() works unchanged
   private static atomFilesCache: Map<string, GPUFile[]> = new Map();
@@ -88,8 +94,73 @@ export class GPUProviderService {
 
   // ─── Public API ─────────────────────────────────────────────────────────────
 
+  /**
+   * Step 1 of the Make.com flow: WFS GeoJSON → gpu_doc_id list
+   * Step 2: GET /api/document/{gpu_doc_id}/details for each ID
+   */
+  private static async getDocIdsByWFS(inseeCode: string): Promise<string[]> {
+    const wfsParams = new URLSearchParams({
+      SERVICE: "WFS",
+      VERSION: "2.0.0",
+      REQUEST: "GetFeature",
+      typeName: "GPU:document",
+      outputFormat: "application/json",
+      CQL_FILTER: `code_insee='${inseeCode}'`,
+    });
+
+    for (const base of GPUProviderService.WFS_URLS) {
+      const url = `${base}?${wfsParams.toString()}`;
+      console.log(`[GPU] WFS query: ${url}`);
+      const raw = GPUProviderService.curl(url, false);
+      if (!raw || raw.startsWith("<!") || raw.startsWith("<html")) continue;
+      try {
+        const geoJson = JSON.parse(raw);
+        const features: any[] = geoJson?.features || [];
+        const ids = features
+          .map((f: any) => f?.properties?.gpu_doc_id || f?.properties?.id || f?.id)
+          .filter(Boolean);
+        if (ids.length > 0) {
+          console.log(`[GPU] WFS ✅ found ${ids.length} gpu_doc_ids via ${base}`);
+          return ids;
+        }
+        console.warn(`[GPU] WFS 0 features at ${base}: ${raw.slice(0, 200)}`);
+      } catch {
+        console.warn(`[GPU] WFS non-JSON at ${base}: ${raw.slice(0, 100)}`);
+      }
+    }
+    return [];
+  }
+
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
-    // 1. Try INSPIRE ATOM feed (primary — no WAF, direct PDFs)
+    // 1. WFS → gpu_doc_id → /api/document/{id}/details  (exact Make.com flow)
+    const docIds = await GPUProviderService.getDocIdsByWFS(inseeCode);
+    if (docIds.length > 0) {
+      const docs: GPUDocument[] = [];
+      for (const docId of docIds) {
+        const url = `${GPUProviderService.BASE_URL}/document/${docId}/details`;
+        console.log(`[GPU] Fetching details: ${url}`);
+        const raw = GPUProviderService.curl(url, false);
+        if (!raw) continue;
+        try {
+          const d = JSON.parse(raw);
+          docs.push({
+            id: d.id || d.gpu_doc_id || docId,
+            name: d.name || d.title || docId,
+            type: d.type || d.documentType || "PLU",
+            status: d.status || d.etat || "production",
+            legalStatus: d.legalStatus || d.statutJuridique || "opposable",
+            publicationDate: d.publicationDate || d.datePubli,
+            originalName: d.originalName || d.name || docId,
+          });
+        } catch {
+          // Still add with minimal info so getFilesByDocumentId() is called
+          docs.push({ id: docId, name: docId, type: "PLU", status: "production", legalStatus: "opposable", originalName: docId });
+        }
+      }
+      if (docs.length > 0) return docs;
+    }
+
+    // 2. Try INSPIRE ATOM feed (primary — no WAF, direct PDFs)
     const atomUrl = `${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`;
     console.log(`[GPU] Trying ATOM feed: ${atomUrl}`);
     const xml = GPUProviderService.curl(atomUrl, true);
@@ -185,13 +256,13 @@ export class GPUProviderService {
 
   /** Returns raw responses for each URL variant — included in sync response when 0 docs found */
   static diagnose(inseeCode: string): Record<string, any> {
-    const urls: Record<string, boolean> = {
-      [`${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`]: true,
-      [`${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`]: false,
-      [`${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`]: false,
-    };
+    const probes: Array<{ url: string; xml: boolean }> = [
+      { url: `${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`, xml: true },
+      { url: `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`, xml: false },
+      { url: `https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeName=GPU:document&outputFormat=application/json&CQL_FILTER=code_insee='${inseeCode}'`, xml: false },
+    ];
     const results: Record<string, any> = {};
-    for (const [url, xml] of Object.entries(urls)) {
+    for (const { url, xml } of probes) {
       const raw = GPUProviderService.curl(url, xml);
       results[url] = raw ? raw.slice(0, 600) : "(no response)";
     }
