@@ -800,29 +800,60 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
 router.get("/documents", async (req: AuthRequest, res) => {
   try {
     const requestedCommune = req.query.commune as string | undefined;
-    
-    let whereClause = eq(townHallDocumentsTable.userId, req.user!.userId);
+    const userId = req.user!.userId;
+
+    // Fetch user's role and assigned communes
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    const isAdmin = currentUser[0]?.role === "admin";
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
+
+    // Build where clause:
+    // - admin: no userId restriction (can see all communes' docs)
+    // - mairie: documents for their assigned communes (regardless of who uploaded them)
+    //   so a GPU sync by one account is visible to all agents of the same commune
+    let whereClause: any;
     if (requestedCommune) {
-      whereClause = and(whereClause, eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase())) as any;
+      // Filter to a specific commune (case-insensitive)
+      const communeFilter = eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase());
+      if (isAdmin) {
+        whereClause = communeFilter;
+      } else {
+        // Non-admin: only show if the requested commune is in their assigned list
+        const isAssigned = assignedCommunes.some(c => c.toLowerCase() === requestedCommune.toLowerCase());
+        whereClause = isAssigned ? communeFilter : sql`false`;
+      }
+    } else {
+      // No commune filter: return docs for all assigned communes
+      if (isAdmin) {
+        whereClause = undefined; // all docs
+      } else if (assignedCommunes.length > 0) {
+        whereClause = inArray(
+          sql`lower(${townHallDocumentsTable.commune})`,
+          assignedCommunes.map(c => c.toLowerCase())
+        );
+      } else {
+        // Fallback: user's own uploads only
+        whereClause = eq(townHallDocumentsTable.userId, userId);
+      }
     }
 
-    const docs = await db.select().from(townHallDocumentsTable)
+    const docs = await db.select({
+      id: townHallDocumentsTable.id,
+      title: townHallDocumentsTable.title,
+      fileName: townHallDocumentsTable.fileName,
+      createdAt: townHallDocumentsTable.createdAt,
+      commune: townHallDocumentsTable.commune,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+      documentType: townHallDocumentsTable.documentType,
+      tags: townHallDocumentsTable.tags,
+    }).from(townHallDocumentsTable)
       .where(whereClause)
       .orderBy(desc(townHallDocumentsTable.createdAt));
-    
-    const filteredDocs = docs.map(d => ({ 
-      id: d.id, 
-      title: d.title, 
-      fileName: d.fileName, 
-      createdAt: d.createdAt, 
-      commune: d.commune,
-      category: d.category,
-      subCategory: d.subCategory,
-      documentType: d.documentType,
-      tags: d.tags
-    }));
-    return res.json({ documents: filteredDocs });
-  } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
+
+    return res.json({ documents: docs });
+  } catch (err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
 
 // POST /documents/analyze — upload files, extract text, classify, return staging data
