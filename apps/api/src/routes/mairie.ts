@@ -1007,11 +1007,24 @@ router.post("/documents/batch/confirm", async (req: AuthRequest, res) => {
         const content = fs.readFileSync(tempPath);
         const hash = createHash("sha256").update(content).digest("hex");
 
-        const [existing] = await db.select().from(baseIADocumentsTable)
+        // Check for duplicate in baseIADocumentsTable by hash
+        const [existingBase] = await db.select({ id: baseIADocumentsTable.id })
+          .from(baseIADocumentsTable)
           .where(eq(baseIADocumentsTable.fileHash, hash)).limit(1);
-        if (existing) {
+        if (existingBase) {
+          // Re-classify the existing townHallDocument with the user's current selection
+          await db.update(townHallDocumentsTable).set({
+            category: staged.category,
+            subCategory: staged.subCategory,
+            documentType: staged.documentType,
+            tags: staged.tags,
+            commune: targetCommune || null,
+          }).where(and(
+            eq(townHallDocumentsTable.userId, req.user!.userId),
+            eq(townHallDocumentsTable.fileName, staged.fileName),
+          ));
           try { fs.unlinkSync(tempPath); } catch {}
-          skipped++;
+          indexed++; // count as re-classified, not skipped
           continue;
         }
 

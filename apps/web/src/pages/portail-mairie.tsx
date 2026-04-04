@@ -925,9 +925,15 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
       if (data.errors?.length > 0) {
-        toast({ title: `Import partiel — ${data.indexed}/${data.total} indexé(s)`, description: data.errors[0], variant: "destructive" });
+        toast({
+          title: `Import — ${data.indexed}/${data.total} traité(s)`,
+          description: `Erreurs: ${data.errors.slice(0, 2).join(" | ")}`,
+          variant: "destructive"
+        });
+      } else if (data.indexed === 0) {
+        toast({ title: "Aucun fichier traité", description: `total=${data.total} skipped=${data.skipped} — vérifiez les fichiers.`, variant: "destructive" });
       } else {
-        toast({ title: "Import terminé", description: `${data.indexed} fichier(s) indexé(s)${data.skipped > 0 ? `, ${data.skipped} doublon(s) ignoré(s)` : ""}.` });
+        toast({ title: "Import terminé ✓", description: `${data.indexed} fichier(s) indexé(s) dans la base.` });
       }
     },
     onError: (err: any) => toast({ title: "Erreur import", description: err.message, variant: "destructive" }),
