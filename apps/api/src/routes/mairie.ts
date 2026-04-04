@@ -949,7 +949,7 @@ router.post("/documents/batch", upload.array("files", 70), async (req: AuthReque
   }
 });
 
-// POST /documents/batch/confirm — index pre-analyzed staged files
+// POST /documents/batch/confirm — index pre-analyzed staged files (synchronous — returns real results)
 router.post("/documents/batch/confirm", async (req: AuthRequest, res) => {
   try {
     const { commune, files } = req.body as {
@@ -964,82 +964,94 @@ router.post("/documents/batch/confirm", async (req: AuthRequest, res) => {
     const targetCommune = commune || (assignedCommunes.length > 0 ? assignedCommunes[0] : undefined);
 
     const uploadsDir = path.resolve(process.cwd(), "uploads");
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-    res.json({ status: "processing", total: files.length });
+    let indexed = 0;
+    let skipped = 0;
+    const errors: string[] = [];
 
-    setImmediate(() => { (async () => {
-      for (const staged of files) {
-        const tempPath = path.join(uploadsDir, staged.tempId);
-        if (!fs.existsSync(tempPath)) { logger.warn("[mairie/confirm] temp file missing", { tempId: staged.tempId }); continue; }
+    for (const staged of files) {
+      const tempPath = path.join(uploadsDir, staged.tempId);
 
-        try {
-          const content = fs.readFileSync(tempPath);
-          const hash = createHash("sha256").update(content).digest("hex");
-
-          const [existing] = await db.select().from(baseIADocumentsTable)
-            .where(eq(baseIADocumentsTable.fileHash, hash)).limit(1);
-          if (existing) { try { fs.unlinkSync(tempPath); } catch {} continue; }
-
-          const rawText = await extractTextFromFile(tempPath, "application/pdf");
-
-          const [doc] = await db.insert(townHallDocumentsTable).values({
-            userId: req.user!.userId,
-            commune: targetCommune || null,
-            title: staged.fileName,
-            fileName: staged.fileName,
-            rawText,
-            category: staged.category,
-            subCategory: staged.subCategory,
-            documentType: staged.documentType,
-            tags: staged.tags,
-            zone: null,
-          }).returning();
-
-          const [batch] = await db.insert(baseIABatchesTable).values({ createdBy: req.user!.userId, status: "processing" }).returning();
-
-          const [baseDoc] = await db.insert(baseIADocumentsTable).values({
-            batchId: batch.id,
-            municipalityId: targetCommune || null,
-            fileName: staged.fileName,
-            fileHash: hash,
-            status: "indexed",
-            type: staged.subCategory === "PLU" ? "plu" : "other",
-            category: staged.category,
-            subCategory: staged.subCategory,
-            tags: staged.tags,
-          }).returning();
-
-          if (targetCommune) {
-            try {
-              const dt = staged.documentType.toLowerCase();
-              let canonicalType: any = "other";
-              if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
-              else if (dt.includes("padd") || dt.includes("oap")) canonicalType = "oap";
-              else if (dt.includes("annexe")) canonicalType = "plu_annexe";
-              await processDocumentForRAG(baseDoc.id, targetCommune, rawText, { document_type: canonicalType, commune: targetCommune, zone: null });
-              await db.update(baseIABatchesTable).set({ status: "completed" }).where(eq(baseIABatchesTable.id, batch.id));
-            } catch (ragErr) {
-              logger.error("[mairie/confirm] RAG failed", ragErr);
-              await db.update(baseIADocumentsTable).set({ status: "vectorization_failed" }).where(eq(baseIADocumentsTable.id, baseDoc.id));
-              await db.update(baseIABatchesTable).set({ status: "failed" }).where(eq(baseIABatchesTable.id, batch.id));
-            }
-          }
-
-          // Move temp file to persistent location
-          const persistentPath = path.join(uploadsDir, `${doc.id}${path.extname(staged.fileName)}`);
-          try { fs.renameSync(tempPath, persistentPath); } catch { try { fs.unlinkSync(tempPath); } catch {} }
-
-        } catch (err) {
-          logger.error("[mairie/confirm] file processing error", err, { tempId: staged.tempId });
-          try { fs.unlinkSync(tempPath); } catch {}
-        }
+      if (!fs.existsSync(tempPath)) {
+        errors.push(`${staged.fileName}: fichier temporaire introuvable`);
+        continue;
       }
-    })().catch((err: any) => logger.error("[mairie/confirm] unhandled", err)); });
 
-    return;
+      try {
+        const content = fs.readFileSync(tempPath);
+        const hash = createHash("sha256").update(content).digest("hex");
+
+        const [existing] = await db.select().from(baseIADocumentsTable)
+          .where(eq(baseIADocumentsTable.fileHash, hash)).limit(1);
+        if (existing) {
+          try { fs.unlinkSync(tempPath); } catch {}
+          skipped++;
+          continue;
+        }
+
+        const rawText = await extractTextFromFile(tempPath, "application/pdf");
+
+        const [doc] = await db.insert(townHallDocumentsTable).values({
+          userId: req.user!.userId,
+          commune: targetCommune || null,
+          title: staged.fileName,
+          fileName: staged.fileName,
+          rawText,
+          category: staged.category,
+          subCategory: staged.subCategory,
+          documentType: staged.documentType,
+          tags: staged.tags,
+          zone: null,
+        }).returning();
+
+        const [batch] = await db.insert(baseIABatchesTable).values({ createdBy: req.user!.userId, status: "processing" }).returning();
+
+        const [baseDoc] = await db.insert(baseIADocumentsTable).values({
+          batchId: batch.id,
+          municipalityId: targetCommune || null,
+          fileName: staged.fileName,
+          fileHash: hash,
+          status: "indexed",
+          type: staged.subCategory === "PLU" ? "plu" : "other",
+          category: staged.category,
+          subCategory: staged.subCategory,
+          tags: staged.tags,
+        }).returning();
+
+        // RAG vectorisation (non-blocking — failure doesn't abort the file)
+        if (targetCommune) {
+          const dt = staged.documentType.toLowerCase();
+          let canonicalType: any = "other";
+          if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
+          else if (dt.includes("padd") || dt.includes("oap")) canonicalType = "oap";
+          else if (dt.includes("annexe")) canonicalType = "plu_annexe";
+          try {
+            await processDocumentForRAG(baseDoc.id, targetCommune, rawText, { document_type: canonicalType, commune: targetCommune, zone: null });
+            await db.update(baseIABatchesTable).set({ status: "completed" }).where(eq(baseIABatchesTable.id, batch.id));
+          } catch (ragErr: any) {
+            logger.error("[mairie/confirm] RAG failed", ragErr, { fileName: staged.fileName });
+            await db.update(baseIADocumentsTable).set({ status: "vectorization_failed" }).where(eq(baseIADocumentsTable.id, baseDoc.id));
+            await db.update(baseIABatchesTable).set({ status: "failed" }).where(eq(baseIABatchesTable.id, batch.id));
+            errors.push(`${staged.fileName}: indexation IA échouée — ${ragErr?.message ?? "erreur inconnue"}`);
+          }
+        }
+
+        const persistentPath = path.join(uploadsDir, `${doc.id}${path.extname(staged.fileName)}`);
+        try { fs.renameSync(tempPath, persistentPath); } catch { try { fs.unlinkSync(tempPath); } catch {} }
+
+        indexed++;
+      } catch (err: any) {
+        logger.error("[mairie/confirm] file error", err, { tempId: staged.tempId });
+        errors.push(`${staged.fileName}: ${err?.message ?? "erreur inconnue"}`);
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
+    }
+
+    return res.json({ status: "done", indexed, skipped, errors, total: files.length });
   } catch (err) {
     logger.error("[mairie/documents/batch/confirm]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: err instanceof Error ? err.message : "Erreur inconnue" });
   }
 });
 
