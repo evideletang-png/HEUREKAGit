@@ -1074,23 +1074,52 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE" });
+      const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error("Delete failed");
       return r.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
       toast({ title: "Supprimé", description: "Document retiré de la base." });
     }
+  });
+
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const resetCommuneMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/mairie/documents/commune?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "DELETE", credentials: "include"
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.message || "Erreur suppression");
+      return data;
+    },
+    onSuccess: (data) => {
+      setShowResetConfirm(false);
+      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      toast({ title: "Base réinitialisée", description: `${data.deleted} document(s) supprimé(s).` });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: string, subCategory: string, docType: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
     setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: true }));
     uploadMutation.mutate({ file, category, subCategory, docType });
   };
+
+  // All valid KB slot keys
+  const KB_KEYS = useMemo(() => {
+    const keys = new Set<string>();
+    Object.entries(KB_STRUCTURE).forEach(([catKey, cat]) => {
+      Object.entries(cat.subCategories).forEach(([subKey, sub]) => {
+        sub.types.forEach(type => keys.add(`${catKey}-${subKey}-${type}`));
+      });
+    });
+    return keys;
+  }, []);
 
   const groupedDocs = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -1101,6 +1130,14 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     });
     return map;
   }, [pluDocsData]);
+
+  // Documents that don't fit any KB slot
+  const uncategorisedDocs = useMemo(() => {
+    return (pluDocsData?.documents || []).filter(doc => {
+      const key = `${doc.category}-${doc.subCategory}-${doc.documentType}`;
+      return !KB_KEYS.has(key);
+    });
+  }, [pluDocsData, KB_KEYS]);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -1136,6 +1173,19 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             {reindexMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4 text-violet-500" />}
             Réindexer Base IA
           </Button>
+
+          {currentCommune !== "all" && (
+            <Button
+              variant="outline"
+              className="gap-2 border-destructive/40 hover:border-destructive hover:bg-destructive/5 h-10 px-4 text-destructive"
+              onClick={() => setShowResetConfirm(true)}
+              disabled={resetCommuneMutation.isPending}
+              title="Supprimer tous les documents de cette commune"
+            >
+              <Trash2 className="w-4 h-4" />
+              Réinitialiser
+            </Button>
+          )}
 
           <Button
             variant="outline"
@@ -1378,6 +1428,58 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </AccordionItem>
         ))}
       </Accordion>
+
+      {/* ── Documents non classifiés (catch-all) ── */}
+      {uncategorisedDocs.length > 0 && (
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+          <div className="px-6 py-4 border-b bg-muted/30 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-muted text-muted-foreground">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-bold text-base">Autres documents</div>
+              <div className="text-xs text-muted-foreground">{uncategorisedDocs.length} document(s) sans catégorie correspondante</div>
+            </div>
+          </div>
+          <div className="px-6 py-4 space-y-2">
+            {uncategorisedDocs.map(doc => (
+              <div key={doc.id} className="flex items-center justify-between p-2.5 rounded-lg border bg-muted/20 text-sm">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span className="truncate font-medium">{doc.title || doc.fileName}</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
+                    {[doc.category, doc.subCategory, doc.documentType].filter(Boolean).join(" › ")}
+                  </span>
+                </div>
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive h-7 w-7 p-0"
+                  onClick={() => deleteMutation.mutate(doc.id)}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirmation réinitialisation ── */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card rounded-xl border shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <h3 className="font-bold text-lg">Réinitialiser la base ?</h3>
+            <p className="text-sm text-muted-foreground">
+              Tous les documents de <strong>{currentCommune}</strong> seront supprimés définitivement. Cette action est irréversible.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" onClick={() => setShowResetConfirm(false)}>Annuler</Button>
+              <Button variant="destructive" disabled={resetCommuneMutation.isPending}
+                onClick={() => resetCommuneMutation.mutate()}>
+                {resetCommuneMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Supprimer tout
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL DE DÉTAILS ET PRÉVISUALISATION PDF */}
       <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>

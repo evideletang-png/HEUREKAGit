@@ -1221,11 +1221,38 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
   }
 });
 
+// DELETE /documents/commune?commune=X — wipe all docs for a commune (mairie users only)
+router.delete("/documents/commune", async (req: AuthRequest, res) => {
+  try {
+    const commune = (req.query.commune as string || "").trim();
+    if (!commune) return res.status(400).json({ error: "commune param required" });
+
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const isAdmin = currentUser[0]?.role === "admin";
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
+
+    if (!isAdmin && !assignedCommunes.some(c => c.toLowerCase() === commune.toLowerCase())) {
+      return res.status(403).json({ error: "FORBIDDEN" });
+    }
+
+    const deleted = await db.delete(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, commune.toLowerCase()))
+      .returning({ id: townHallDocumentsTable.id });
+
+    logger.info("[mairie/documents/commune DELETE]", { commune, count: deleted.length });
+    return res.json({ success: true, deleted: deleted.length });
+  } catch (err) {
+    logger.error("[mairie/documents/commune DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 router.delete("/documents/:id", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
     await db.delete(townHallDocumentsTable)
-      .where(and(eq(townHallDocumentsTable.id, id), eq(townHallDocumentsTable.userId, req.user!.userId)));
+      .where(eq(townHallDocumentsTable.id, id));
     res.json({ success: true });
   } catch(err) { res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
