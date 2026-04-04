@@ -33,8 +33,19 @@ const upload = multer({
   dest: os.tmpdir(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/webp", "text/plain"];
-    cb(null, allowed.includes(file.mimetype));
+    const allowedMimeTypes = new Set([
+      "application/pdf",
+      "application/x-pdf",
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+      "text/plain",
+      "application/octet-stream",
+    ]);
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const allowedExtensions = new Set([".pdf", ".jpg", ".jpeg", ".png", ".webp", ".txt"]);
+    cb(null, allowedMimeTypes.has(file.mimetype) || allowedExtensions.has(ext));
   },
 });
 
@@ -251,11 +262,12 @@ router.get("/", authenticate, async (req: AuthRequest, res) => {
 });
 
 // POST /api/documents/upload — upload + analyse document(s)
-router.post("/upload", authenticate, upload.array("files", 50), async (req: AuthRequest, res) => {
+router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 50 }, { name: "file", maxCount: 1 }]), async (req: AuthRequest, res) => {
   try {
     logger.debug("[Upload] Request received", { bodyKeys: Object.keys(req.body || {}) });
     logger.debug("[Upload] User", { userId: req.user?.userId });
-    const files = req.files as Express.Multer.File[];
+    const inputFiles = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const files = [...(inputFiles?.files ?? []), ...(inputFiles?.file ?? [])];
 
     const { title, documentType = "permis_de_construire", analysisId, referenceDocumentId, commune, adresse, dossierId, pieceCode } = req.body as {
       title?: string;

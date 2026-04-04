@@ -945,6 +945,12 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
       files.forEach(f => formData.append("files", f));
+    mutationFn: async ({ file, category, subCategory, docType }: { file: File, category?: string, subCategory?: string, docType?: string }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (category && category !== "auto") formData.append("category", category);
+      if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
+      if (docType && docType !== "auto") formData.append("documentType", docType);
       if (currentCommune !== "all") formData.append("commune", currentCommune);
       const r = await fetch("/api/mairie/documents", { method: "POST", credentials: "include", body: formData });
       const data = await r.json();
@@ -1004,6 +1010,41 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: string, subCategory: string, docType: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: true }));
+    uploadMutation.mutate({ file, category, subCategory, docType });
+  };
+
+  const validSlotKeys = useMemo(() => {
+    return new Set(
+      Object.entries(KB_STRUCTURE).flatMap(([catKey, cat]) =>
+        Object.entries(cat.subCategories).flatMap(([subKey, sub]) =>
+          sub.types.map((type) => `${catKey}-${subKey}-${type}`)
+        )
+      )
+    );
+  }, []);
+
+  const groupedDocs = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    pluDocsData?.documents?.forEach(doc => {
+      const key = `${doc.category}-${doc.subCategory}-${doc.documentType}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(doc);
+    });
+    return map;
+  }, [pluDocsData]);
+
+  const unmatchedDocs = useMemo(() => {
+    return (pluDocsData?.documents || []).filter((doc) => {
+      const key = `${doc.category}-${doc.subCategory}-${doc.documentType}`;
+      return !validSlotKeys.has(key);
+    });
+  }, [pluDocsData, validSlotKeys]);
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       {/* ── Header ── */}
@@ -1033,6 +1074,13 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
               onChange={(e) => {
                 if (e.target.files?.length) { uploadMutation.mutate(Array.from(e.target.files)); e.target.value = ""; }
               }} />
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+                Array.from(files).forEach(file => {
+                  uploadMutation.mutate({ file });
+                });
+              }}
+            />
           </Button>
           {currentCommune !== "all" && (
             <Button variant="outline" size="sm"
@@ -1067,6 +1115,142 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
               onClick={() => setSelectedDoc(doc)}>
               <div className="p-2 rounded-lg bg-primary/5 text-primary shrink-0">
                 <FileText className="w-4 h-4" />
+      )}
+
+      {unmatchedDocs.length > 0 && (
+        <Card className="border-amber-500/20 bg-amber-500/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              Documents hors classification ({unmatchedDocs.length})
+            </CardTitle>
+            <CardDescription>
+              Ces documents existent bien mais ne correspondent à aucune case du tableau ci-dessous.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {unmatchedDocs.slice(0, 6).map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold truncate">{doc.title}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {doc.category || "—"} / {doc.subCategory || "—"} / {doc.documentType || "—"}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedDoc(doc)}>Voir</Button>
+              </div>
+            ))}
+            {unmatchedDocs.length > 6 && (
+              <p className="text-[11px] text-muted-foreground">+ {unmatchedDocs.length - 6} autre(s) document(s).</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <Accordion type="multiple" defaultValue={["item-0", "item-1"]} className="space-y-4">
+        {Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => (
+          <AccordionItem key={catKey} value={`item-${idx}`} className="border rounded-xl bg-card overflow-hidden shadow-sm">
+            <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors border-b">
+              <div className="flex items-center gap-4 text-left">
+                <div className={`p-2 rounded-lg bg-muted ${cat.color}`}>
+                  <cat.icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-bold text-base">{cat.label}</div>
+                  <div className="text-xs text-muted-foreground font-normal">Classification IA activée</div>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6 pt-4">
+              <div className="space-y-8">
+                {Object.entries(cat.subCategories).map(([subKey, sub]) => (
+                  <div key={subKey} className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Folder className="w-4 h-4 text-primary/60" />
+                      <span className="font-bold text-sm uppercase tracking-wide text-foreground/80">{sub.label}</span>
+                      {sub.subLabel && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground ml-2">{sub.subLabel}</span>}
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-1">
+                      {sub.types.map(type => {
+                        const docs = groupedDocs[`${catKey}-${subKey}-${type}`] || [];
+                        const isUploading = uploadingSlots[`${catKey}-${subKey}-${type}`];
+                        
+                        return (
+                          <div key={type} className="flex flex-col gap-2 p-4 border rounded-xl bg-muted/20 hover:border-primary/20 transition-all group relative">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-tighter">{type}</span>
+                              <div className="relative">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-7 gap-1.5 text-primary bg-primary/5 hover:bg-primary/10 transition-all rounded-full"
+                                  disabled={isUploading}
+                                >
+                                  {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <UploadCloud className="w-3 h-3" />}
+                                  <span className="text-[10px] font-black uppercase">Dépôt</span>
+                                  <input 
+                                    type="file" 
+                                    className="absolute inset-0 opacity-0 cursor-pointer" 
+                                    accept=".pdf,image/*" 
+                                    onChange={(e) => handleFileUpload(e, catKey, subKey, type)}
+                                    disabled={isUploading}
+                                  />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {docs.length > 0 ? (
+                              <div className="space-y-2">
+                                {docs.map(doc => (
+                                  <div 
+                                    key={doc.id} 
+                                    className="flex items-center justify-between bg-background p-2.5 rounded-lg border shadow-sm hover:shadow-md cursor-pointer group/doc border-l-4 border-l-blue-500/30 hover:border-l-blue-500 transition-all"
+                                    onClick={() => setSelectedDoc(doc)}
+                                  >
+                                    <div className="flex items-center gap-2.5 overflow-hidden">
+                                      <div className="p-1.5 bg-blue-50 rounded text-blue-600">
+                                        <FileText className="w-4 h-4 shrink-0" />
+                                      </div>
+                                      <div className="flex flex-col min-w-0">
+                                        <span className="text-[11px] truncate font-bold text-foreground/90">{doc.title}</span>
+                                        {doc.explanatoryNote && (
+                                          <p className="text-[9px] text-muted-foreground truncate italic">{doc.explanatoryNote}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-7 w-7 opacity-0 group-hover/doc:opacity-100 transition-opacity"
+                                        onClick={(e) => { e.stopPropagation(); setSelectedDoc(doc); }}
+                                      >
+                                        <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                                      </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="h-7 w-7 opacity-0 group-hover/doc:opacity-100 transition-opacity text-destructive hover:bg-destructive/5"
+                                        onClick={(e) => { e.stopPropagation(); if(confirm("Supprimer ?")) deleteMutation.mutate(doc.id); }}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[9px] text-muted-foreground/40 font-bold uppercase flex items-center gap-2 py-4 justify-center border border-dashed rounded-lg bg-background/30">
+                                <Clock className="w-3 h-3" />
+                                Vide
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{doc.title || doc.fileName}</p>
