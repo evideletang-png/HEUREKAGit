@@ -1,6 +1,4 @@
 import { Router, type IRouter } from "express";
-import { OpenAI } from "openai";
-const openai = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
 import { db } from "@workspace/db";
 import { desc, eq, sql, and, inArray, or, ne } from "drizzle-orm";
 import { 
@@ -45,7 +43,7 @@ import { recordDecision } from "../services/learningService.js";
 
 const upload = multer({
   dest: os.tmpdir(),
-  limits: { fileSize: 200 * 1024 * 1024, files: 70 }
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
 const router: IRouter = Router();
@@ -706,78 +704,53 @@ interface SuggestedClassification {
 }
 
 function autoSuggestClassification(text: string, fileName: string): SuggestedClassification {
-  // Normalise: lowercase + strip accents for robust filename matching
-  const normalise = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const content = normalise(text + " " + fileName);
-  const fn = normalise(fileName);
-
-  // ── Infrastructure & Réseaux ────────────────────────────────────────────────
-  if (fn.includes("assainissement") || fn.includes("euep") || fn.includes("eu_ep") || fn.includes("eaux_usees")) {
-    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Sanitation (EU/EP)", tags: ["Infrastructure", "Assainissement"] };
+  const content = (text + " " + fileName).toLowerCase();
+  
+  if (content.includes("plu") || content.includes("règlement") || content.includes("zonage")) {
+    let docType = "Written regulation";
+    if (content.includes("plan") || content.includes("graphique") || content.includes("carte")) docType = "Zoning map";
+    if (content.includes("padd")) docType = "PADD";
+    if (content.includes("oap")) docType = "OAP";
+    
+    return {
+      category: "REGULATORY",
+      subCategory: "PLU",
+      documentType: docType,
+      tags: ["PLU", content.includes("article") ? "Article" : ""].filter(Boolean)
+    };
   }
-  if (fn.includes("eau") || fn.includes("aep") || fn.includes("adduction")) {
-    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Water & AEP", tags: ["Infrastructure", "Eau"] };
+  
+  if (content.includes("pprn") || content.includes("pprt") || content.includes("risque") || content.includes("inondation")) {
+    return {
+      category: "ANNEXES",
+      subCategory: "RISKS",
+      documentType: content.includes("pprn") ? "PPRN" : (content.includes("pprt") ? "PPRT" : "Risk Map"),
+      tags: ["Risk", content.includes("flood") || content.includes("inondation") ? "Flood_risk" : ""].filter(Boolean)
+    };
   }
-  if (fn.includes("gaz") || fn.includes("energie") || fn.includes("erdf") || fn.includes("edf")) {
-    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Energy/Gaz", tags: ["Infrastructure", "Energie"] };
+  
+  if (content.includes("abf") || content.includes("monument") || content.includes("patrimoine")) {
+    return {
+      category: "ANNEXES",
+      subCategory: "HERITAGE",
+      documentType: "ABF perimeter",
+      tags: ["Heritage", "ABF"]
+    };
   }
-  if (fn.includes("dechets") || fn.includes("ordures") || fn.includes("collecte")) {
-    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Waste management", tags: ["Infrastructure", "Dechets"] };
-  }
-
-  // ── Annexes & Risques ───────────────────────────────────────────────────────
-  if (fn.includes("pprn") || content.includes("pprn")) {
-    return { category: "ANNEXES", subCategory: "RISKS", documentType: "PPRN", tags: ["Risque", "PPRN"] };
-  }
-  if (fn.includes("pprt") || content.includes("pprt")) {
-    return { category: "ANNEXES", subCategory: "RISKS", documentType: "PPRT", tags: ["Risque", "PPRT"] };
-  }
-  if (fn.includes("risque") || fn.includes("inondation") || fn.includes("alea") || fn.includes("ppri")) {
-    return { category: "ANNEXES", subCategory: "RISKS", documentType: "Risk Map", tags: ["Risque"] };
-  }
-  if (fn.includes("bruit") || fn.includes("nuisance") || fn.includes("acoustique")) {
-    return { category: "ANNEXES", subCategory: "RISKS", documentType: "Noise Exposure Plan", tags: ["Bruit"] };
-  }
-  if (fn.includes("abf") || fn.includes("monument") || fn.includes("patrimoine") || fn.includes("zppaup") || fn.includes("avap")) {
-    return { category: "ANNEXES", subCategory: "HERITAGE", documentType: "ABF perimeter", tags: ["Patrimoine", "ABF"] };
-  }
-
-  // ── Documents Graphiques ────────────────────────────────────────────────────
-  if (fn.includes("reglement_graphique") || fn.includes("plan_graphique") || fn.includes("plan_de_zonage") || fn.includes("zonage_graphique")) {
-    return { category: "ZONING", subCategory: "PLANS", documentType: "Zoning map", tags: ["PLU", "Graphique"] };
-  }
-  if (fn.includes("secteur") || fn.includes("zoning")) {
-    return { category: "ZONING", subCategory: "PLANS", documentType: "Zoning sectors", tags: ["PLU", "Zonage"] };
-  }
-
-  // ── Réglementaire PLU ───────────────────────────────────────────────────────
-  if (fn.includes("padd") || content.includes("projet d'amenagement et de developpement")) {
-    return { category: "REGULATORY", subCategory: "PLU", documentType: "PADD", tags: ["PLU", "PADD"] };
-  }
-  if (fn.includes("oap") || content.includes("orientation d'amenagement et de programmation")) {
-    return { category: "REGULATORY", subCategory: "PLU", documentType: "OAP", tags: ["PLU", "OAP"] };
-  }
-  if (fn.includes("arrete") || fn.includes("deliberation") || fn.includes("decision")) {
-    return { category: "REGULATORY", subCategory: "PLU", documentType: "Administrative Act", tags: ["PLU", "Acte"] };
-  }
-  // Any file mentioning PLU / règlement / plan local / etc.
-  if (fn.includes("plu") || fn.includes("reglement") || fn.includes("plan_local") || fn.includes("rapport") ||
-      content.includes("plan local d'urbanisme") || content.includes("reglement ecrit") || content.includes("zone u") || content.includes("zone a ")) {
-    return { category: "REGULATORY", subCategory: "PLU", documentType: "Written regulation", tags: ["PLU"] };
-  }
-
-  // ── Content-based fallback ───────────────────────────────────────────────────
-  if (content.includes("assainissement")) {
-    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Sanitation (EU/EP)", tags: ["Infrastructure"] };
-  }
-  if (content.includes("risque") || content.includes("inondation")) {
-    return { category: "ANNEXES", subCategory: "RISKS", documentType: "Risk Map", tags: ["Risque"] };
+  
+  if (content.includes("eau") || content.includes("edf") || content.includes("assainissement") || content.includes("réseau")) {
+    return {
+      category: "INFRASTRUCTURE",
+      subCategory: "NETWORKS",
+      documentType: content.includes("eau") ? "Water" : (content.includes("assainissement") ? "Sanitation" : "Electricity"),
+      tags: ["Infrastructure", "Network"]
+    };
   }
 
   return {
-    category: "REGULATORY",
-    subCategory: "PLU",
-    documentType: "Written regulation",
+    category: "OTHER",
+    subCategory: "MISC",
+    documentType: "Other",
     tags: []
   };
 }
@@ -802,70 +775,32 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
 router.get("/documents", async (req: AuthRequest, res) => {
   try {
     const requestedCommune = req.query.commune as string | undefined;
-
-    // Return all documents for the requested commune (any authenticated mairie user can view their commune's docs)
-    // If no commune filter, fall back to the user's own uploads
-    let whereClause: any;
+    
+    let whereClause = eq(townHallDocumentsTable.userId, req.user!.userId);
     if (requestedCommune) {
-      whereClause = eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase());
-    } else {
-      whereClause = eq(townHallDocumentsTable.userId, req.user!.userId);
+      whereClause = and(whereClause, eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase())) as any;
     }
 
-    const docs = await db.select({
-      id: townHallDocumentsTable.id,
-      title: townHallDocumentsTable.title,
-      fileName: townHallDocumentsTable.fileName,
-      createdAt: townHallDocumentsTable.createdAt,
-      commune: townHallDocumentsTable.commune,
-      category: townHallDocumentsTable.category,
-      subCategory: townHallDocumentsTable.subCategory,
-      documentType: townHallDocumentsTable.documentType,
-      tags: townHallDocumentsTable.tags,
-    }).from(townHallDocumentsTable)
+    const docs = await db.select().from(townHallDocumentsTable)
       .where(whereClause)
       .orderBy(desc(townHallDocumentsTable.createdAt));
-
-    return res.json({ documents: docs });
-  } catch (err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
+    
+    const filteredDocs = docs.map(d => ({ 
+      id: d.id, 
+      title: d.title, 
+      fileName: d.fileName, 
+      createdAt: d.createdAt, 
+      commune: d.commune,
+      category: d.category,
+      subCategory: d.subCategory,
+      documentType: d.documentType,
+      tags: d.tags
+    }));
+    return res.json({ documents: filteredDocs });
+  } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
 
-// POST /documents/analyze — upload files, extract text, classify, return staging data
-router.post("/documents/analyze", upload.array("files", 70), async (req: AuthRequest, res) => {
-  try {
-    const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) return res.status(400).json({ error: "Fichiers requis." });
-
-    const staged = [];
-    for (const file of files) {
-      // Store in os.tmpdir() which is always writable; use a unique ID that survives across requests
-      const tempId = `heureka-stage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const tempPath = path.join(os.tmpdir(), tempId);
-      fs.copyFileSync(file.path, tempPath);
-      try { fs.unlinkSync(file.path); } catch {}
-
-      const rawText = await extractTextFromFile(tempPath, file.mimetype);
-      const suggestion = autoSuggestClassification(rawText, file.originalname);
-
-      staged.push({
-        tempId,
-        fileName: file.originalname,
-        category: suggestion.category,
-        subCategory: suggestion.subCategory,
-        documentType: suggestion.documentType,
-        tags: suggestion.tags,
-        textPreview: rawText.slice(0, 200).replace(/\s+/g, " ").trim(),
-      });
-    }
-
-    return res.json(staged);
-  } catch (err) {
-    logger.error("[mairie/documents/analyze]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
-  }
-});
-
-router.post("/documents/batch", upload.array("files", 70), async (req: AuthRequest, res) => {
+router.post("/documents/batch", upload.array("files", 10), async (req: AuthRequest, res) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
@@ -889,7 +824,7 @@ router.post("/documents/batch", upload.array("files", 70), async (req: AuthReque
 
     const results = [];
 
-    res.json({ batchId: batch.id, status: "processing", total: files.length, indexed: 0, skipped: 0, message: "Traitement par lot démarré." });
+    res.json({ batchId: batch.id, status: "processing", message: "Traitement par lot démarré." });
 
     // 2. Process Files Background
     setImmediate(() => { (async () => {
@@ -911,9 +846,8 @@ router.post("/documents/batch", upload.array("files", 70), async (req: AuthReque
 
           const rawText = await extractTextFromFile(file.path, file.mimetype);
           const suggestion = autoSuggestClassification(rawText, file.originalname);
-          // "auto" means let the classifier decide
-          const category    = (!req.body.category    || req.body.category    === "auto") ? suggestion.category    : req.body.category;
-          const subCategory = (!req.body.subCategory || req.body.subCategory === "auto") ? suggestion.subCategory : req.body.subCategory;
+          const category = req.body.category || suggestion.category;
+          const subCategory = req.body.subCategory || suggestion.subCategory;
           const tags = req.body.tags ? JSON.parse(req.body.tags) : suggestion.tags;
 
           const [doc] = await db.insert(baseIADocumentsTable).values({
@@ -977,111 +911,6 @@ router.post("/documents/batch", upload.array("files", 70), async (req: AuthReque
   }
 });
 
-// POST /documents/batch/confirm — upsert pre-analyzed staged files synchronously, RAG in background
-router.post("/documents/batch/confirm", async (req: AuthRequest, res) => {
-  const userId = req.user!.userId;
-  try {
-    const { commune, files } = req.body as {
-      commune?: string;
-      files: Array<{ tempId: string; fileName: string; category: string; subCategory: string; documentType: string; tags: string[] }>;
-    };
-    if (!files || files.length === 0) return res.status(400).json({ error: "Aucun fichier à confirmer." });
-
-    const currentUser = await db.select({ communes: usersTable.communes })
-      .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-    const targetCommune: string | null = commune || (assignedCommunes[0] ?? null);
-
-    let indexed = 0;
-    const errors: string[] = [];
-    const ragQueue: Array<{ docId: string; rawText: string; documentType: string }> = [];
-
-    for (const staged of files) {
-      const tempPath = path.join(os.tmpdir(), staged.tempId);
-
-      if (!fs.existsSync(tempPath)) {
-        errors.push(`${staged.fileName}: fichier temporaire introuvable`);
-        continue;
-      }
-
-      try {
-        const rawText = await extractTextFromFile(tempPath, "application/pdf");
-        try { fs.unlinkSync(tempPath); } catch {}
-
-        // UPSERT by (userId, fileName) — always update classification if already exists
-        const [existing] = await db.select({ id: townHallDocumentsTable.id })
-          .from(townHallDocumentsTable)
-          .where(and(
-            eq(townHallDocumentsTable.userId, userId),
-            eq(townHallDocumentsTable.fileName, staged.fileName)
-          )).limit(1);
-
-        let docId: string;
-        if (existing) {
-          await db.update(townHallDocumentsTable).set({
-            category: staged.category,
-            subCategory: staged.subCategory,
-            documentType: staged.documentType,
-            tags: staged.tags as any,
-            commune: targetCommune,
-            rawText,
-            updatedAt: new Date(),
-          }).where(eq(townHallDocumentsTable.id, existing.id));
-          docId = existing.id;
-        } else {
-          const [doc] = await db.insert(townHallDocumentsTable).values({
-            userId,
-            commune: targetCommune,
-            title: staged.fileName,
-            fileName: staged.fileName,
-            rawText,
-            category: staged.category,
-            subCategory: staged.subCategory,
-            documentType: staged.documentType,
-            tags: staged.tags as any,
-            zone: null,
-          }).returning();
-          docId = doc.id;
-        }
-
-        ragQueue.push({ docId, rawText, documentType: staged.documentType });
-        indexed++;
-      } catch (err: any) {
-        logger.error("[mairie/confirm] file error", err, { tempId: staged.tempId, fileName: staged.fileName });
-        errors.push(`${staged.fileName}: ${err?.message ?? "erreur inconnue"}`);
-      }
-    }
-
-    // Send DB result immediately — don't wait for RAG
-    res.json({ status: "done", indexed, errors, total: files.length });
-
-    // Background RAG — runs after response is sent; errors are logged but don't affect the user
-    if (targetCommune && ragQueue.length > 0) {
-      setImmediate(() => {
-        (async () => {
-          for (const { docId, rawText, documentType } of ragQueue) {
-            try {
-              const dt = documentType.toLowerCase();
-              let canonicalType: any = "other";
-              if (dt.includes("written") || dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
-              else if (dt.includes("padd") || dt.includes("oap")) canonicalType = "oap";
-              else if (dt.includes("annexe")) canonicalType = "plu_annexe";
-              await processDocumentForRAG(docId, targetCommune!, rawText, { document_type: canonicalType, commune: targetCommune!, zone: null });
-            } catch (ragErr: any) {
-              logger.error("[mairie/confirm] Background RAG failed", { docId, error: ragErr?.message });
-            }
-          }
-        })().catch((e: any) => logger.error("[mairie/confirm] RAG background crash", e));
-      });
-    }
-  } catch (err) {
-    logger.error("[mairie/documents/batch/confirm]", err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "INTERNAL_ERROR", message: err instanceof Error ? err.message : "Erreur inconnue" });
-    }
-  }
-});
-
 // GET /documents/batch/:id — poll batch ingestion progress
 router.get("/documents/batch/:id", async (req: AuthRequest, res) => {
   try {
@@ -1119,153 +948,92 @@ router.get("/documents/batch/:id", async (req: AuthRequest, res) => {
   }
 });
 
-// POST /documents — upload one or more files, store immediately, RAG in background
-router.post("/documents", upload.array("files", 70), async (req: AuthRequest, res) => {
-  const userId = req.user!.userId;
+router.post("/documents", upload.single("file"), async (req: AuthRequest, res) => {
   try {
-    const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) return res.status(400).json({ error: "Fichier(s) requis." });
-
-    const currentUser = await db.select({ communes: usersTable.communes })
-      .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    const targetCommune: string | null = req.body.commune || parseCommunes(currentUser[0]?.communes)[0] || null;
-
-    const inserted: { id: string; fileName: string }[] = [];
-    const ragQueue: { docId: string; rawText: string; commune: string }[] = [];
-
-    for (const file of files) {
-      try {
-        const rawText = await extractTextFromFile(file.path, file.mimetype);
-
-        // UPSERT by commune + fileName
-        const [existing] = await db.select({ id: townHallDocumentsTable.id })
-          .from(townHallDocumentsTable)
-          .where(and(
-            eq(townHallDocumentsTable.fileName, file.originalname),
-            eq(sql`lower(coalesce(${townHallDocumentsTable.commune},''))`, (targetCommune || "").toLowerCase())
-          )).limit(1);
-
-        let docId: string;
-        if (existing) {
-          await db.update(townHallDocumentsTable).set({ rawText, userId, updatedAt: new Date() })
-            .where(eq(townHallDocumentsTable.id, existing.id));
-          docId = existing.id;
-        } else {
-          const [doc] = await db.insert(townHallDocumentsTable).values({
-            userId, commune: targetCommune,
-            title: file.originalname,
-            fileName: file.originalname,
-            rawText,
-            category: null, subCategory: null, documentType: null,
-            tags: [] as any, zone: null,
-          }).returning();
-          docId = doc.id;
-        }
-
-        inserted.push({ id: docId, fileName: file.originalname });
-        if (targetCommune) ragQueue.push({ docId, rawText, commune: targetCommune });
-      } catch (fileErr: any) {
-        logger.error("[mairie/upload] file error", { file: file.originalname, error: fileErr?.message });
-      } finally {
-        try { fs.unlinkSync(file.path); } catch {}
-      }
-    }
-
-    res.json({ status: "ok", inserted: inserted.length, files: inserted });
-
-    // Background RAG for all successfully inserted docs
-    if (ragQueue.length > 0) {
-      setImmediate(() => {
-        (async () => {
-          for (const { docId, rawText, commune } of ragQueue) {
-            try {
-              await processDocumentForRAG(docId, commune, rawText, { document_type: "plu_reglement", commune, zone: null });
-            } catch (e: any) {
-              logger.error("[mairie/upload] RAG failed", { docId, error: e?.message });
-            }
-          }
-        })().catch((e: any) => logger.error("[mairie/upload] RAG crash", e));
-      });
-    }
-  } catch (err) {
-    logger.error("[mairie/documents POST]", err);
-    if (!res.headersSent) res.status(500).json({ error: "INTERNAL_ERROR" });
-  }
-});
-
-// POST /documents/:id/analyze — generate and cache an AI summary of the document
-router.post("/documents/:id/analyze", async (req: AuthRequest, res) => {
-  try {
-    const [doc] = await db.select().from(townHallDocumentsTable)
-      .where(eq(townHallDocumentsTable.id, req.params.id)).limit(1);
-    if (!doc) return res.status(404).json({ error: "NOT_FOUND" });
-
-    // Return cached analysis if already generated
-    if (doc.explanatoryNote) {
-      try { return res.json(JSON.parse(doc.explanatoryNote)); } catch {}
-    }
-
-    // Generate AI summary (gpt-4o-mini is fast and cheap for this)
-    const textSample = (doc.rawText || "").slice(0, 6000);
-    if (!textSample.trim()) {
-      return res.json({ summary: "Aucun texte extractible (document scanné ou image).", keyPoints: [], documentType: "Inconnu" });
-    }
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `Tu es un expert en droit de l'urbanisme français. Analyse le contenu d'un document PLU et retourne un JSON avec ces clés exactes:
-- summary: string (2-3 phrases décrivant le document)
-- documentType: string (ex: "Règlement écrit", "PADD", "OAP", "Plan de zonage", "Annexe")
-- keyPoints: string[] (3-5 points clés)
-- zones: string[] (zones mentionnées, ex: ["UA", "UB", "N", "A"])
-- restrictions: string[] (principales restrictions importantes)`
-        },
-        { role: "user", content: `Fichier: ${doc.fileName}\n\n${textSample}` }
-      ]
-    });
-
-    const analysis = JSON.parse(completion.choices[0].message.content || "{}");
-
-    // Cache in DB so we don't re-generate next time
-    await db.update(townHallDocumentsTable)
-      .set({ explanatoryNote: JSON.stringify(analysis) })
-      .where(eq(townHallDocumentsTable.id, doc.id));
-
-    return res.json(analysis);
-  } catch (err: any) {
-    logger.error("[mairie/documents/analyze]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR", message: err?.message });
-  }
-});
-
-// DELETE /documents/commune?commune=X — wipe all docs for a commune (mairie users only)
-router.delete("/documents/commune", async (req: AuthRequest, res) => {
-  try {
-    const commune = (req.query.commune as string || "").trim();
-    if (!commune) return res.status(400).json({ error: "commune param required" });
-
+    const file = req.file;
+    if (!file) { res.status(400).json({ error: "Fichier requis." }); return; }
+    
+    // Validate commune ownership
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
-    const isAdmin = currentUser[0]?.role === "admin";
     const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-
-    if (!isAdmin && !assignedCommunes.some(c => c.toLowerCase() === commune.toLowerCase())) {
-      return res.status(403).json({ error: "FORBIDDEN" });
+    
+    let targetCommune = req.body.commune as string | undefined;
+    if (!targetCommune && assignedCommunes.length > 0) {
+      targetCommune = assignedCommunes[0];
     }
+    
+    if (currentUser[0]?.role !== "admin" && targetCommune && !assignedCommunes.some(c => c.toLowerCase() === targetCommune!.toLowerCase())) {
+      try { fs.unlinkSync(file.path); } catch {}
+      res.status(403).json({ error: "FORBIDDEN", message: "Vous n'avez pas accès à cette commune." });
+      return;
+    }
+    
+    res.json({ status: "processing", message: "Document reçu, analyse en arrière-plan démarrée." });
 
-    const deleted = await db.delete(townHallDocumentsTable)
-      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, commune.toLowerCase()))
-      .returning({ id: townHallDocumentsTable.id });
+    setImmediate(() => { (async () => {
+      try {
+        const rawText = await extractTextFromFile(file.path, file.mimetype);
+        const suggestion = autoSuggestClassification(rawText, file.originalname);
+        const category = req.body.category || suggestion.category;
+        const subCategory = req.body.subCategory || suggestion.subCategory;
+        const documentType = req.body.documentType || suggestion.documentType;
+        const tags = req.body.tags ? (typeof req.body.tags === 'string' ? JSON.parse(req.body.tags) : req.body.tags) : suggestion.tags;
 
-    logger.info("[mairie/documents/commune DELETE]", { commune, count: deleted.length });
-    return res.json({ success: true, deleted: deleted.length });
-  } catch (err) {
-    logger.error("[mairie/documents/commune DELETE]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+        const [doc] = await db.insert(townHallDocumentsTable).values({
+          userId: req.user!.userId,
+          commune: targetCommune || null,
+          title: req.body.title || file.originalname,
+          fileName: file.originalname,
+          rawText: rawText,
+          category,
+          subCategory,
+          documentType,
+          tags,
+          zone: req.body.zone || null
+        }).returning();
+        
+        // Embad generation using RAG pipeline
+        if (targetCommune) {
+            try {
+              // Map suggest classification to canonical document_type
+              let canonicalType: any = "other";
+              const dt = (documentType || "").toLowerCase();
+              if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
+              else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
+              else if (dt.includes("annexe")) canonicalType = "plu_annexe";
+
+              await processDocumentForRAG(doc.id, targetCommune, rawText, {
+                document_type: canonicalType,
+                commune: targetCommune,
+                zone: req.body.zone || null
+              });
+             logger.debug("[mairie/upload] Successfully processed RAG", { docId: doc.id });
+           } catch (ragErr) {
+             logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: doc.id });
+           }
+        }
+        
+        // Store file persistently for Vision (Phase 4)
+        const persistentPath = path.join(process.cwd(), "uploads", `${doc.id}${path.extname(file.originalname)}`);
+        try {
+          fs.copyFileSync(file.path, persistentPath);
+          logger.debug("[VisionStorage] File stored", { path: persistentPath });
+        } catch (copyErr) {
+          logger.error("[VisionStorage] Failed to store file", copyErr);
+        }
+
+        logger.info("[mairie/upload] Successfully processed", { fileName: file.originalname });
+        try { fs.unlinkSync(file.path); } catch {}
+      } catch (err) {
+        logger.error("[mairie/upload] Background error", err);
+      }
+    })().catch((err: any) => logger.error("[mairie/upload] Unhandled rejection", err)); });
+
+    return;
+  } catch(err) {
+    logger.error("[mairie/documents POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", details: err instanceof Error ? err.stack : String(err) });
   }
 });
 
@@ -1273,20 +1041,46 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
     await db.delete(townHallDocumentsTable)
-      .where(eq(townHallDocumentsTable.id, id));
+      .where(and(eq(townHallDocumentsTable.id, id), eq(townHallDocumentsTable.userId, req.user!.userId)));
     res.json({ success: true });
   } catch(err) { res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
 
 /**
- * GET /gpu/probe?insee=37113
- * Public endpoint (no auth) — shows raw zone-urba + writingMaterials for debugging.
+ * GET /gpu/probe?insee=37112
+ * Returns the raw GPU API response for debugging response format issues.
+ * Requires mairie auth (same as other /gpu/* routes).
  */
-router.get("/gpu/probe", async (req, res) => {
+router.get("/gpu/probe", async (req: AuthRequest, res) => {
   const insee = (req.query.insee as string || "").trim();
   if (!insee) return res.status(400).json({ error: "insee param required" });
-  const diagnostic = await GPUProviderService.diagnose(insee);
-  return res.json({ insee, diagnostic });
+
+  const urls = [
+    `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&gridType=insee&active=true&sort=-publicationDate`,
+    `https://www.geoportail-urbanisme.gouv.fr/api/document?codeMunicipalite=${insee}`,
+    `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&gridType=insee`,
+  ];
+
+  const results: any[] = [];
+  for (const url of urls) {
+    try {
+      const cmd = `curl -s -k --max-time 15 -H "Accept: application/json" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
+      const raw = execSync(cmd, { maxBuffer: 2 * 1024 * 1024 }).toString().trim();
+      let parsed: any = null;
+      try { parsed = JSON.parse(raw); } catch { parsed = raw.slice(0, 500); }
+      results.push({
+        url,
+        type: Array.isArray(parsed) ? "array" : typeof parsed,
+        keys: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : null,
+        length: Array.isArray(parsed) ? parsed.length : null,
+        sample: Array.isArray(parsed) ? parsed.slice(0, 2) : parsed
+      });
+    } catch (e: any) {
+      results.push({ url, error: e.message });
+    }
+  }
+
+  return res.json({ insee, results });
 });
 
 router.post("/gpu/sync", async (req: AuthRequest, res) => {

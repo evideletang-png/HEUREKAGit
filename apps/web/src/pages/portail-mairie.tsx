@@ -855,96 +855,18 @@ const KB_STRUCTURE = {
   }
 };
 
-function DocAnalysisPanel({ doc }: { doc: any }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["doc-analysis", doc.id],
-    queryFn: async () => {
-      const r = await fetch(`/api/mairie/documents/${doc.id}/analyze`, { method: "POST", credentials: "include" });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-    staleTime: Infinity, // cached forever once generated
-  });
-
-  return (
-    <div className="mt-6 space-y-5 overflow-y-auto">
-      {isLoading && (
-        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2 className="w-4 h-4 animate-spin" /> Analyse IA en cours…
-        </div>
-      )}
-      {error && (
-        <p className="text-sm text-destructive">Erreur lors de l'analyse. Réessayez.</p>
-      )}
-      {data && !isLoading && (
-        <>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Type de document</p>
-            <Badge variant="secondary">{data.documentType || "Non déterminé"}</Badge>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Résumé</p>
-            <p className="text-sm leading-relaxed">{data.summary}</p>
-          </div>
-          {data.keyPoints?.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Points clés</p>
-              <ul className="space-y-1.5">
-                {data.keyPoints.map((pt: string, i: number) => (
-                  <li key={i} className="flex gap-2 text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                    {pt}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.zones?.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Zones couvertes</p>
-              <div className="flex flex-wrap gap-1.5">
-                {data.zones.map((z: string) => (
-                  <Badge key={z} variant="outline" className="font-mono text-xs">{z}</Badge>
-                ))}
-              </div>
-            </div>
-          )}
-          {data.restrictions?.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Restrictions principales</p>
-              <ul className="space-y-1.5">
-                {data.restrictions.map((r: string, i: number) => (
-                  <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                    {r}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
 function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  const { data: docsData, isLoading } = useQuery<{ documents: any[] }>({
+  const { data: pluDocsData, isLoading: loadingPluDocs } = useQuery<{ documents: any[] }>({
     queryKey: ["mairie-documents", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/documents${currentCommune !== "all" ? `?commune=${encodeURIComponent(currentCommune)}` : ""}`),
   });
 
-  const docs = docsData?.documents || [];
-
   const uploadMutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      const formData = new FormData();
-      files.forEach(f => formData.append("files", f));
     mutationFn: async ({ file, category, subCategory, docType }: { file: File, category?: string, subCategory?: string, docType?: string }) => {
       const formData = new FormData();
       formData.append("file", file);
@@ -952,62 +874,91 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
       if (docType && docType !== "auto") formData.append("documentType", docType);
       if (currentCommune !== "all") formData.append("commune", currentCommune);
-      const r = await fetch("/api/mairie/documents", { method: "POST", credentials: "include", body: formData });
+      
+      const r = await fetch("/api/mairie/documents", { method: "POST", body: formData });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.message || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(data.message || "Erreur upload");
       return data;
     },
-    onSuccess: (data) => {
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      toast({ title: `${data.inserted} document(s) ajouté(s)`, description: "Indexation IA en arrière-plan." });
+    onSuccess: (data, variables) => {
+      setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      toast({ title: "Document ajouté", description: `Le document ${variables.docType} a été indexé.` });
     },
-    onError: (err: any) => toast({ title: "Erreur upload", description: err.message, variant: "destructive" }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE", credentials: "include" });
-      if (!r.ok) throw new Error("Erreur suppression");
-      return r.json();
-    },
-    onSuccess: () => {
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      toast({ title: "Document supprimé" });
-    },
+    onError: (err: any, variables) => {
+      setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   });
 
   const syncGpuMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/mairie/gpu/sync?commune=${encodeURIComponent(currentCommune)}`, { method: "POST", credentials: "include" });
+      const r = await fetch(`/api/mairie/gpu/sync?commune=${encodeURIComponent(currentCommune)}`, { method: "POST" });
       if (!r.ok) throw new Error("Sync GPU failed");
       return r.json();
     },
     onSuccess: (data) => {
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      if (data.count > 0) {
-        toast({ title: `GPU : ${data.count} document(s) synchronisé(s)` });
-      } else {
-        toast({ title: "GPU : aucun document trouvé", description: data.message, variant: "destructive" });
-      }
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      toast({ title: "Synchronisation GPU terminée", description: `${data.count} documents récupérés.` });
     },
-    onError: (err: any) => toast({ title: "Erreur Sync GPU", description: err.message, variant: "destructive" }),
+    onError: (err: any) => {
+      toast({ title: "Erreur Sync", description: err.message, variant: "destructive" });
+    }
   });
 
-  const resetMutation = useMutation({
+  const reindexMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/mairie/documents/commune?commune=${encodeURIComponent(currentCommune)}`, {
-        method: "DELETE", credentials: "include"
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.message || "Erreur");
-      return data;
+      const r = await fetch(`/api/mairie/gpu/reindex?commune=${encodeURIComponent(currentCommune)}`, { method: "POST" });
+      if (!r.ok) throw new Error("Reindex failed");
+      return r.json();
     },
     onSuccess: (data) => {
-      setShowResetConfirm(false);
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      toast({ title: `Base réinitialisée — ${data.deleted} doc(s) supprimé(s)` });
+      toast({ title: "Réindexation démarrée", description: `${data.total} documents en cours de traitement en arrière-plan.` });
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] }), 5000);
     },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+    onError: (err: any) => {
+      toast({ title: "Erreur réindexation", description: err.message, variant: "destructive" });
+    }
+  });
+
+  const { data: coverageData, isLoading: loadingCoverage } = useQuery<{
+    commune: string; insee: string; ready: boolean;
+    documents: { total: number; indexed: number; failed: number };
+    embeddings: { totalChunks: number; byZone: { zone: string; chunks: number }[] };
+  }>({
+    queryKey: ["base-ia-coverage", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/base-ia/coverage?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+    refetchInterval: 30000,
+  });
+
+  const updateNoteMutation = useMutation({
+    mutationFn: async ({ id, note }: { id: string, note: string }) => {
+      const r = await fetch(`/api/mairie/documents/${id}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ explanatoryNote: note })
+      });
+      if (!r.ok) throw new Error("Update failed");
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      toast({ title: "Note sauvegardée" });
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error("Delete failed");
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      toast({ title: "Supprimé", description: "Document retiré de la base." });
+    }
   });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: string, subCategory: string, docType: string) => {
@@ -1046,34 +997,55 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   }, [pluDocsData, validSlotKeys]);
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
+    <div className="space-y-6 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <HardDrive className="w-6 h-6 text-primary" />
-            Base de Connaissances IA
+            Base de Connaissances Urbanisme
           </h2>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            {currentCommune !== "all" ? `Commune de ${currentCommune}` : "Tous les territoires"}
-            {" · "}
-            <span className="font-medium text-foreground">{docs.length} document{docs.length !== 1 ? "s" : ""} indexé{docs.length !== 1 ? "s" : ""}</span>
+          <p className="text-muted-foreground">
+            Structurez les documents réglementaires pour {currentCommune === "all" ? "tous les territoires" : `la commune de ${currentCommune}`}.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => syncGpuMutation.mutate()}
-            disabled={syncGpuMutation.isPending || currentCommune === "all"}>
-            {syncGpuMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5 text-emerald-600" />}
+        
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Button 
+            variant="outline" 
+            className="gap-2 border-primary/20 hover:bg-primary/5 h-10 px-4"
+            onClick={() => syncGpuMutation.mutate()}
+            disabled={syncGpuMutation.isPending || currentCommune === "all"}
+          >
+            {syncGpuMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-emerald-600" />}
             Sync GPU
           </Button>
-          <Button size="sm" onClick={() => document.getElementById("doc-upload")?.click()}
-            disabled={uploadMutation.isPending}>
-            {uploadMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <UploadCloud className="w-4 h-4 mr-1.5" />}
-            {uploadMutation.isPending ? "Envoi…" : "Ajouter des documents"}
-            <input id="doc-upload" type="file" className="hidden" multiple accept=".pdf,.PDF"
+
+          <Button
+            variant="outline"
+            className="gap-2 border-primary/20 hover:bg-primary/5 h-10 px-4"
+            onClick={() => reindexMutation.mutate()}
+            disabled={reindexMutation.isPending || currentCommune === "all"}
+            title="Réindexer les documents existants dans la Base IA"
+          >
+            {reindexMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4 text-violet-500" />}
+            Réindexer Base IA
+          </Button>
+
+          <Button
+            variant="outline"
+            className="gap-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/5 h-10 px-4"
+            onClick={() => document.getElementById('batch-upload')?.click()}
+            disabled={uploadMutation.isPending}
+          >
+            <UploadCloud className="w-4 h-4 text-primary" />
+            Batch Upload
+            <input 
+              id="batch-upload"
+              type="file" 
+              className="hidden" 
+              multiple 
+              accept=".pdf"
               onChange={(e) => {
-                if (e.target.files?.length) { uploadMutation.mutate(Array.from(e.target.files)); e.target.value = ""; }
-              }} />
                 const files = e.target.files;
                 if (!files || files.length === 0) return;
                 Array.from(files).forEach(file => {
@@ -1082,39 +1054,55 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
               }}
             />
           </Button>
-          {currentCommune !== "all" && (
-            <Button variant="outline" size="sm"
-              className="text-destructive border-destructive/30 hover:bg-destructive/5"
-              onClick={() => setShowResetConfirm(true)}>
-              <Trash2 className="w-4 h-4 mr-1.5" /> Réinitialiser
-            </Button>
-          )}
         </div>
       </div>
 
-      {/* ── Document list ── */}
-      {isLoading ? (
-        <div className="flex items-center gap-2 text-muted-foreground py-8">
-          <Loader2 className="w-5 h-5 animate-spin" /> Chargement…
-        </div>
-      ) : docs.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center py-16 text-center gap-3">
-          <HardDrive className="w-12 h-12 text-muted-foreground/30" />
-          <div>
-            <p className="font-medium text-muted-foreground">Aucun document chargé</p>
-            <p className="text-sm text-muted-foreground/70 mt-1">
-              Utilisez "Ajouter des documents" ou "Sync GPU" pour commencer.
-            </p>
+      {/* ── Base IA Coverage Card ── */}
+      {currentCommune !== "all" && (
+        <div className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
+          loadingCoverage ? "bg-muted/30" :
+          coverageData?.ready ? "bg-emerald-500/5 border-emerald-500/20" :
+          "bg-amber-500/5 border-amber-500/20"
+        }`}>
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {loadingCoverage ? (
+              <Loader2 className="w-5 h-5 text-muted-foreground animate-spin flex-shrink-0" />
+            ) : coverageData?.ready ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+            )}
+            <div className="min-w-0">
+              <p className="font-medium text-sm">
+                {loadingCoverage ? "Vérification de la Base IA…" :
+                 coverageData?.ready
+                   ? `Base IA opérationnelle — ${coverageData.embeddings.totalChunks.toLocaleString()} chunks indexés`
+                   : "Base IA vide — aucun chunk indexé pour cette commune"}
+              </p>
+              {coverageData && !loadingCoverage && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {coverageData.documents.indexed} doc{coverageData.documents.indexed !== 1 ? "s" : ""} indexé{coverageData.documents.indexed !== 1 ? "s" : ""}
+                  {coverageData.documents.failed > 0 && ` · ${coverageData.documents.failed} en erreur`}
+                  {coverageData.embeddings.byZone.length > 0 && (
+                    <> · Zones&nbsp;:&nbsp;{coverageData.embeddings.byZone.slice(0, 5).map(z => `${z.zone} (${z.chunks})`).join(", ")}{coverageData.embeddings.byZone.length > 5 ? "…" : ""}</>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
+          {coverageData && !coverageData.ready && !loadingCoverage && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-shrink-0 gap-1.5 border-amber-500/30 hover:border-amber-500 text-amber-700"
+              onClick={() => reindexMutation.mutate()}
+              disabled={reindexMutation.isPending}
+            >
+              {reindexMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BrainCircuit className="w-3.5 h-3.5" />}
+              Réindexer maintenant
+            </Button>
+          )}
         </div>
-      ) : (
-        <div className="rounded-xl border bg-card divide-y overflow-hidden">
-          {docs.map(doc => (
-            <div key={doc.id}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 cursor-pointer group transition-colors"
-              onClick={() => setSelectedDoc(doc)}>
-              <div className="p-2 rounded-lg bg-primary/5 text-primary shrink-0">
-                <FileText className="w-4 h-4" />
       )}
 
       {unmatchedDocs.length > 0 && (
@@ -1252,57 +1240,122 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   </div>
                 ))}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{doc.title || doc.fileName}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {doc.commune && <span className="mr-2">{doc.commune}</span>}
-                  {format(new Date(doc.createdAt), "d MMM yyyy", { locale: fr })}
-                </p>
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+
+      {/* MODAL DE DÉTAILS ET PRÉVISUALISATION PDF */}
+      <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>
+        <SheetContent side="right" className="sm:max-w-[80vw] p-0 overflow-hidden flex flex-col">
+          <SheetHeader className="p-6 border-b bg-muted/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <FileText className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <SheetTitle className="text-lg font-bold">{selectedDoc?.title}</SheetTitle>
+                  <SheetDescription className="text-xs">
+                    {selectedDoc?.category} › {selectedDoc?.subCategory} › {selectedDoc?.documentType}
+                  </SheetDescription>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Badge variant="outline" className="text-[10px] hidden sm:flex">Analyser</Badge>
-                <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 text-destructive h-7 w-7 p-0"
-                  onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(doc.id); }}>
-                  <Trash2 className="w-3.5 h-3.5" />
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-8 gap-2" onClick={() => window.open(`/api/mairie/documents/${selectedDoc?.id}/view`, '_blank')}>
+                  <Zap className="w-3.5 h-3.5" /> Ouvrir plein écran
                 </Button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Document detail / analysis sheet ── */}
-      <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader className="pr-6">
-            <SheetTitle className="text-base leading-snug break-words">{selectedDoc?.title || selectedDoc?.fileName}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {selectedDoc?.commune && <span className="mr-2">{selectedDoc.commune}</span>}
-              {selectedDoc && format(new Date(selectedDoc.createdAt), "d MMMM yyyy", { locale: fr })}
-            </SheetDescription>
           </SheetHeader>
-          {selectedDoc && <DocAnalysisPanel doc={selectedDoc} />}
-        </SheetContent>
-      </Sheet>
+          
+          <div className="flex-1 flex overflow-hidden">
+            {/* GAUCHE: PDF PREVIEW */}
+            <div className="flex-1 bg-muted/30 relative">
+              {selectedDoc ? (
+                <iframe 
+                  src={`/api/mairie/documents/${selectedDoc.id}/view#toolbar=0`} 
+                  className="w-full h-full border-none"
+                  title="PDF Preview"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Loader2 className="w-10 h-10 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            </div>
 
-      {/* ── Reset confirmation ── */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="bg-card rounded-xl border shadow-2xl p-6 max-w-sm w-full mx-4 space-y-4">
-            <h3 className="font-bold text-lg">Réinitialiser la base ?</h3>
-            <p className="text-sm text-muted-foreground">
-              Tous les documents de <strong>{currentCommune}</strong> seront supprimés définitivement.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <Button variant="outline" onClick={() => setShowResetConfirm(false)}>Annuler</Button>
-              <Button variant="destructive" disabled={resetMutation.isPending} onClick={() => resetMutation.mutate()}>
-                {resetMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                Tout supprimer
-              </Button>
+            {/* DROITE: MÉTADONNÉES & IA */}
+            <div className="w-[350px] border-l bg-background p-6 space-y-6 overflow-y-auto">
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold flex items-center gap-2 border-b pb-2">
+                  <BrainCircuit className="w-4 h-4 text-primary" />
+                  Analyse IA du Document
+                </h4>
+                
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Note Explicative (Synthèse)</label>
+                    <Textarea 
+                      className="text-xs min-h-[120px] bg-muted/10 italic leading-relaxed"
+                      placeholder="L'IA génère ici une note synthétique du contenu..."
+                      defaultValue={selectedDoc?.explanatoryNote}
+                      onBlur={(e) => {
+                        if (e.target.value !== selectedDoc?.explanatoryNote) {
+                          updateNoteMutation.mutate({ id: selectedDoc.id, note: e.target.value });
+                        }
+                      }}
+                    />
+                    <p className="text-[9px] text-muted-foreground italic">
+                      Cette note sera affichée dans la liste des documents pour faciliter la navigation.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t">
+                <h4 className="text-sm font-bold flex items-center gap-2 border-b pb-2">
+                  <Settings className="w-4 h-4 text-muted-foreground" />
+                  Métadonnées Réglementaires
+                </h4>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Classification</label>
+                    <div className="grid grid-cols-1 gap-2">
+                      <div className="p-2 bg-muted/30 rounded border text-[10px] font-bold">
+                        ORIGINE : {selectedDoc?.category} / {selectedDoc?.documentType}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Date d'Indexation</label>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {selectedDoc && format(new Date(selectedDoc.createdAt), "dd/MM/yyyy HH:mm")}
+                    </div>
+                  </div>
+
+                  <div className="pt-4">
+                    <Button 
+                      variant="destructive" 
+                      className="w-full gap-2 h-9 text-xs"
+                      onClick={() => {
+                        if(confirm("Supprimer définitivement ce document de la base de connaissances ?")) {
+                          deleteMutation.mutate(selectedDoc.id);
+                          setSelectedDoc(null);
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" /> Supprimer du corpus
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
