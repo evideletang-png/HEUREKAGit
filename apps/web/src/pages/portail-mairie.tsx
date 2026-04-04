@@ -867,12 +867,12 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ file, category, subCategory, docType }: { file: File, category: string, subCategory: string, docType: string }) => {
+    mutationFn: async ({ file, category, subCategory, docType }: { file: File, category?: string, subCategory?: string, docType?: string }) => {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("category", category);
-      formData.append("subCategory", subCategory);
-      formData.append("documentType", docType);
+      if (category && category !== "auto") formData.append("category", category);
+      if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
+      if (docType && docType !== "auto") formData.append("documentType", docType);
       if (currentCommune !== "all") formData.append("commune", currentCommune);
       
       const r = await fetch("/api/mairie/documents", { method: "POST", body: formData });
@@ -969,6 +969,16 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     uploadMutation.mutate({ file, category, subCategory, docType });
   };
 
+  const validSlotKeys = useMemo(() => {
+    return new Set(
+      Object.entries(KB_STRUCTURE).flatMap(([catKey, cat]) =>
+        Object.entries(cat.subCategories).flatMap(([subKey, sub]) =>
+          sub.types.map((type) => `${catKey}-${subKey}-${type}`)
+        )
+      )
+    );
+  }, []);
+
   const groupedDocs = useMemo(() => {
     const map: Record<string, any[]> = {};
     pluDocsData?.documents?.forEach(doc => {
@@ -978,6 +988,13 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     });
     return map;
   }, [pluDocsData]);
+
+  const unmatchedDocs = useMemo(() => {
+    return (pluDocsData?.documents || []).filter((doc) => {
+      const key = `${doc.category}-${doc.subCategory}-${doc.documentType}`;
+      return !validSlotKeys.has(key);
+    });
+  }, [pluDocsData, validSlotKeys]);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -1032,7 +1049,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                 const files = e.target.files;
                 if (!files || files.length === 0) return;
                 Array.from(files).forEach(file => {
-                  uploadMutation.mutate({ file, category: "auto", subCategory: "auto", docType: "auto" });
+                  uploadMutation.mutate({ file });
                 });
               }}
             />
@@ -1086,6 +1103,36 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             </Button>
           )}
         </div>
+      )}
+
+      {unmatchedDocs.length > 0 && (
+        <Card className="border-amber-500/20 bg-amber-500/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              Documents hors classification ({unmatchedDocs.length})
+            </CardTitle>
+            <CardDescription>
+              Ces documents existent bien mais ne correspondent à aucune case du tableau ci-dessous.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {unmatchedDocs.slice(0, 6).map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold truncate">{doc.title}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {doc.category || "—"} / {doc.subCategory || "—"} / {doc.documentType || "—"}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedDoc(doc)}>Voir</Button>
+              </div>
+            ))}
+            {unmatchedDocs.length > 6 && (
+              <p className="text-[11px] text-muted-foreground">+ {unmatchedDocs.length - 6} autre(s) document(s).</p>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <Accordion type="multiple" defaultValue={["item-0", "item-1"]} className="space-y-4">
