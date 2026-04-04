@@ -109,7 +109,6 @@ async function getWritingMaterials(gpu_doc_id: string, nomfic: string): Promise<
   const data = await httpGet(url);
   if (!data) return [];
 
-  // writingMaterials is an array of URL strings (or objects)
   const raw: any[] = Array.isArray(data?.writingMaterials) ? data.writingMaterials : [];
 
   if (raw.length === 0) {
@@ -117,17 +116,45 @@ async function getWritingMaterials(gpu_doc_id: string, nomfic: string): Promise<
     return [];
   }
 
-  console.log(`[GPU] writingMaterials(${gpu_doc_id}) → ${raw.length} items`);
+  // Log full raw structure so we can diagnose shape issues
+  console.log(`[GPU] writingMaterials(${gpu_doc_id}) raw[0]:`, JSON.stringify(raw[0]).slice(0, 300));
+  console.log(`[GPU] writingMaterials total: ${raw.length} items`);
 
-  return raw.map((item: any) => {
-    // item may be a string URL or an object with a url/href field
-    const fileUrl: string = typeof item === "string" ? item : (item?.url || item?.href || item?.link || "");
-    if (!fileUrl) return null;
+  const files: GPUFile[] = [];
+
+  for (const item of raw) {
+    // item can be a string URL or an object
+    const fileUrl: string = typeof item === "string"
+      ? item
+      : (item?.url || item?.href || item?.link || item?.telechargement || item?.download || "");
+
+    if (!fileUrl) continue;
 
     const pathPart = fileUrl.split("?")[0];
-    const fileName = decodeURIComponent(pathPart.split("/").pop() || fileUrl);
+    const rawFileName = decodeURIComponent(pathPart.split("/").pop() || "");
 
-    // Derive a human-readable title from the filename
+    // The item may have an explicit name/title field
+    const itemName: string = typeof item === "object"
+      ? (item?.nom || item?.name || item?.titre || item?.title || rawFileName)
+      : rawFileName;
+
+    // Skip metadata / non-document entries
+    const lowerName = itemName.toLowerCase();
+    const lowerUrl  = fileUrl.toLowerCase();
+    if (
+      lowerName === "metadata" ||
+      lowerUrl.includes("/metadata") ||
+      lowerUrl.endsWith(".xml") ||
+      lowerUrl.endsWith(".json") ||
+      lowerName.endsWith(".xml") ||
+      lowerName.endsWith(".json")
+    ) {
+      console.log(`[GPU] skipping non-document: ${itemName}`);
+      continue;
+    }
+
+    const fileName = itemName || rawFileName || fileUrl;
+
     let title = fileName;
     const lower = fileName.toLowerCase();
     if (lower.includes("reglement") && lower.includes("ecrit")) title = "Règlement écrit";
@@ -135,10 +162,13 @@ async function getWritingMaterials(gpu_doc_id: string, nomfic: string): Promise<
     else if (lower.includes("padd")) title = "PADD";
     else if (lower.includes("oap")) title = "OAP";
     else if (lower.includes("rapport")) title = "Rapport de présentation";
-    else if (nomfic && fileName.includes(nomfic)) title = `Règlement — ${nomfic}`;
+    else if (nomfic && (fileName.includes(nomfic) || fileUrl.includes(nomfic))) title = `Règlement — ${nomfic}`;
 
-    return { name: fileName, title, url: fileUrl } as GPUFile;
-  }).filter(Boolean) as GPUFile[];
+    files.push({ name: fileName, title, url: fileUrl });
+  }
+
+  console.log(`[GPU] kept ${files.length}/${raw.length} writingMaterials after filtering`);
+  return files;
 }
 
 // ─── Build GPUDocument from gpu_doc_id + files ────────────────────────────────
@@ -208,7 +238,11 @@ export class GPUProviderService {
       const url = `${GPU_API}/document/${gpu_doc_id}/details`;
       const data = await httpGet(url);
       result[`details_${gpu_doc_id}`] = data
-        ? { keys: Object.keys(data), writingMaterials_count: data?.writingMaterials?.length ?? 0, sample: data?.writingMaterials?.slice(0, 2) }
+        ? {
+            keys: Object.keys(data),
+            writingMaterials_count: data?.writingMaterials?.length ?? 0,
+            writingMaterials_raw: data?.writingMaterials ?? [],  // full raw array
+          }
         : "no response";
     }
     return result;
