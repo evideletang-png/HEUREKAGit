@@ -1016,7 +1016,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           <p className="text-muted-foreground text-sm mt-0.5">
             {currentCommune !== "all" ? `Commune de ${currentCommune}` : "Tous les territoires"}
             {" · "}
-            <span className="font-medium text-foreground">{docs.length} document{docs.length !== 1 ? "s" : ""}</span>
+            <span className="font-medium text-foreground">{docs.length} document{docs.length !== 1 ? "s" : ""} indexé{docs.length !== 1 ? "s" : ""}</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
