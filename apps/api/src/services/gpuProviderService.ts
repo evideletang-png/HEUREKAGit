@@ -186,12 +186,76 @@ function makeDocument(gpu_doc_id: string, files: GPUFile[]): GPUDocument {
   };
 }
 
+// ─── Fallback: GPU REST search by INSEE ───────────────────────────────────────
+
+async function getDocsFromRestSearch(inseeCode: string): Promise<GPUDocument[]> {
+  // Try multiple REST parameter variants
+  const variants = [
+    `${GPU_API}/document?codeMunicipalite=${inseeCode}`,
+    `${GPU_API}/document?grid=${inseeCode}&gridType=insee&active=true`,
+    `${GPU_API}/document?codeInsee=${inseeCode}`,
+  ];
+
+  for (const url of variants) {
+    const data = await httpGet(url);
+    if (!data) continue;
+
+    const list: any[] = Array.isArray(data) ? data
+      : Array.isArray(data?.content) ? data.content
+      : Array.isArray(data?.items) ? data.items : [];
+
+    if (list.length === 0) continue;
+
+    console.log(`[GPU] REST search found ${list.length} docs via ${url}`);
+    const docs: GPUDocument[] = [];
+
+    for (const item of list) {
+      const docId: string = item?.id || item?.gpu_doc_id || "";
+      if (!docId) continue;
+
+      // Try /details first, then /files
+      let files = await getWritingMaterials(docId, "");
+      if (files.length === 0) {
+        const filesData = await httpGet(`${GPU_API}/document/${docId}/files`);
+        if (filesData) {
+          const raw: any[] = Array.isArray(filesData) ? filesData : filesData?.content || [];
+          files = raw
+            .filter((f: any) => {
+              const n = (f?.name || "").toLowerCase();
+              return !n.includes("metadata") && !n.endsWith(".xml") && !n.endsWith(".json");
+            })
+            .map((f: any) => ({
+              name: f.name,
+              title: f.title || f.name,
+              url: `${GPU_API}/document/${docId}/files/${encodeURIComponent(f.name)}`,
+            }));
+        }
+      }
+
+      if (files.length > 0) docs.push(makeDocument(docId, files));
+    }
+
+    if (docs.length > 0) return docs;
+  }
+
+  return [];
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export class GPUProviderService {
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
+    // Primary: zone-urba → gpu_doc_id → /details → writingMaterials (Make.com flow)
     const features = await getZoneUrbaFeatures(`code_insee=${inseeCode}`);
-    return GPUProviderService._buildDocs(features);
+    let docs = await GPUProviderService._buildDocs(features);
+
+    // Fallback: GPU REST search when zone-urba returns nothing (PLUi communes etc.)
+    if (docs.length === 0) {
+      console.log(`[GPU] zone-urba returned 0 usable docs — trying REST search`);
+      docs = await getDocsFromRestSearch(inseeCode);
+    }
+
+    return docs;
   }
 
   static async getDocumentsByCoords(lon: number, lat: number): Promise<GPUDocument[]> {

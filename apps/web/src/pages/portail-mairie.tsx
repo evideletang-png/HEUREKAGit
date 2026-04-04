@@ -900,7 +900,18 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
-      toast({ title: "Synchronisation GPU terminée", description: `${data.count} documents récupérés.` });
+      if (data.count > 0) {
+        toast({ title: "Synchronisation GPU terminée", description: `${data.count} documents récupérés.` });
+      } else {
+        const diag = data.diagnostic ?? {};
+        const zoneUrba = diag.zone_urba_features ?? "?";
+        const ids = (diag.gpu_doc_ids ?? []).join(", ") || "aucun";
+        toast({
+          title: "GPU — 0 documents trouvés",
+          description: `zone-urba: ${zoneUrba} feature(s) | gpu_doc_ids: ${ids}${data.message ? ` | ${data.message}` : ""}`,
+          variant: "destructive",
+        });
+      }
     },
     onError: (err: any) => {
       toast({ title: "Erreur Sync", description: err.message, variant: "destructive" });
