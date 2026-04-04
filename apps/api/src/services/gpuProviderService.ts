@@ -1,13 +1,23 @@
-import { execSync } from "child_process";
-
 /**
  * Service d'interfaçage avec le Géoportail de l'Urbanisme (GPU)
  *
- * PRIMARY METHOD: INSPIRE ATOM feed
- *   https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml?partition=DU_{inseeCode}
- *   Returns an XML feed with direct PDF download links — no WAF issues.
+ * API base: https://www.geoportail-urbanisme.gouv.fr/api
  *
- * FALLBACK: REST JSON API (various endpoint variants)
+ * FLOW:
+ *  1. GET apicarto.ign.fr/api/gpu/zone-urba?code_insee={insee}
+ *     → features[].properties.gpu_doc_id  (32-char hex document ID)
+ *     → features[].properties.nomfic       (reference filename)
+ *
+ *  2. GET /document/{gpu_doc_id}/details
+ *     → writingMaterials: Record<filename, url>   ← OBJECT not array
+ *     → archiveUrl: string                         (ZIP of all files)
+ *
+ *  3. Iterate Object.entries(writingMaterials) to get all PDF URLs.
+ *
+ * FALLBACK (if zone-urba returns no features):
+ *  GET /document?documentFamily=DU&status=document.production&legalStatus=APPROVED&limit=1000
+ *  → filter by doc.grid.name === inseeCode
+ *  → then step 2 as above
  */
 
 export interface GPUDocument {
@@ -28,257 +38,227 @@ export interface GPUFile {
   url: string;
 }
 
-export class GPUProviderService {
-  private static BASE_URL = "https://www.geoportail-urbanisme.gouv.fr/api";
-  private static ATOM_BASE = "https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml";
-  // WFS endpoints that return GeoJSON with gpu_doc_id per feature
-  private static WFS_URLS = [
-    "https://data.geopf.fr/wfs/ows",
-    "https://www.geoportail-urbanisme.gouv.fr/wfs/",
-    "https://wxs.ign.fr/essentiels/geoportail/wfs",
-  ];
+const GPU_API   = "https://www.geoportail-urbanisme.gouv.fr/api";
+const ZONE_URBA = "https://apicarto.ign.fr/api/gpu/zone-urba";
 
-  // Cache ATOM-derived files so getFilesByDocumentId() works unchanged
-  private static atomFilesCache: Map<string, GPUFile[]> = new Map();
+const FETCH_HEADERS = {
+  "Accept": "application/json, */*",
+  "Accept-Language": "fr-FR,fr;q=0.9",
+  "Referer": "https://www.geoportail-urbanisme.gouv.fr/",
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+};
 
-  private static curl(url: string, acceptXml = false): string | null {
-    try {
-      const accept = acceptXml ? "application/xml,text/xml,*/*" : "application/json";
-      const command = [
-        "curl", "-s", "-L", "-k", "--max-time", "30",
-        "-H", `"Accept: ${accept}"`,
-        "-H", '"Accept-Language: fr-FR,fr;q=0.9"',
-        "-H", '"Referer: https://www.geoportail-urbanisme.gouv.fr/"',
-        "-A", '"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"',
-        `"${url}"`,
-      ].join(" ");
-      const stdout = execSync(command, { maxBuffer: 10 * 1024 * 1024 }).toString().trim();
-      if (!stdout) { console.warn(`[GPU] Empty response: ${url}`); return null; }
-      return stdout;
-    } catch (e: any) {
-      console.error(`[GPU] curl failed for ${url}: ${e.message}`);
-      return null;
+const filesCache = new Map<string, GPUFile[]>();
+
+// ─── HTTP ──────────────────────────────────────────────────────────────────────
+
+async function httpGet(url: string): Promise<any | null> {
+  try {
+    console.log(`[GPU] GET ${url}`);
+    const res = await fetch(url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) { console.warn(`[GPU] HTTP ${res.status} — ${url}`); return null; }
+    const text = await res.text();
+    if (!text || text.trimStart().startsWith("<!") || text.trimStart().startsWith("<html")) {
+      console.warn(`[GPU] HTML response — ${url}`); return null;
     }
+    return JSON.parse(text);
+  } catch (e: any) {
+    console.error(`[GPU] fetch failed ${url}: ${e.message}`); return null;
   }
+}
 
-  // ─── ATOM feed parser ───────────────────────────────────────────────────────
+// ─── Step 1: zone-urba → gpu_doc_id + nomfic ──────────────────────────────────
 
-  private static parseAtomEntries(xml: string): GPUFile[] {
-    const files: GPUFile[] = [];
-    // Match <entry>...</entry> blocks (handles multiline, namespaced tags)
-    const entryRe = /<(?:\w+:)?entry[^>]*>([\s\S]*?)<\/(?:\w+:)?entry>/gi;
-    let m: RegExpExecArray | null;
+interface ZoneUrbaFeature { gpu_doc_id: string; nomfic: string; }
 
-    while ((m = entryRe.exec(xml)) !== null) {
-      const block = m[1];
+async function getZoneUrbaFeatures(params: string): Promise<ZoneUrbaFeature[]> {
+  const geoJson = await httpGet(`${ZONE_URBA}?${params}`);
+  if (!geoJson) return [];
+  const features: any[] = geoJson?.features || [];
+  console.log(`[GPU] zone-urba → ${features.length} features`);
 
-      // title — handles CDATA and plain text
-      const titleMatch = block.match(/<(?:\w+:)?title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:\w+:)?title>/i);
-      const title = titleMatch ? titleMatch[1].replace(/&amp;/g, "&").trim() : "";
-
-      // link href — <link href="..." ...> or <link rel="..." href="...">
-      const linkMatch = block.match(/<(?:\w+:)?link[^>]+href=["']([^"']+)["'][^>]*\/?>/i);
-      const href = linkMatch ? linkMatch[1].trim() : "";
-
-      if (!href) continue;
-
-      // Derive filename from URL path
-      const urlPath = href.split("?")[0];
-      const name = decodeURIComponent(urlPath.split("/").pop() || title || href);
-
-      files.push({ name, title: title || name, url: href });
-    }
-
-    return files;
+  const seen = new Set<string>();
+  const results: ZoneUrbaFeature[] = [];
+  for (const f of features) {
+    const props = f?.properties || {};
+    const gpu_doc_id = (props.gpu_doc_id || "").trim();
+    const nomfic     = (props.nomfic     || "").trim();
+    if (!gpu_doc_id || seen.has(gpu_doc_id)) continue;
+    seen.add(gpu_doc_id);
+    results.push({ gpu_doc_id, nomfic });
   }
+  console.log(`[GPU] unique gpu_doc_ids: ${results.map(r => r.gpu_doc_id).join(", ") || "none"}`);
+  return results;
+}
 
-  // ─── Public API ─────────────────────────────────────────────────────────────
+// ─── Step 2: /document/{id}/details → writingMaterials (object) ───────────────
 
-  /**
-   * Step 1 of the Make.com flow: WFS GeoJSON → gpu_doc_id list
-   * Step 2: GET /api/document/{gpu_doc_id}/details for each ID
-   */
-  private static async getDocIdsByWFS(inseeCode: string): Promise<string[]> {
-    const wfsParams = new URLSearchParams({
-      SERVICE: "WFS",
-      VERSION: "2.0.0",
-      REQUEST: "GetFeature",
-      typeName: "GPU:document",
-      outputFormat: "application/json",
-      CQL_FILTER: `code_insee='${inseeCode}'`,
-    });
+async function getFilesFromDetails(gpu_doc_id: string, nomfic: string): Promise<GPUFile[]> {
+  const data = await httpGet(`${GPU_API}/document/${gpu_doc_id}/details`);
+  if (!data) return [];
 
-    for (const base of GPUProviderService.WFS_URLS) {
-      const url = `${base}?${wfsParams.toString()}`;
-      console.log(`[GPU] WFS query: ${url}`);
-      const raw = GPUProviderService.curl(url, false);
-      if (!raw || raw.startsWith("<!") || raw.startsWith("<html")) continue;
-      try {
-        const geoJson = JSON.parse(raw);
-        const features: any[] = geoJson?.features || [];
-        const ids = features
-          .map((f: any) => f?.properties?.gpu_doc_id || f?.properties?.id || f?.id)
-          .filter(Boolean);
-        if (ids.length > 0) {
-          console.log(`[GPU] WFS ✅ found ${ids.length} gpu_doc_ids via ${base}`);
-          return ids;
-        }
-        console.warn(`[GPU] WFS 0 features at ${base}: ${raw.slice(0, 200)}`);
-      } catch {
-        console.warn(`[GPU] WFS non-JSON at ${base}: ${raw.slice(0, 100)}`);
-      }
+  // writingMaterials is Record<filename, url> — NOT an array
+  const wm = data?.writingMaterials;
+  if (!wm || typeof wm !== "object" || Array.isArray(wm)) {
+    console.warn(`[GPU] writingMaterials missing or wrong type for ${gpu_doc_id}. Keys: ${Object.keys(data).join(", ")}`);
+    // Try archiveUrl as last resort
+    if (data?.archiveUrl) {
+      const name = data.originalName || gpu_doc_id;
+      return [{ name: `${name}.zip`, title: "Archive ZIP", url: data.archiveUrl }];
     }
     return [];
   }
 
+  const entries = Object.entries(wm) as [string, string][];
+  console.log(`[GPU] writingMaterials: ${entries.length} files for ${gpu_doc_id}`);
+
+  return entries
+    .filter(([filename]) => {
+      const lower = filename.toLowerCase();
+      return !lower.includes("metadata") && !lower.endsWith(".xml");
+    })
+    .map(([filename, fileUrl]) => {
+      let title = filename;
+      const lower = filename.toLowerCase();
+      if (lower.includes("reglement") && lower.includes("ecrit")) title = "Règlement écrit";
+      else if (lower.includes("reglement_graphique") || lower.includes("plan_graphique")) title = "Plan graphique";
+      else if (lower.includes("padd"))    title = "PADD";
+      else if (lower.includes("oap"))     title = "OAP";
+      else if (lower.includes("rapport")) title = "Rapport de présentation";
+      else if (lower.includes("annexe"))  title = "Annexes";
+      else if (nomfic && filename.includes(nomfic)) title = `Règlement — ${nomfic}`;
+      return { name: filename, title, url: fileUrl };
+    });
+}
+
+// ─── Fallback: scan all DU documents to find commune match ────────────────────
+
+async function findDocumentForCommune(inseeCode: string): Promise<any | null> {
+  let page = 0;
+  const limit = 1000;
+
+  while (true) {
+    const data = await httpGet(
+      `${GPU_API}/document?documentFamily=DU&status=document.production&page=${page}&limit=${limit}`
+    );
+    if (!data) break;
+
+    const list: any[] = Array.isArray(data) ? data
+      : Array.isArray(data?.content) ? data.content
+      : [];
+
+    const match = list.find((d: any) =>
+      d?.grid?.name === inseeCode ||
+      d?.name === `DU_${inseeCode}` ||
+      d?.originalName?.startsWith(inseeCode)
+    );
+
+    if (match) {
+      console.log(`[GPU] Found doc for INSEE ${inseeCode}: ${match.id} (${match.originalName})`);
+      return match;
+    }
+
+    // No more pages
+    if (list.length < limit) break;
+    page++;
+  }
+
+  console.warn(`[GPU] No document found for INSEE ${inseeCode} after scanning all pages`);
+  return null;
+}
+
+async function getDocsFromRestSearch(inseeCode: string): Promise<GPUDocument[]> {
+  const match = await findDocumentForCommune(inseeCode);
+  if (!match) return [];
+
+  const files = await getFilesFromDetails(match.id, "");
+  if (files.length === 0) return [];
+
+  const id = `gpu-${match.id}`;
+  filesCache.set(id, files);
+  return [{
+    id,
+    name: match.originalName || match.name || match.id,
+    type: match.type || "PLU",
+    status: match.status || "production",
+    legalStatus: match.legalStatus || "APPROVED",
+    publicationDate: match.publicationDate,
+    originalName: match.originalName || match.id,
+  }];
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+export class GPUProviderService {
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
-    // 1. WFS → gpu_doc_id → /api/document/{id}/details  (exact Make.com flow)
-    const docIds = await GPUProviderService.getDocIdsByWFS(inseeCode);
-    if (docIds.length > 0) {
+    // Primary: zone-urba → gpu_doc_id → /details → writingMaterials
+    const features = await getZoneUrbaFeatures(`code_insee=${inseeCode}`);
+    if (features.length > 0) {
       const docs: GPUDocument[] = [];
-      for (const docId of docIds) {
-        const url = `${GPUProviderService.BASE_URL}/document/${docId}/details`;
-        console.log(`[GPU] Fetching details: ${url}`);
-        const raw = GPUProviderService.curl(url, false);
-        if (!raw) continue;
-        try {
-          const d = JSON.parse(raw);
-          docs.push({
-            id: d.id || d.gpu_doc_id || docId,
-            name: d.name || d.title || docId,
-            type: d.type || d.documentType || "PLU",
-            status: d.status || d.etat || "production",
-            legalStatus: d.legalStatus || d.statutJuridique || "opposable",
-            publicationDate: d.publicationDate || d.datePubli,
-            originalName: d.originalName || d.name || docId,
-          });
-        } catch {
-          // Still add with minimal info so getFilesByDocumentId() is called
-          docs.push({ id: docId, name: docId, type: "PLU", status: "production", legalStatus: "opposable", originalName: docId });
+      for (const { gpu_doc_id, nomfic } of features) {
+        const files = await getFilesFromDetails(gpu_doc_id, nomfic);
+        if (files.length > 0) {
+          const id = `gpu-${gpu_doc_id}`;
+          filesCache.set(id, files);
+          docs.push({ id, name: `PLU — ${gpu_doc_id}`, type: "PLU", status: "production", legalStatus: "APPROVED", originalName: gpu_doc_id });
         }
       }
       if (docs.length > 0) return docs;
     }
 
-    // 2. Try INSPIRE ATOM feed (primary — no WAF, direct PDFs)
-    const atomUrl = `${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`;
-    console.log(`[GPU] Trying ATOM feed: ${atomUrl}`);
-    const xml = GPUProviderService.curl(atomUrl, true);
+    // Fallback: GPU REST list search
+    console.log(`[GPU] zone-urba gave no usable docs — falling back to REST search`);
+    return getDocsFromRestSearch(inseeCode);
+  }
 
-    if (xml && !xml.startsWith("{") && !xml.startsWith("<html") && !xml.startsWith("<!")) {
-      const files = GPUProviderService.parseAtomEntries(xml);
-      console.log(`[GPU] ATOM feed returned ${files.length} entries for INSEE ${inseeCode}`);
+  static async getDocumentsByCoords(lon: number, lat: number): Promise<GPUDocument[]> {
+    const geom = JSON.stringify({ type: "Point", coordinates: [lon, lat] });
+    const features = await getZoneUrbaFeatures(`geom=${encodeURIComponent(geom)}`);
+    const docs: GPUDocument[] = [];
+    for (const { gpu_doc_id, nomfic } of features) {
+      const files = await getFilesFromDetails(gpu_doc_id, nomfic);
       if (files.length > 0) {
-        const syntheticId = `atom-${inseeCode}`;
-        GPUProviderService.atomFilesCache.set(syntheticId, files);
-        return [{
-          id: syntheticId,
-          name: `PLU ${inseeCode}`,
-          type: "PLU",
-          status: "production",
-          legalStatus: "opposable",
-          originalName: `Documents d'urbanisme — ${inseeCode}`,
-        }];
-      }
-      // Log first 500 chars of the ATOM response for diagnosis
-      console.warn(`[GPU] ATOM feed returned 0 entries. Raw: ${xml.slice(0, 500)}`);
-    }
-
-    // 2. REST JSON fallback (multiple parameter variants)
-    const jsonUrls = [
-      `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`,
-      `${GPUProviderService.BASE_URL}/document?grid=${inseeCode}&gridType=insee`,
-      `${GPUProviderService.BASE_URL}/document/by-municipality/${inseeCode}`,
-    ];
-
-    for (const url of jsonUrls) {
-      console.log(`[GPU] Trying REST fallback: ${url}`);
-      const raw = GPUProviderService.curl(url, false);
-      if (!raw || raw.startsWith("<!") || raw.startsWith("<html")) continue;
-      try {
-        const data = JSON.parse(raw);
-        const docs = GPUProviderService.extractDocs(data);
-        if (docs.length > 0) {
-          console.log(`[GPU] ✅ REST fallback returned ${docs.length} docs via ${url}`);
-          return docs as GPUDocument[];
-        }
-        console.warn(`[GPU] REST 0 docs at ${url} — shape: ${raw.slice(0, 200)}`);
-      } catch {
-        console.warn(`[GPU] Non-JSON response at ${url}: ${raw.slice(0, 200)}`);
+        const id = `gpu-${gpu_doc_id}`;
+        filesCache.set(id, files);
+        docs.push({ id, name: `PLU — ${gpu_doc_id}`, type: "PLU", status: "production", legalStatus: "APPROVED", originalName: gpu_doc_id });
       }
     }
-
-    console.warn(`[GPU] No documents found for INSEE ${inseeCode} from ATOM or REST`);
-    return [];
+    return docs;
   }
 
   static async getFilesByDocumentId(documentId: string): Promise<GPUFile[]> {
-    // Return ATOM-cached files if this is an ATOM synthetic document
-    if (GPUProviderService.atomFilesCache.has(documentId)) {
-      const files = GPUProviderService.atomFilesCache.get(documentId)!;
-      console.log(`[GPU] Returning ${files.length} ATOM-cached files for ${documentId}`);
-      return files;
-    }
-
-    // REST fallback for real document IDs
-    const url = `${GPUProviderService.BASE_URL}/document/${documentId}/files`;
-    console.log(`[GPU] Fetching REST file list for ${documentId}`);
-    const raw = GPUProviderService.curl(url, false);
-    if (!raw) return [];
-
-    try {
-      const data = JSON.parse(raw);
-      const files: any[] = Array.isArray(data) ? data
-        : Array.isArray(data?.content) ? data.content
-        : Array.isArray(data?.items) ? data.items
-        : [];
-
-      if (files.length === 0) {
-        console.warn(`[GPU] No files for document ${documentId}: ${raw.slice(0, 100)}`);
-        return [];
-      }
-
-      return files.map((f: any) => ({
-        name: f.name,
-        title: f.title || f.name,
-        path: f.path || "",
-        url: `${GPUProviderService.BASE_URL}/document/${documentId}/files/${encodeURIComponent(f.name)}`
-      }));
-    } catch {
-      console.warn(`[GPU] Non-JSON file list for ${documentId}: ${raw.slice(0, 100)}`);
-      return [];
-    }
+    const cached = filesCache.get(documentId);
+    if (cached) { console.log(`[GPU] ${cached.length} cached files for ${documentId}`); return cached; }
+    const rawId = documentId.replace(/^gpu-/, "");
+    return getFilesFromDetails(rawId, "");
   }
 
-  static filterCriticalFiles(files: GPUFile[]): GPUFile[] {
-    return files;
-  }
+  static filterCriticalFiles(files: GPUFile[]): GPUFile[] { return files; }
 
-  /** Returns raw responses for each URL variant — included in sync response when 0 docs found */
-  static diagnose(inseeCode: string): Record<string, any> {
-    const probes: Array<{ url: string; xml: boolean }> = [
-      { url: `${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`, xml: true },
-      { url: `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`, xml: false },
-      { url: `https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeName=GPU:document&outputFormat=application/json&CQL_FILTER=code_insee='${inseeCode}'`, xml: false },
-    ];
-    const results: Record<string, any> = {};
-    for (const { url, xml } of probes) {
-      const raw = GPUProviderService.curl(url, xml);
-      results[url] = raw ? raw.slice(0, 600) : "(no response)";
+  static async diagnose(inseeCode: string): Promise<Record<string, any>> {
+    const features = await getZoneUrbaFeatures(`code_insee=${inseeCode}`);
+    const result: Record<string, any> = {
+      zone_urba_features: features.length,
+      gpu_doc_ids: features.map(f => f.gpu_doc_id),
+      nomfic_values: features.map(f => f.nomfic),
+    };
+    for (const { gpu_doc_id } of features.slice(0, 2)) {
+      const data = await httpGet(`${GPU_API}/document/${gpu_doc_id}/details`);
+      const wm = data?.writingMaterials;
+      result[`details_${gpu_doc_id}`] = data ? {
+        keys: Object.keys(data),
+        writingMaterials_type: Array.isArray(wm) ? "array" : typeof wm,
+        writingMaterials_keys: wm && typeof wm === "object" ? Object.keys(wm).slice(0, 5) : wm,
+        archiveUrl: data?.archiveUrl ?? null,
+      } : "no response";
     }
-    return results;
-  }
-
-  private static extractDocs(data: any): any[] {
-    if (!data) return [];
-    if (Array.isArray(data)) return data;
-    for (const key of ["content", "items", "documents", "results"]) {
-      if (Array.isArray(data[key])) return data[key];
+    if (features.length === 0) {
+      const match = await findDocumentForCommune(inseeCode);
+      result["rest_scan_match"] = match
+        ? { id: match.id, name: match.name, originalName: match.originalName, type: match.type }
+        : "none found";
     }
-    for (const v of Object.values(data)) {
-      if (Array.isArray(v) && (v as any[]).length > 0) return v as any[];
-    }
-    return [];
+    return result;
   }
 
   static async generateExplanatoryNote(fileName: string, title?: string): Promise<string> {
