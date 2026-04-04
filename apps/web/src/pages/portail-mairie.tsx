@@ -861,6 +861,51 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
 
+  interface StagedFile {
+    tempId: string;
+    fileName: string;
+    category: string;
+    subCategory: string;
+    documentType: string;
+    tags: string[];
+    textPreview: string;
+  }
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+
+  const analyzeMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      const formData = new FormData();
+      files.forEach(f => formData.append("files", f));
+      if (currentCommune !== "all") formData.append("commune", currentCommune);
+      const r = await fetch("/api/mairie/documents/analyze", { method: "POST", body: formData });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.message || data.error || "Erreur analyse");
+      return data as StagedFile[];
+    },
+    onSuccess: (data) => setStagedFiles(data),
+    onError: (err: any) => toast({ title: "Erreur analyse", description: err.message, variant: "destructive" }),
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: async (files: StagedFile[]) => {
+      const r = await fetch("/api/mairie/documents/batch/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commune: currentCommune !== "all" ? currentCommune : undefined, files }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.message || data.error || "Erreur import");
+      return data;
+    },
+    onSuccess: (data) => {
+      setStagedFiles([]);
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      toast({ title: "Import confirmé", description: `${data.total} fichier(s) en cours d'indexation.` });
+    },
+    onError: (err: any) => toast({ title: "Erreur import", description: err.message, variant: "destructive" }),
+  });
+
   const { data: pluDocsData, isLoading: loadingPluDocs } = useQuery<{ documents: any[] }>({
     queryKey: ["mairie-documents", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/documents${currentCommune !== "all" ? `?commune=${encodeURIComponent(currentCommune)}` : ""}`),
@@ -1061,10 +1106,10 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             variant="outline"
             className="gap-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/5 h-10 px-4"
             onClick={() => document.getElementById('batch-upload')?.click()}
-            disabled={batchUploadMutation.isPending}
+            disabled={analyzeMutation.isPending}
           >
             <UploadCloud className="w-4 h-4 text-primary" />
-            {batchUploadMutation.isPending ? "Envoi en cours…" : "Batch Upload"}
+            {analyzeMutation.isPending ? "Analyse en cours…" : "Batch Upload"}
             <input
               id="batch-upload"
               type="file"
@@ -1074,14 +1119,55 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
               onChange={(e) => {
                 const files = e.target.files;
                 if (!files || files.length === 0) return;
-                batchUploadMutation.mutate(Array.from(files));
-                // reset so same files can be re-selected if needed
+                analyzeMutation.mutate(Array.from(files));
                 e.target.value = "";
               }}
             />
           </Button>
         </div>
       </div>
+
+      {/* ── Staged Upload Panel ── */}
+      {stagedFiles.length > 0 && (
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-sm">{stagedFiles.length} fichier(s) analysé(s) — vérifiez les catégories</p>
+            <Button variant="ghost" size="sm" onClick={() => setStagedFiles([])}>Annuler</Button>
+          </div>
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+            {stagedFiles.map((f, i) => (
+              <div key={f.tempId} className="flex items-center gap-3 p-2 rounded-lg bg-muted/40 text-sm">
+                <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <span className="flex-1 truncate font-mono text-xs" title={f.fileName}>{f.fileName}</span>
+                <Select
+                  value={f.documentType}
+                  onValueChange={(val) => setStagedFiles(prev => prev.map((x, j) => j === i ? { ...x, documentType: val } : x))}
+                >
+                  <SelectTrigger className="w-44 h-7 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Written regulation">Règlement écrit</SelectItem>
+                    <SelectItem value="Zoning map">Plan graphique</SelectItem>
+                    <SelectItem value="PADD">PADD</SelectItem>
+                    <SelectItem value="OAP">OAP</SelectItem>
+                    <SelectItem value="Rapport de présentation">Rapport de présentation</SelectItem>
+                    <SelectItem value="Annexes">Annexes</SelectItem>
+                    <SelectItem value="Other">Autre</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+          <Button
+            className="w-full"
+            disabled={confirmMutation.isPending}
+            onClick={() => confirmMutation.mutate(stagedFiles)}
+          >
+            {confirmMutation.isPending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Indexation en cours…</> : `Confirmer l'import (${stagedFiles.length} fichiers)`}
+          </Button>
+        </div>
+      )}
 
       {/* ── Base IA Coverage Card ── */}
       {currentCommune !== "all" && (
