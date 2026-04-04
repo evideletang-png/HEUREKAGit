@@ -1149,6 +1149,11 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </h2>
           <p className="text-muted-foreground">
             Structurez les documents réglementaires pour {currentCommune === "all" ? "tous les territoires" : `la commune de ${currentCommune}`}.
+            {pluDocsData && (
+              <span className="ml-2 text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                {pluDocsData.documents?.length ?? 0} doc(s) en base
+              </span>
+            )}
           </p>
         </div>
         

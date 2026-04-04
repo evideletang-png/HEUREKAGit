@@ -800,42 +800,14 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
 router.get("/documents", async (req: AuthRequest, res) => {
   try {
     const requestedCommune = req.query.commune as string | undefined;
-    const userId = req.user!.userId;
 
-    // Fetch user's role and assigned communes
-    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
-      .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    const isAdmin = currentUser[0]?.role === "admin";
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-
-    // Build where clause:
-    // - admin: no userId restriction (can see all communes' docs)
-    // - mairie: documents for their assigned communes (regardless of who uploaded them)
-    //   so a GPU sync by one account is visible to all agents of the same commune
+    // Return all documents for the requested commune (any authenticated mairie user can view their commune's docs)
+    // If no commune filter, fall back to the user's own uploads
     let whereClause: any;
     if (requestedCommune) {
-      // Filter to a specific commune (case-insensitive)
-      const communeFilter = eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase());
-      if (isAdmin) {
-        whereClause = communeFilter;
-      } else {
-        // Non-admin: only show if the requested commune is in their assigned list
-        const isAssigned = assignedCommunes.some(c => c.toLowerCase() === requestedCommune.toLowerCase());
-        whereClause = isAssigned ? communeFilter : sql`false`;
-      }
+      whereClause = eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase());
     } else {
-      // No commune filter: return docs for all assigned communes
-      if (isAdmin) {
-        whereClause = undefined; // all docs
-      } else if (assignedCommunes.length > 0) {
-        whereClause = inArray(
-          sql`lower(${townHallDocumentsTable.commune})`,
-          assignedCommunes.map(c => c.toLowerCase())
-        );
-      } else {
-        // Fallback: user's own uploads only
-        whereClause = eq(townHallDocumentsTable.userId, userId);
-      }
+      whereClause = eq(townHallDocumentsTable.userId, req.user!.userId);
     }
 
     const docs = await db.select({
