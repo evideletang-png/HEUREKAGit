@@ -800,7 +800,7 @@ router.get("/documents", async (req: AuthRequest, res) => {
   } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
 
-router.post("/documents/batch", upload.array("files", 10), async (req: AuthRequest, res) => {
+router.post("/documents/batch", upload.array("files", 50), async (req: AuthRequest, res) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
@@ -824,7 +824,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
 
     const results = [];
 
-    res.json({ batchId: batch.id, status: "processing", message: "Traitement par lot démarré." });
+    res.json({ batchId: batch.id, status: "processing", total: files.length, indexed: 0, skipped: 0, message: "Traitement par lot démarré." });
 
     // 2. Process Files Background
     setImmediate(() => { (async () => {
@@ -846,8 +846,9 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
 
           const rawText = await extractTextFromFile(file.path, file.mimetype);
           const suggestion = autoSuggestClassification(rawText, file.originalname);
-          const category = req.body.category || suggestion.category;
-          const subCategory = req.body.subCategory || suggestion.subCategory;
+          // "auto" means let the classifier decide
+          const category    = (!req.body.category    || req.body.category    === "auto") ? suggestion.category    : req.body.category;
+          const subCategory = (!req.body.subCategory || req.body.subCategory === "auto") ? suggestion.subCategory : req.body.subCategory;
           const tags = req.body.tags ? JSON.parse(req.body.tags) : suggestion.tags;
 
           const [doc] = await db.insert(baseIADocumentsTable).values({

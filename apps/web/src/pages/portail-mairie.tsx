@@ -891,6 +891,38 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     }
   });
 
+  const batchUploadMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      // Send in chunks of 10 (multer limit)
+      const CHUNK = 10;
+      let totalIndexed = 0;
+      let totalSkipped = 0;
+      for (let i = 0; i < files.length; i += CHUNK) {
+        const chunk = files.slice(i, i + CHUNK);
+        const formData = new FormData();
+        chunk.forEach(f => formData.append("files", f));
+        if (currentCommune !== "all") formData.append("commune", currentCommune);
+        const r = await fetch("/api/mairie/documents/batch", { method: "POST", body: formData });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.message || data.error || "Erreur upload");
+        totalIndexed += data.indexed ?? 0;
+        totalSkipped += data.skipped ?? 0;
+      }
+      return { indexed: totalIndexed, skipped: totalSkipped, total: files.length };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      toast({
+        title: "Batch Upload terminé",
+        description: `${data.total} fichier(s) envoyé(s) — traitement en arrière-plan démarré.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur Batch Upload", description: err.message, variant: "destructive" });
+    },
+  });
+
   const syncGpuMutation = useMutation({
     mutationFn: async () => {
       const r = await fetch(`/api/mairie/gpu/sync?commune=${encodeURIComponent(currentCommune)}`, { method: "POST" });
@@ -1029,22 +1061,22 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             variant="outline"
             className="gap-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/5 h-10 px-4"
             onClick={() => document.getElementById('batch-upload')?.click()}
-            disabled={uploadMutation.isPending}
+            disabled={batchUploadMutation.isPending}
           >
             <UploadCloud className="w-4 h-4 text-primary" />
-            Batch Upload
-            <input 
+            {batchUploadMutation.isPending ? "Envoi en cours…" : "Batch Upload"}
+            <input
               id="batch-upload"
-              type="file" 
-              className="hidden" 
-              multiple 
-              accept=".pdf"
+              type="file"
+              className="hidden"
+              multiple
+              accept=".pdf,.PDF"
               onChange={(e) => {
                 const files = e.target.files;
                 if (!files || files.length === 0) return;
-                Array.from(files).forEach(file => {
-                  uploadMutation.mutate({ file, category: "auto", subCategory: "auto", docType: "auto" });
-                });
+                batchUploadMutation.mutate(Array.from(files));
+                // reset so same files can be re-selected if needed
+                e.target.value = "";
               }}
             />
           </Button>
