@@ -158,6 +158,37 @@ export class GPUProviderService {
     return [];
   }
 
+  /** Coordinate-based lookup via Apicarto zone-urba ?geom=Point */
+  static async getDocumentsByCoords(lon: number, lat: number): Promise<GPUDocument[]> {
+    const geom = JSON.stringify({ type: "Point", coordinates: [lon, lat] });
+    const url = `${GPUProviderService.APICARTO_ZONE_URBA}?geom=${encodeURIComponent(geom)}`;
+    console.log(`[GPU] Apicarto zone-urba by coords: ${url}`);
+    const raw = GPUProviderService.curl(url, false);
+    if (!raw || raw.startsWith("<!") || raw.startsWith("<html")) return [];
+    try {
+      const geoJson = JSON.parse(raw);
+      const features: any[] = geoJson?.features || [];
+      const ids = [...new Set(
+        features
+          .map((f: any) => f?.properties?.gpu_doc_id || f?.properties?.partition)
+          .filter(Boolean)
+      )];
+      if (ids.length === 0) { console.warn(`[GPU] Apicarto coords 0 features: ${raw.slice(0, 200)}`); return []; }
+      console.log(`[GPU] Apicarto coords ✅ found ${ids.length} gpu_doc_ids`);
+      const docs: GPUDocument[] = [];
+      for (const docId of ids) {
+        const detailUrl = `${GPUProviderService.BASE_URL}/document/${docId}/details`;
+        const detailRaw = GPUProviderService.curl(detailUrl, false);
+        if (!detailRaw) { docs.push({ id: docId, name: docId, type: "PLU", status: "production", legalStatus: "opposable", originalName: docId }); continue; }
+        try {
+          const d = JSON.parse(detailRaw);
+          docs.push({ id: d.id || docId, name: d.name || docId, type: d.type || "PLU", status: d.status || "production", legalStatus: d.legalStatus || "opposable", publicationDate: d.publicationDate, originalName: d.originalName || d.name || docId });
+        } catch { docs.push({ id: docId, name: docId, type: "PLU", status: "production", legalStatus: "opposable", originalName: docId }); }
+      }
+      return docs;
+    } catch { console.warn(`[GPU] Apicarto coords non-JSON: ${raw.slice(0, 100)}`); return []; }
+  }
+
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
     // 1. WFS → gpu_doc_id → /api/document/{id}/details  (exact Make.com flow)
     const docIds = await GPUProviderService.getDocIdsByWFS(inseeCode);
