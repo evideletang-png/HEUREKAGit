@@ -131,41 +131,60 @@ async function getFilesFromDetails(gpu_doc_id: string, nomfic: string): Promise<
     });
 }
 
-// ─── Fallback: REST list search by INSEE ──────────────────────────────────────
+// ─── Fallback: scan all DU documents to find commune match ────────────────────
+
+async function findDocumentForCommune(inseeCode: string): Promise<any | null> {
+  let page = 0;
+  const limit = 1000;
+
+  while (true) {
+    const data = await httpGet(
+      `${GPU_API}/document?documentFamily=DU&status=document.production&page=${page}&limit=${limit}`
+    );
+    if (!data) break;
+
+    const list: any[] = Array.isArray(data) ? data
+      : Array.isArray(data?.content) ? data.content
+      : [];
+
+    const match = list.find((d: any) =>
+      d?.grid?.name === inseeCode ||
+      d?.name === `DU_${inseeCode}` ||
+      d?.originalName?.startsWith(inseeCode)
+    );
+
+    if (match) {
+      console.log(`[GPU] Found doc for INSEE ${inseeCode}: ${match.id} (${match.originalName})`);
+      return match;
+    }
+
+    // No more pages
+    if (list.length < limit) break;
+    page++;
+  }
+
+  console.warn(`[GPU] No document found for INSEE ${inseeCode} after scanning all pages`);
+  return null;
+}
 
 async function getDocsFromRestSearch(inseeCode: string): Promise<GPUDocument[]> {
-  // Search for approved PLU documents, filter client-side by grid.name === inseeCode
-  const url = `${GPU_API}/document?documentFamily=DU&status=document.production&legalStatus=APPROVED&limit=1000`;
-  const data = await httpGet(url);
-  if (!data) return [];
+  const match = await findDocumentForCommune(inseeCode);
+  if (!match) return [];
 
-  const list: any[] = Array.isArray(data) ? data
-    : Array.isArray(data?.content) ? data.content
-    : [];
+  const files = await getFilesFromDetails(match.id, "");
+  if (files.length === 0) return [];
 
-  const matches = list.filter((d: any) => d?.grid?.name === inseeCode);
-  console.log(`[GPU] REST search: ${list.length} total docs, ${matches.length} match INSEE ${inseeCode}`);
-
-  const docs: GPUDocument[] = [];
-  for (const item of matches) {
-    const docId: string = item?.id || "";
-    if (!docId) continue;
-    const files = await getFilesFromDetails(docId, "");
-    if (files.length > 0) {
-      const id = `gpu-${docId}`;
-      filesCache.set(id, files);
-      docs.push({
-        id,
-        name: item.originalName || item.name || docId,
-        type: item.type || "PLU",
-        status: item.status || "production",
-        legalStatus: item.legalStatus || "APPROVED",
-        publicationDate: item.publicationDate,
-        originalName: item.originalName || docId,
-      });
-    }
-  }
-  return docs;
+  const id = `gpu-${match.id}`;
+  filesCache.set(id, files);
+  return [{
+    id,
+    name: match.originalName || match.name || match.id,
+    type: match.type || "PLU",
+    status: match.status || "production",
+    legalStatus: match.legalStatus || "APPROVED",
+    publicationDate: match.publicationDate,
+    originalName: match.originalName || match.id,
+  }];
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -234,14 +253,10 @@ export class GPUProviderService {
       } : "no response";
     }
     if (features.length === 0) {
-      // Try REST search to see if it finds anything
-      const url = `${GPU_API}/document?documentFamily=DU&status=document.production&legalStatus=APPROVED&limit=1000`;
-      const data = await httpGet(url);
-      const list: any[] = Array.isArray(data) ? data : data?.content || [];
-      const matches = list.filter((d: any) => d?.grid?.name === inseeCode);
-      result["rest_search_total"] = list.length;
-      result["rest_search_matches"] = matches.length;
-      result["rest_search_sample"] = matches.slice(0, 2).map((d: any) => ({ id: d.id, name: d.name, type: d.type }));
+      const match = await findDocumentForCommune(inseeCode);
+      result["rest_scan_match"] = match
+        ? { id: match.id, name: match.name, originalName: match.originalName, type: match.type }
+        : "none found";
     }
     return result;
   }
