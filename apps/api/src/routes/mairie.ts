@@ -1,4 +1,6 @@
 import { Router, type IRouter } from "express";
+import { OpenAI } from "openai";
+const openai = new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY });
 import { db } from "@workspace/db";
 import { desc, eq, sql, and, inArray, or, ne } from "drizzle-orm";
 import { 
@@ -1117,79 +1119,126 @@ router.get("/documents/batch/:id", async (req: AuthRequest, res) => {
   }
 });
 
-// POST /documents — single-file upload per slot (synchronous DB insert, background RAG)
-router.post("/documents", upload.single("file"), async (req: AuthRequest, res) => {
+// POST /documents — upload one or more files, store immediately, RAG in background
+router.post("/documents", upload.array("files", 70), async (req: AuthRequest, res) => {
   const userId = req.user!.userId;
   try {
-    const file = req.file;
-    if (!file) return res.status(400).json({ error: "Fichier requis." });
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) return res.status(400).json({ error: "Fichier(s) requis." });
 
-    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+    const currentUser = await db.select({ communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
+    const targetCommune: string | null = req.body.commune || parseCommunes(currentUser[0]?.communes)[0] || null;
 
-    let targetCommune: string | null = req.body.commune || (assignedCommunes[0] ?? null);
+    const inserted: { id: string; fileName: string }[] = [];
+    const ragQueue: { docId: string; rawText: string; commune: string }[] = [];
 
-    if (currentUser[0]?.role !== "admin" && targetCommune && !assignedCommunes.some(c => c.toLowerCase() === targetCommune!.toLowerCase())) {
-      try { fs.unlinkSync(file.path); } catch {}
-      return res.status(403).json({ error: "FORBIDDEN" });
-    }
+    for (const file of files) {
+      try {
+        const rawText = await extractTextFromFile(file.path, file.mimetype);
 
-    // Extract text synchronously before responding
-    const rawText = await extractTextFromFile(file.path, file.mimetype);
-    const suggestion = autoSuggestClassification(rawText, file.originalname);
-    const category    = req.body.category    || suggestion.category;
-    const subCategory = req.body.subCategory || suggestion.subCategory;
-    const documentType = req.body.documentType || suggestion.documentType;
-    const tags = req.body.tags ? (typeof req.body.tags === "string" ? JSON.parse(req.body.tags) : req.body.tags) : suggestion.tags;
+        // UPSERT by commune + fileName
+        const [existing] = await db.select({ id: townHallDocumentsTable.id })
+          .from(townHallDocumentsTable)
+          .where(and(
+            eq(townHallDocumentsTable.fileName, file.originalname),
+            eq(sql`lower(coalesce(${townHallDocumentsTable.commune},''))`, (targetCommune || "").toLowerCase())
+          )).limit(1);
 
-    // UPSERT by (userId, fileName) so re-uploading updates classification
-    const [existing] = await db.select({ id: townHallDocumentsTable.id })
-      .from(townHallDocumentsTable)
-      .where(and(eq(townHallDocumentsTable.userId, userId), eq(townHallDocumentsTable.fileName, file.originalname)))
-      .limit(1);
-
-    let docId: string;
-    if (existing) {
-      await db.update(townHallDocumentsTable).set({
-        category, subCategory, documentType, tags, commune: targetCommune, rawText, updatedAt: new Date()
-      }).where(eq(townHallDocumentsTable.id, existing.id));
-      docId = existing.id;
-    } else {
-      const [doc] = await db.insert(townHallDocumentsTable).values({
-        userId, commune: targetCommune,
-        title: req.body.title || file.originalname,
-        fileName: file.originalname, rawText, category, subCategory, documentType, tags, zone: null
-      }).returning();
-      docId = doc.id;
-    }
-
-    // Respond with the inserted/updated doc so the frontend can refresh immediately
-    res.json({ status: "ok", id: docId, category, subCategory, documentType });
-
-    // Background RAG (after response is sent)
-    const tc = targetCommune;
-    setImmediate(() => {
-      (async () => {
-        try {
-          if (tc) {
-            let canonicalType: any = "other";
-            const dt = documentType.toLowerCase();
-            if (dt.includes("written") || dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
-            else if (dt.includes("padd") || dt.includes("oap")) canonicalType = "oap";
-            else if (dt.includes("annexe")) canonicalType = "plu_annexe";
-            await processDocumentForRAG(docId, tc, rawText, { document_type: canonicalType, commune: tc, zone: null });
-          }
-        } catch (ragErr) {
-          logger.error("[mairie/upload] Background RAG failed", { docId, error: ragErr });
-        } finally {
-          try { fs.unlinkSync(file.path); } catch {}
+        let docId: string;
+        if (existing) {
+          await db.update(townHallDocumentsTable).set({ rawText, userId, updatedAt: new Date() })
+            .where(eq(townHallDocumentsTable.id, existing.id));
+          docId = existing.id;
+        } else {
+          const [doc] = await db.insert(townHallDocumentsTable).values({
+            userId, commune: targetCommune,
+            title: file.originalname,
+            fileName: file.originalname,
+            rawText,
+            category: null, subCategory: null, documentType: null,
+            tags: [] as any, zone: null,
+          }).returning();
+          docId = doc.id;
         }
-      })().catch((e: any) => logger.error("[mairie/upload] RAG crash", e));
-    });
+
+        inserted.push({ id: docId, fileName: file.originalname });
+        if (targetCommune) ragQueue.push({ docId, rawText, commune: targetCommune });
+      } catch (fileErr: any) {
+        logger.error("[mairie/upload] file error", { file: file.originalname, error: fileErr?.message });
+      } finally {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+    }
+
+    res.json({ status: "ok", inserted: inserted.length, files: inserted });
+
+    // Background RAG for all successfully inserted docs
+    if (ragQueue.length > 0) {
+      setImmediate(() => {
+        (async () => {
+          for (const { docId, rawText, commune } of ragQueue) {
+            try {
+              await processDocumentForRAG(docId, commune, rawText, { document_type: "plu_reglement", commune, zone: null });
+            } catch (e: any) {
+              logger.error("[mairie/upload] RAG failed", { docId, error: e?.message });
+            }
+          }
+        })().catch((e: any) => logger.error("[mairie/upload] RAG crash", e));
+      });
+    }
   } catch (err) {
     logger.error("[mairie/documents POST]", err);
     if (!res.headersSent) res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+// POST /documents/:id/analyze — generate and cache an AI summary of the document
+router.post("/documents/:id/analyze", async (req: AuthRequest, res) => {
+  try {
+    const [doc] = await db.select().from(townHallDocumentsTable)
+      .where(eq(townHallDocumentsTable.id, req.params.id)).limit(1);
+    if (!doc) return res.status(404).json({ error: "NOT_FOUND" });
+
+    // Return cached analysis if already generated
+    if (doc.explanatoryNote) {
+      try { return res.json(JSON.parse(doc.explanatoryNote)); } catch {}
+    }
+
+    // Generate AI summary (gpt-4o-mini is fast and cheap for this)
+    const textSample = (doc.rawText || "").slice(0, 6000);
+    if (!textSample.trim()) {
+      return res.json({ summary: "Aucun texte extractible (document scanné ou image).", keyPoints: [], documentType: "Inconnu" });
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `Tu es un expert en droit de l'urbanisme français. Analyse le contenu d'un document PLU et retourne un JSON avec ces clés exactes:
+- summary: string (2-3 phrases décrivant le document)
+- documentType: string (ex: "Règlement écrit", "PADD", "OAP", "Plan de zonage", "Annexe")
+- keyPoints: string[] (3-5 points clés)
+- zones: string[] (zones mentionnées, ex: ["UA", "UB", "N", "A"])
+- restrictions: string[] (principales restrictions importantes)`
+        },
+        { role: "user", content: `Fichier: ${doc.fileName}\n\n${textSample}` }
+      ]
+    });
+
+    const analysis = JSON.parse(completion.choices[0].message.content || "{}");
+
+    // Cache in DB so we don't re-generate next time
+    await db.update(townHallDocumentsTable)
+      .set({ explanatoryNote: JSON.stringify(analysis) })
+      .where(eq(townHallDocumentsTable.id, doc.id));
+
+    return res.json(analysis);
+  } catch (err: any) {
+    logger.error("[mairie/documents/analyze]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: err?.message });
   }
 });
 
