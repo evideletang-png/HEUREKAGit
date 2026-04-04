@@ -900,43 +900,45 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       const formData = new FormData();
       files.forEach(f => formData.append("files", f));
       if (currentCommune !== "all") formData.append("commune", currentCommune);
-      const r = await fetch("/api/mairie/documents/analyze", { method: "POST", body: formData });
+      const r = await fetch("/api/mairie/documents/analyze", { method: "POST", credentials: "include", body: formData });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.message || data.error || "Erreur analyse");
+      if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`);
       return data as StagedFile[];
     },
     onSuccess: (data) => setStagedFiles(data),
-    onError: (err: any) => toast({ title: "Erreur analyse", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Erreur analyse", description: String(err.message), variant: "destructive" }),
   });
 
   const confirmMutation = useMutation({
     mutationFn: async (files: StagedFile[]) => {
       const r = await fetch("/api/mairie/documents/batch/confirm", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ commune: currentCommune !== "all" ? currentCommune : undefined, files }),
       });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.message || data.error || "Erreur import");
+      if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`);
       return data;
     },
     onSuccess: (data) => {
       setStagedFiles([]);
-      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      // Force immediate refetch of the docs list so slots update right away
+      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
       if (data.errors?.length > 0) {
         toast({
           title: `Import — ${data.indexed}/${data.total} traité(s)`,
           description: `Erreurs: ${data.errors.slice(0, 2).join(" | ")}`,
-          variant: "destructive"
+          variant: "destructive",
         });
       } else if (data.indexed === 0) {
-        toast({ title: "Aucun fichier traité", description: `total=${data.total} skipped=${data.skipped} — vérifiez les fichiers.`, variant: "destructive" });
+        toast({ title: "Aucun fichier traité", description: `Tous les fichiers semblent introuvables. Ré-essayez l'upload.`, variant: "destructive" });
       } else {
         toast({ title: "Import terminé ✓", description: `${data.indexed} fichier(s) indexé(s) dans la base.` });
       }
     },
-    onError: (err: any) => toast({ title: "Erreur import", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Erreur import", description: String(err.message), variant: "destructive" }),
   });
 
   const { data: pluDocsData, isLoading: loadingPluDocs } = useQuery<{ documents: any[] }>({
@@ -952,20 +954,20 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       formData.append("subCategory", subCategory);
       formData.append("documentType", docType);
       if (currentCommune !== "all") formData.append("commune", currentCommune);
-      
-      const r = await fetch("/api/mairie/documents", { method: "POST", body: formData });
+      const r = await fetch("/api/mairie/documents", { method: "POST", credentials: "include", body: formData });
       const data = await r.json();
-      if (!r.ok) throw new Error(data.message || "Erreur upload");
+      if (!r.ok) throw new Error(data.message || `HTTP ${r.status}`);
       return data;
     },
     onSuccess: (data, variables) => {
       setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
-      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
-      toast({ title: "Document ajouté", description: `Le document ${variables.docType} a été indexé.` });
+      // Force immediate refetch — doc is now in DB
+      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
+      toast({ title: "Document ajouté", description: `${variables.docType} indexé.` });
     },
     onError: (err: any, variables) => {
       setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: "Erreur upload", description: String(err.message), variant: "destructive" });
     }
   });
 
