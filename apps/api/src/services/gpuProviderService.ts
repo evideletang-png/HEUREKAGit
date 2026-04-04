@@ -1,14 +1,17 @@
 /**
  * Service d'interfaçage avec le Géoportail de l'Urbanisme (GPU)
  *
- * FLOW:
- *  1. GET https://apicarto.ign.fr/api/gpu/zone-urba?code_insee={insee}
- *     → GeoJSON features. Each feature has:
- *       - properties.partition  → e.g. "DU_37113"  (PLU partition key)
- *       - properties.urlfic     → direct URL to the plan graphique PDF for that zone
- *  2. Collect unique partitions + all urlfic URLs  (plan graphique files)
- *  3. For each partition, fetch ATOM feed → remaining documents (règlement, PADD, OAP…)
- *  4. Fallback: GPU REST /api/document?partition={p} → /files
+ * FLOW (exact replication of the Make.com chain):
+ *
+ *  Step 16: GET apicarto.ign.fr/api/gpu/zone-urba?code_insee={insee}
+ *           → features[].properties.gpu_doc_id   (document ID)
+ *           → features[].properties.nomfic        (reference filename for the règlement)
+ *
+ *  Step 20: GET geoportail-urbanisme.gouv.fr/api/document/{gpu_doc_id}/details
+ *           → response.writingMaterials[]          (array of document URLs — all PLU docs)
+ *
+ *  Step 47: (we skip the nomfic filter — we want ALL writingMaterials, not just the règlement)
+ *           → download & index every URL
  */
 
 export interface GPUDocument {
@@ -29,310 +32,185 @@ export interface GPUFile {
   url: string;
 }
 
-const GPU_API       = "https://www.geoportail-urbanisme.gouv.fr/api";
-const ATOM_BASE     = "https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml";
-const ZONE_URBA     = "https://apicarto.ign.fr/api/gpu/zone-urba";
-const DATAGOUV_API  = "https://www.data.gouv.fr/api/1";
+const GPU_API   = "https://www.geoportail-urbanisme.gouv.fr/api";
+const ZONE_URBA = "https://apicarto.ign.fr/api/gpu/zone-urba";
 
-const HEADERS = {
-  "Accept": "application/json, application/xml, text/xml, */*",
+const FETCH_HEADERS = {
+  "Accept": "application/json, */*",
   "Accept-Language": "fr-FR,fr;q=0.9",
   "Referer": "https://www.geoportail-urbanisme.gouv.fr/",
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
 
-// Cache keyed by synthetic document id
+// Cache files keyed by synthetic document id
 const filesCache = new Map<string, GPUFile[]>();
 
-// ─── HTTP helpers ──────────────────────────────────────────────────────────────
+// ─── HTTP helper ───────────────────────────────────────────────────────────────
 
-async function fetchJson(url: string): Promise<any | null> {
+async function httpGet(url: string): Promise<any | null> {
   try {
     console.log(`[GPU] GET ${url}`);
-    const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) { console.warn(`[GPU] ${res.status} ${res.statusText} — ${url}`); return null; }
+    const res = await fetch(url, {
+      headers: FETCH_HEADERS,
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      console.warn(`[GPU] HTTP ${res.status} — ${url}`);
+      return null;
+    }
     const text = await res.text();
-    if (!text || text.startsWith("<!") || text.startsWith("<html")) {
-      console.warn(`[GPU] HTML/empty response from ${url}`);
+    if (!text || text.trimStart().startsWith("<!") || text.trimStart().startsWith("<html")) {
+      console.warn(`[GPU] HTML/empty response — ${url}`);
       return null;
     }
     return JSON.parse(text);
   } catch (e: any) {
-    console.error(`[GPU] fetchJson failed ${url}: ${e.message}`);
+    console.error(`[GPU] fetch failed ${url}: ${e.message}`);
     return null;
   }
 }
 
-async function fetchXml(url: string): Promise<string | null> {
-  try {
-    console.log(`[GPU] GET (xml) ${url}`);
-    const res = await fetch(url, {
-      headers: { ...HEADERS, Accept: "application/xml,text/xml,*/*" },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) { console.warn(`[GPU] ${res.status} ${res.statusText} — ${url}`); return null; }
-    const text = await res.text();
-    if (!text || text.startsWith("<html") || text.startsWith("<!DOCTYPE")) {
-      console.warn(`[GPU] HTML/empty XML response from ${url}`);
-      return null;
-    }
-    return text;
-  } catch (e: any) {
-    console.error(`[GPU] fetchXml failed ${url}: ${e.message}`);
-    return null;
-  }
+// ─── Step 16: zone-urba → gpu_doc_id + nomfic ─────────────────────────────────
+
+interface ZoneUrbaFeature {
+  gpu_doc_id: string;
+  nomfic: string;
 }
 
-// ─── ATOM feed parser ──────────────────────────────────────────────────────────
-
-function parseAtomEntries(xml: string): GPUFile[] {
-  const files: GPUFile[] = [];
-  const entryRe = /<(?:\w+:)?entry[^>]*>([\s\S]*?)<\/(?:\w+:)?entry>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = entryRe.exec(xml)) !== null) {
-    const block = m[1];
-    const titleMatch = block.match(/<(?:\w+:)?title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:\w+:)?title>/i);
-    const title = titleMatch ? titleMatch[1].replace(/&amp;/g, "&").trim() : "";
-    const linkMatch = block.match(/<(?:\w+:)?link[^>]+href=["']([^"']+)["'][^>]*\/?>/i);
-    const href = linkMatch ? linkMatch[1].trim() : "";
-    if (!href) continue;
-    const name = decodeURIComponent(href.split("?")[0].split("/").pop() || title || href);
-    files.push({ name, title: title || name, url: href });
-  }
-  return files;
-}
-
-// ─── Step 1: zone-urba → partitions + urlfic files ────────────────────────────
-
-interface ZoneUrbaResult {
-  partitions: string[];
-  urlficFiles: GPUFile[];
-}
-
-async function queryZoneUrba(params: string): Promise<ZoneUrbaResult> {
+async function getZoneUrbaFeatures(params: string): Promise<ZoneUrbaFeature[]> {
   const url = `${ZONE_URBA}?${params}`;
-  const geoJson = await fetchJson(url);
-  if (!geoJson) return { partitions: [], urlficFiles: [] };
+  const geoJson = await httpGet(url);
+  if (!geoJson) return [];
 
   const features: any[] = geoJson?.features || [];
   console.log(`[GPU] zone-urba → ${features.length} features`);
 
-  const partitionSet = new Set<string>();
-  const urlficFiles: GPUFile[] = [];
-  const seenUrls = new Set<string>();
+  // Deduplicate by gpu_doc_id
+  const seen = new Set<string>();
+  const results: ZoneUrbaFeature[] = [];
 
   for (const f of features) {
     const props = f?.properties || {};
-    const partition: string = props.partition || props.gpu_doc_id || "";
-    if (partition) partitionSet.add(partition);
-
-    // urlfic = direct URL to the graphical plan file for this zone
-    const urlfic: string = props.urlfic || props.url_fic || "";
-    if (urlfic && !seenUrls.has(urlfic)) {
-      seenUrls.add(urlfic);
-      const zoneName = props.libelle || props.lib_zone || props.typezone || "zone";
-      const fileName = decodeURIComponent(urlfic.split("?")[0].split("/").pop() || urlfic);
-      urlficFiles.push({ name: fileName, title: `Plan graphique — ${zoneName}`, url: urlfic });
-    }
+    const gpu_doc_id: string = (props.gpu_doc_id || "").trim();
+    const nomfic: string = (props.nomfic || "").trim();
+    if (!gpu_doc_id || seen.has(gpu_doc_id)) continue;
+    seen.add(gpu_doc_id);
+    results.push({ gpu_doc_id, nomfic });
   }
 
-  const partitions = [...partitionSet];
-  console.log(`[GPU] partitions: ${partitions.join(", ") || "none"} | urlfic files: ${urlficFiles.length}`);
-  return { partitions, urlficFiles };
+  console.log(`[GPU] unique gpu_doc_ids: ${results.map(r => r.gpu_doc_id).join(", ") || "none"}`);
+  return results;
 }
 
-// ─── Step 2a: ATOM feed ────────────────────────────────────────────────────────
+// ─── Step 20: /api/document/{gpu_doc_id}/details → writingMaterials ───────────
 
-async function fetchAtomFiles(partition: string): Promise<GPUFile[]> {
-  const xml = await fetchXml(`${ATOM_BASE}?partition=${partition}`);
-  if (!xml) return [];
-  const files = parseAtomEntries(xml);
-  console.log(`[GPU] ATOM(${partition}) → ${files.length} files`);
-  return files;
-}
-
-// ─── Step 2b: GPU REST fallback ───────────────────────────────────────────────
-
-async function fetchRestFiles(partition: string): Promise<GPUFile[]> {
-  const data = await fetchJson(`${GPU_API}/document?partition=${partition}`);
+async function getWritingMaterials(gpu_doc_id: string, nomfic: string): Promise<GPUFile[]> {
+  const url = `${GPU_API}/document/${gpu_doc_id}/details`;
+  const data = await httpGet(url);
   if (!data) return [];
 
-  const docs: any[] = Array.isArray(data) ? data
-    : Array.isArray(data?.content) ? data.content
-    : Array.isArray(data?.items) ? data.items : [];
+  // writingMaterials is an array of URL strings (or objects)
+  const raw: any[] = Array.isArray(data?.writingMaterials) ? data.writingMaterials : [];
 
-  const allFiles: GPUFile[] = [];
-  for (const doc of docs) {
-    const docId = doc.id || doc.gpu_doc_id;
-    if (!docId) continue;
-    const filesData = await fetchJson(`${GPU_API}/document/${docId}/files`);
-    if (!filesData) continue;
-    const files: any[] = Array.isArray(filesData) ? filesData : filesData?.content || [];
-    for (const f of files) {
-      allFiles.push({
-        name: f.name, title: f.title || f.name, path: f.path || "",
-        url: `${GPU_API}/document/${docId}/files/${encodeURIComponent(f.name)}`,
-      });
-    }
+  if (raw.length === 0) {
+    console.warn(`[GPU] No writingMaterials for ${gpu_doc_id}. Keys: ${Object.keys(data).join(", ")}`);
+    return [];
   }
-  console.log(`[GPU] REST(${partition}) → ${allFiles.length} files`);
-  return allFiles;
+
+  console.log(`[GPU] writingMaterials(${gpu_doc_id}) → ${raw.length} items`);
+
+  return raw.map((item: any) => {
+    // item may be a string URL or an object with a url/href field
+    const fileUrl: string = typeof item === "string" ? item : (item?.url || item?.href || item?.link || "");
+    if (!fileUrl) return null;
+
+    const pathPart = fileUrl.split("?")[0];
+    const fileName = decodeURIComponent(pathPart.split("/").pop() || fileUrl);
+
+    // Derive a human-readable title from the filename
+    let title = fileName;
+    const lower = fileName.toLowerCase();
+    if (lower.includes("reglement") && lower.includes("ecrit")) title = "Règlement écrit";
+    else if (lower.includes("reglement_graphique") || lower.includes("plan_graphique")) title = "Plan graphique";
+    else if (lower.includes("padd")) title = "PADD";
+    else if (lower.includes("oap")) title = "OAP";
+    else if (lower.includes("rapport")) title = "Rapport de présentation";
+    else if (nomfic && fileName.includes(nomfic)) title = `Règlement — ${nomfic}`;
+
+    return { name: fileName, title, url: fileUrl } as GPUFile;
+  }).filter(Boolean) as GPUFile[];
 }
 
-// ─── Build GPUDocument from partition + files ─────────────────────────────────
+// ─── Build GPUDocument from gpu_doc_id + files ────────────────────────────────
 
-function makeDocument(partition: string, files: GPUFile[]): GPUDocument {
-  const id = `gpu-${partition}`;
+function makeDocument(gpu_doc_id: string, files: GPUFile[]): GPUDocument {
+  const id = `gpu-${gpu_doc_id}`;
   filesCache.set(id, files);
   return {
-    id, name: `PLU — ${partition}`, type: "PLU",
-    status: "production", legalStatus: "opposable",
-    originalName: `Documents d'urbanisme — ${partition}`,
+    id,
+    name: `PLU — ${gpu_doc_id}`,
+    type: "PLU",
+    status: "production",
+    legalStatus: "opposable",
+    originalName: `Documents d'urbanisme — ${gpu_doc_id}`,
   };
-}
-
-// ─── Resolve files for a set of partitions + seed urlfic ──────────────────────
-
-async function resolveDocuments(partitions: string[], seedFiles: GPUFile[]): Promise<GPUDocument[]> {
-  // If zone-urba returned no partitions, guess the default one (tried later in ATOM)
-  const toSearch = partitions.length > 0 ? partitions : [];
-  const docs: GPUDocument[] = [];
-
-  // Group seed urlfic files by partition (or put them all in the first partition)
-  const seedByPartition = new Map<string, GPUFile[]>();
-  if (seedFiles.length > 0 && toSearch.length > 0) {
-    seedByPartition.set(toSearch[0], seedFiles);
-  }
-
-  for (const partition of toSearch) {
-    const seed = seedByPartition.get(partition) || [];
-    let files = await fetchAtomFiles(partition);
-    if (files.length === 0) files = await fetchRestFiles(partition);
-    // Merge urlfic files (avoid duplicates by URL)
-    const allUrls = new Set(files.map(f => f.url));
-    for (const s of seed) { if (!allUrls.has(s.url)) files.push(s); }
-    if (files.length > 0) docs.push(makeDocument(partition, files));
-  }
-
-  // If partitions gave nothing but we have urlfic seed files, expose them
-  if (docs.length === 0 && seedFiles.length > 0) {
-    const syntheticPartition = "urlfic-direct";
-    docs.push(makeDocument(syntheticPartition, seedFiles));
-  }
-
-  return docs;
-}
-
-// ─── data.gouv.fr GPU dataset ─────────────────────────────────────────────────
-// The GPU (Géoportail de l'Urbanisme) publishes all PLU documents on data.gouv.fr
-// under the organization "geoportail-urbanisme". Each commune's partition is a
-// separate dataset resource. We search by INSEE code in the dataset title/description.
-
-async function fetchDataGouvFiles(inseeCode: string): Promise<GPUFile[]> {
-  // Search for GPU datasets matching this INSEE code
-  const searchUrl = `${DATAGOUV_API}/datasets/?q=${inseeCode}&organization=geoportail-urbanisme&page_size=20`;
-  const data = await fetchJson(searchUrl);
-  if (!data) {
-    // Fallback: broader search without org filter
-    const data2 = await fetchJson(`${DATAGOUV_API}/datasets/?q=PLU+${inseeCode}&tag=plu&page_size=10`);
-    if (!data2) return [];
-    return extractDataGouvFiles(data2, inseeCode);
-  }
-  const files = extractDataGouvFiles(data, inseeCode);
-  if (files.length > 0) return files;
-
-  // Second try: search by partition key DU_{inseeCode}
-  const partitionSearch = await fetchJson(`${DATAGOUV_API}/datasets/?q=DU_${inseeCode}&page_size=10`);
-  return partitionSearch ? extractDataGouvFiles(partitionSearch, inseeCode) : [];
-}
-
-function extractDataGouvFiles(data: any, inseeCode: string): GPUFile[] {
-  const datasets: any[] = data?.data || data?.results || [];
-  const files: GPUFile[] = [];
-  const PDF_EXTS = [".pdf", ".zip", ".xml", ".json"];
-
-  for (const ds of datasets) {
-    const resources: any[] = ds?.resources || [];
-    for (const r of resources) {
-      const url: string = r?.url || r?.latest || "";
-      if (!url) continue;
-      const lower = url.toLowerCase();
-      if (!PDF_EXTS.some(ext => lower.includes(ext))) continue;
-      const title: string = r?.title || r?.description || ds?.title || url;
-      const name = decodeURIComponent(url.split("?")[0].split("/").pop() || title);
-      files.push({ name, title, url });
-    }
-  }
-
-  console.log(`[GPU] data.gouv.fr → ${files.length} files for INSEE ${inseeCode}`);
-  return files;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export class GPUProviderService {
   static async getDocumentsByInsee(inseeCode: string): Promise<GPUDocument[]> {
-    const { partitions, urlficFiles } = await queryZoneUrba(`code_insee=${inseeCode}`);
-
-    // Also try the default DU_ partition directly if Apicarto returned nothing
-    const allPartitions = partitions.length > 0 ? partitions : [`DU_${inseeCode}`];
-    let docs = await resolveDocuments(allPartitions, urlficFiles);
-
-    // Fallback: data.gouv.fr open data API
-    if (docs.length === 0) {
-      console.log(`[GPU] Trying data.gouv.fr for INSEE ${inseeCode}`);
-      const files = await fetchDataGouvFiles(inseeCode);
-      if (files.length > 0) {
-        const id = `datagouv-${inseeCode}`;
-        filesCache.set(id, files);
-        docs = [{
-          id, name: `PLU — ${inseeCode} (data.gouv.fr)`, type: "PLU",
-          status: "production", legalStatus: "opposable",
-          originalName: `Documents d'urbanisme — ${inseeCode}`,
-        }];
-      }
-    }
-
-    if (docs.length === 0) console.warn(`[GPU] No documents found for INSEE ${inseeCode}`);
-    return docs;
+    const features = await getZoneUrbaFeatures(`code_insee=${inseeCode}`);
+    return GPUProviderService._buildDocs(features);
   }
 
   static async getDocumentsByCoords(lon: number, lat: number): Promise<GPUDocument[]> {
     const geom = JSON.stringify({ type: "Point", coordinates: [lon, lat] });
-    const { partitions, urlficFiles } = await queryZoneUrba(`geom=${encodeURIComponent(geom)}`);
-    return resolveDocuments(partitions, urlficFiles);
+    const features = await getZoneUrbaFeatures(`geom=${encodeURIComponent(geom)}`);
+    return GPUProviderService._buildDocs(features);
+  }
+
+  private static async _buildDocs(features: ZoneUrbaFeature[]): Promise<GPUDocument[]> {
+    if (features.length === 0) return [];
+    const docs: GPUDocument[] = [];
+    for (const { gpu_doc_id, nomfic } of features) {
+      const files = await getWritingMaterials(gpu_doc_id, nomfic);
+      if (files.length > 0) docs.push(makeDocument(gpu_doc_id, files));
+    }
+    return docs;
   }
 
   static async getFilesByDocumentId(documentId: string): Promise<GPUFile[]> {
     const cached = filesCache.get(documentId);
-    if (cached) { console.log(`[GPU] ${cached.length} cached files for ${documentId}`); return cached; }
-    // Direct REST lookup as last resort
-    const data = await fetchJson(`${GPU_API}/document/${documentId}/files`);
-    if (!data) return [];
-    const files: any[] = Array.isArray(data) ? data : data?.content || [];
-    return files.map((f: any) => ({
-      name: f.name, title: f.title || f.name, path: f.path || "",
-      url: `${GPU_API}/document/${documentId}/files/${encodeURIComponent(f.name)}`,
-    }));
+    if (cached) {
+      console.log(`[GPU] ${cached.length} cached files for ${documentId}`);
+      return cached;
+    }
+    // documentId format is "gpu-{gpu_doc_id}" — strip prefix and re-fetch
+    const rawId = documentId.replace(/^gpu-/, "");
+    const files = await getWritingMaterials(rawId, "");
+    if (files.length > 0) filesCache.set(documentId, files);
+    return files;
   }
 
-  static filterCriticalFiles(files: GPUFile[]): GPUFile[] { return files; }
+  static filterCriticalFiles(files: GPUFile[]): GPUFile[] {
+    return files;
+  }
 
   static async diagnose(inseeCode: string): Promise<Record<string, any>> {
-    const { partitions, urlficFiles } = await queryZoneUrba(`code_insee=${inseeCode}`);
+    const features = await getZoneUrbaFeatures(`code_insee=${inseeCode}`);
     const result: Record<string, any> = {
-      zone_urba_partitions: partitions,
-      zone_urba_urlfic_count: urlficFiles.length,
-      zone_urba_urlfic_sample: urlficFiles.slice(0, 3).map(f => f.url),
+      zone_urba_features: features.length,
+      gpu_doc_ids: features.map(f => f.gpu_doc_id),
+      nomfic_values: features.map(f => f.nomfic),
     };
-    const toCheck = partitions.length > 0 ? partitions : [`DU_${inseeCode}`];
-    for (const p of toCheck) {
-      const xml = await fetchXml(`${ATOM_BASE}?partition=${p}`);
-      result[`atom_${p}`] = xml ? `${parseAtomEntries(xml).length} files` : "no response";
+    for (const { gpu_doc_id } of features.slice(0, 3)) {
+      const url = `${GPU_API}/document/${gpu_doc_id}/details`;
+      const data = await httpGet(url);
+      result[`details_${gpu_doc_id}`] = data
+        ? { keys: Object.keys(data), writingMaterials_count: data?.writingMaterials?.length ?? 0, sample: data?.writingMaterials?.slice(0, 2) }
+        : "no response";
     }
-    const dgFiles = await fetchDataGouvFiles(inseeCode);
-    result["data_gouv_files"] = dgFiles.length;
-    result["data_gouv_sample"] = dgFiles.slice(0, 3).map(f => f.url);
     return result;
   }
 
