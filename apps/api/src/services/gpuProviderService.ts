@@ -3,11 +3,14 @@ import { execSync } from "child_process";
 /**
  * Service d'interfaçage avec le Géoportail de l'Urbanisme (GPU)
  *
- * PRIMARY METHOD: INSPIRE ATOM feed
- *   https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml?partition=DU_{inseeCode}
- *   Returns an XML feed with direct PDF download links — no WAF issues.
+ * PRIMARY METHOD: IGN Apicarto GPU zone-urba (Make.com step 16)
+ *   https://apicarto.ign.fr/api/gpu/zone-urba?code_insee={inseeCode}
+ *   Returns GeoJSON with gpu_doc_id per feature — then fetch details.
  *
- * FALLBACK: REST JSON API (various endpoint variants)
+ * FALLBACK 1: INSPIRE ATOM feed
+ *   https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml?partition=DU_{inseeCode}
+ *
+ * FALLBACK 2: REST JSON API (various endpoint variants)
  */
 
 export interface GPUDocument {
@@ -31,7 +34,9 @@ export interface GPUFile {
 export class GPUProviderService {
   private static BASE_URL = "https://www.geoportail-urbanisme.gouv.fr/api";
   private static ATOM_BASE = "https://www.geoportail-urbanisme.gouv.fr/atom/download-feed.xml";
-  // WFS endpoints that return GeoJSON with gpu_doc_id per feature
+  // Make.com step 16: IGN Apicarto GPU zone-urba (primary)
+  private static APICARTO_ZONE_URBA = "https://apicarto.ign.fr/api/gpu/zone-urba";
+  // WFS fallback endpoints
   private static WFS_URLS = [
     "https://data.geopf.fr/wfs/ows",
     "https://www.geoportail-urbanisme.gouv.fr/wfs/",
@@ -95,10 +100,32 @@ export class GPUProviderService {
   // ─── Public API ─────────────────────────────────────────────────────────────
 
   /**
-   * Step 1 of the Make.com flow: WFS GeoJSON → gpu_doc_id list
-   * Step 2: GET /api/document/{gpu_doc_id}/details for each ID
+   * Make.com step 16: Apicarto zone-urba → gpu_doc_id list
+   * Fallback: WFS endpoints
    */
   private static async getDocIdsByWFS(inseeCode: string): Promise<string[]> {
+    // PRIMARY: IGN Apicarto zone-urba (Make.com step 16)
+    const apicartUrl = `${GPUProviderService.APICARTO_ZONE_URBA}?code_insee=${inseeCode}`;
+    console.log(`[GPU] Apicarto zone-urba query: ${apicartUrl}`);
+    const apicartRaw = GPUProviderService.curl(apicartUrl, false);
+    if (apicartRaw && !apicartRaw.startsWith("<!") && !apicartRaw.startsWith("<html")) {
+      try {
+        const geoJson = JSON.parse(apicartRaw);
+        const features: any[] = geoJson?.features || [];
+        const ids = features
+          .map((f: any) => f?.properties?.gpu_doc_id || f?.properties?.partition || f?.id)
+          .filter(Boolean);
+        if (ids.length > 0) {
+          console.log(`[GPU] Apicarto ✅ found ${ids.length} gpu_doc_ids`);
+          return [...new Set(ids)]; // deduplicate
+        }
+        console.warn(`[GPU] Apicarto 0 features: ${apicartRaw.slice(0, 200)}`);
+      } catch {
+        console.warn(`[GPU] Apicarto non-JSON: ${apicartRaw.slice(0, 100)}`);
+      }
+    }
+
+    // FALLBACK: WFS endpoints
     const wfsParams = new URLSearchParams({
       SERVICE: "WFS",
       VERSION: "2.0.0",
@@ -257,6 +284,7 @@ export class GPUProviderService {
   /** Returns raw responses for each URL variant — included in sync response when 0 docs found */
   static diagnose(inseeCode: string): Record<string, any> {
     const probes: Array<{ url: string; xml: boolean }> = [
+      { url: `${GPUProviderService.APICARTO_ZONE_URBA}?code_insee=${inseeCode}`, xml: false },
       { url: `${GPUProviderService.ATOM_BASE}?partition=DU_${inseeCode}`, xml: true },
       { url: `${GPUProviderService.BASE_URL}/document?codeMunicipalite=${inseeCode}`, xml: false },
       { url: `https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeName=GPU:document&outputFormat=application/json&CQL_FILTER=code_insee='${inseeCode}'`, xml: false },
