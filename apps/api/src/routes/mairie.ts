@@ -704,53 +704,78 @@ interface SuggestedClassification {
 }
 
 function autoSuggestClassification(text: string, fileName: string): SuggestedClassification {
-  const content = (text + " " + fileName).toLowerCase();
-  
-  if (content.includes("plu") || content.includes("règlement") || content.includes("zonage")) {
-    let docType = "Written regulation";
-    if (content.includes("plan") || content.includes("graphique") || content.includes("carte")) docType = "Zoning map";
-    if (content.includes("padd")) docType = "PADD";
-    if (content.includes("oap")) docType = "OAP";
-    
-    return {
-      category: "REGULATORY",
-      subCategory: "PLU",
-      documentType: docType,
-      tags: ["PLU", content.includes("article") ? "Article" : ""].filter(Boolean)
-    };
+  // Normalise: lowercase + strip accents for robust filename matching
+  const normalise = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const content = normalise(text + " " + fileName);
+  const fn = normalise(fileName);
+
+  // ── Infrastructure & Réseaux ────────────────────────────────────────────────
+  if (fn.includes("assainissement") || fn.includes("euep") || fn.includes("eu_ep") || fn.includes("eaux_usees")) {
+    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Sanitation (EU/EP)", tags: ["Infrastructure", "Assainissement"] };
   }
-  
-  if (content.includes("pprn") || content.includes("pprt") || content.includes("risque") || content.includes("inondation")) {
-    return {
-      category: "ANNEXES",
-      subCategory: "RISKS",
-      documentType: content.includes("pprn") ? "PPRN" : (content.includes("pprt") ? "PPRT" : "Risk Map"),
-      tags: ["Risk", content.includes("flood") || content.includes("inondation") ? "Flood_risk" : ""].filter(Boolean)
-    };
+  if (fn.includes("eau") || fn.includes("aep") || fn.includes("adduction")) {
+    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Water & AEP", tags: ["Infrastructure", "Eau"] };
   }
-  
-  if (content.includes("abf") || content.includes("monument") || content.includes("patrimoine")) {
-    return {
-      category: "ANNEXES",
-      subCategory: "HERITAGE",
-      documentType: "ABF perimeter",
-      tags: ["Heritage", "ABF"]
-    };
+  if (fn.includes("gaz") || fn.includes("energie") || fn.includes("erdf") || fn.includes("edf")) {
+    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Energy/Gaz", tags: ["Infrastructure", "Energie"] };
   }
-  
-  if (content.includes("eau") || content.includes("edf") || content.includes("assainissement") || content.includes("réseau")) {
-    return {
-      category: "INFRASTRUCTURE",
-      subCategory: "NETWORKS",
-      documentType: content.includes("eau") ? "Water" : (content.includes("assainissement") ? "Sanitation" : "Electricity"),
-      tags: ["Infrastructure", "Network"]
-    };
+  if (fn.includes("dechets") || fn.includes("ordures") || fn.includes("collecte")) {
+    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Waste management", tags: ["Infrastructure", "Dechets"] };
+  }
+
+  // ── Annexes & Risques ───────────────────────────────────────────────────────
+  if (fn.includes("pprn") || content.includes("pprn")) {
+    return { category: "ANNEXES", subCategory: "RISKS", documentType: "PPRN", tags: ["Risque", "PPRN"] };
+  }
+  if (fn.includes("pprt") || content.includes("pprt")) {
+    return { category: "ANNEXES", subCategory: "RISKS", documentType: "PPRT", tags: ["Risque", "PPRT"] };
+  }
+  if (fn.includes("risque") || fn.includes("inondation") || fn.includes("alea") || fn.includes("ppri")) {
+    return { category: "ANNEXES", subCategory: "RISKS", documentType: "Risk Map", tags: ["Risque"] };
+  }
+  if (fn.includes("bruit") || fn.includes("nuisance") || fn.includes("acoustique")) {
+    return { category: "ANNEXES", subCategory: "RISKS", documentType: "Noise Exposure Plan", tags: ["Bruit"] };
+  }
+  if (fn.includes("abf") || fn.includes("monument") || fn.includes("patrimoine") || fn.includes("zppaup") || fn.includes("avap")) {
+    return { category: "ANNEXES", subCategory: "HERITAGE", documentType: "ABF perimeter", tags: ["Patrimoine", "ABF"] };
+  }
+
+  // ── Documents Graphiques ────────────────────────────────────────────────────
+  if (fn.includes("reglement_graphique") || fn.includes("plan_graphique") || fn.includes("plan_de_zonage") || fn.includes("zonage_graphique")) {
+    return { category: "ZONING", subCategory: "PLANS", documentType: "Zoning map", tags: ["PLU", "Graphique"] };
+  }
+  if (fn.includes("secteur") || fn.includes("zoning")) {
+    return { category: "ZONING", subCategory: "PLANS", documentType: "Zoning sectors", tags: ["PLU", "Zonage"] };
+  }
+
+  // ── Réglementaire PLU ───────────────────────────────────────────────────────
+  if (fn.includes("padd") || content.includes("projet d'amenagement et de developpement")) {
+    return { category: "REGULATORY", subCategory: "PLU", documentType: "PADD", tags: ["PLU", "PADD"] };
+  }
+  if (fn.includes("oap") || content.includes("orientation d'amenagement et de programmation")) {
+    return { category: "REGULATORY", subCategory: "PLU", documentType: "OAP", tags: ["PLU", "OAP"] };
+  }
+  if (fn.includes("arrete") || fn.includes("deliberation") || fn.includes("decision")) {
+    return { category: "REGULATORY", subCategory: "PLU", documentType: "Administrative Act", tags: ["PLU", "Acte"] };
+  }
+  // Any file mentioning PLU / règlement / plan local / etc.
+  if (fn.includes("plu") || fn.includes("reglement") || fn.includes("plan_local") || fn.includes("rapport") ||
+      content.includes("plan local d'urbanisme") || content.includes("reglement ecrit") || content.includes("zone u") || content.includes("zone a ")) {
+    return { category: "REGULATORY", subCategory: "PLU", documentType: "Written regulation", tags: ["PLU"] };
+  }
+
+  // ── Content-based fallback ───────────────────────────────────────────────────
+  if (content.includes("assainissement")) {
+    return { category: "INFRASTRUCTURE", subCategory: "NETWORKS", documentType: "Sanitation (EU/EP)", tags: ["Infrastructure"] };
+  }
+  if (content.includes("risque") || content.includes("inondation")) {
+    return { category: "ANNEXES", subCategory: "RISKS", documentType: "Risk Map", tags: ["Risque"] };
   }
 
   return {
-    category: "OTHER",
-    subCategory: "MISC",
-    documentType: "Other",
+    category: "REGULATORY",
+    subCategory: "PLU",
+    documentType: "Written regulation",
     tags: []
   };
 }

@@ -872,6 +872,29 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   }
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
 
+  // Maps every documentType to its owning category+subCategory slot in KB_STRUCTURE
+  const DOC_TYPE_META: Record<string, { category: string; subCategory: string }> = {
+    "Written regulation":    { category: "REGULATORY",      subCategory: "PLU"      },
+    "OAP":                   { category: "REGULATORY",      subCategory: "PLU"      },
+    "PADD":                  { category: "REGULATORY",      subCategory: "PLU"      },
+    "Administrative Act":    { category: "REGULATORY",      subCategory: "PLU"      },
+    "Zoning map":            { category: "ZONING",          subCategory: "PLANS"    },
+    "Zoning sectors":        { category: "ZONING",          subCategory: "PLANS"    },
+    "Graphic Document":      { category: "ZONING",          subCategory: "PLANS"    },
+    "PPRN":                  { category: "ANNEXES",         subCategory: "RISKS"    },
+    "PPRT":                  { category: "ANNEXES",         subCategory: "RISKS"    },
+    "Risk Map":              { category: "ANNEXES",         subCategory: "RISKS"    },
+    "Noise Exposure Plan":   { category: "ANNEXES",         subCategory: "RISKS"    },
+    "ABF perimeter":         { category: "ANNEXES",         subCategory: "HERITAGE" },
+    "Monuments historiques": { category: "ANNEXES",         subCategory: "HERITAGE" },
+    "Site classé":           { category: "ANNEXES",         subCategory: "HERITAGE" },
+    "ZPPAUP/AVAP":           { category: "ANNEXES",         subCategory: "HERITAGE" },
+    "Water & AEP":           { category: "INFRASTRUCTURE",  subCategory: "NETWORKS" },
+    "Sanitation (EU/EP)":    { category: "INFRASTRUCTURE",  subCategory: "NETWORKS" },
+    "Energy/Gaz":            { category: "INFRASTRUCTURE",  subCategory: "NETWORKS" },
+    "Waste management":      { category: "INFRASTRUCTURE",  subCategory: "NETWORKS" },
+  };
+
   const analyzeMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const formData = new FormData();
@@ -1145,19 +1168,36 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                 <span className="flex-1 truncate font-mono text-xs" title={f.fileName}>{f.fileName}</span>
                 <Select
                   value={f.documentType}
-                  onValueChange={(val) => setStagedFiles(prev => prev.map((x, j) => j === i ? { ...x, documentType: val } : x))}
+                  onValueChange={(val) => {
+                    const meta = DOC_TYPE_META[val];
+                    setStagedFiles(prev => prev.map((x, j) => j === i
+                      ? { ...x, documentType: val, ...(meta ? { category: meta.category, subCategory: meta.subCategory } : {}) }
+                      : x
+                    ));
+                  }}
                 >
-                  <SelectTrigger className="w-44 h-7 text-xs">
+                  <SelectTrigger className="w-52 h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Written regulation">Règlement écrit</SelectItem>
-                    <SelectItem value="Zoning map">Plan graphique</SelectItem>
-                    <SelectItem value="PADD">PADD</SelectItem>
-                    <SelectItem value="OAP">OAP</SelectItem>
-                    <SelectItem value="Rapport de présentation">Rapport de présentation</SelectItem>
-                    <SelectItem value="Annexes">Annexes</SelectItem>
-                    <SelectItem value="Other">Autre</SelectItem>
+                    <SelectItem value="Written regulation">Règlement écrit (PLU)</SelectItem>
+                    <SelectItem value="OAP">OAP (PLU)</SelectItem>
+                    <SelectItem value="PADD">PADD (PLU)</SelectItem>
+                    <SelectItem value="Administrative Act">Acte administratif</SelectItem>
+                    <SelectItem value="Zoning map">Plan de zonage</SelectItem>
+                    <SelectItem value="Zoning sectors">Secteurs de zonage</SelectItem>
+                    <SelectItem value="Graphic Document">Document graphique</SelectItem>
+                    <SelectItem value="PPRN">PPRN (Risques naturels)</SelectItem>
+                    <SelectItem value="PPRT">PPRT (Risques technologiques)</SelectItem>
+                    <SelectItem value="Risk Map">Carte des risques</SelectItem>
+                    <SelectItem value="Noise Exposure Plan">Plan d'exposition au bruit</SelectItem>
+                    <SelectItem value="ABF perimeter">Périmètre ABF</SelectItem>
+                    <SelectItem value="Monuments historiques">Monuments historiques</SelectItem>
+                    <SelectItem value="Site classé">Site classé</SelectItem>
+                    <SelectItem value="Water & AEP">Eau / AEP</SelectItem>
+                    <SelectItem value="Sanitation (EU/EP)">Assainissement EU/EP</SelectItem>
+                    <SelectItem value="Energy/Gaz">Énergie / Gaz</SelectItem>
+                    <SelectItem value="Waste management">Collecte des déchets</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
