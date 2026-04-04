@@ -43,7 +43,7 @@ import { recordDecision } from "../services/learningService.js";
 
 const upload = multer({
   dest: os.tmpdir(),
-  limits: { fileSize: 50 * 1024 * 1024 }
+  limits: { fileSize: 200 * 1024 * 1024, files: 70 }
 });
 
 const router: IRouter = Router();
@@ -800,7 +800,7 @@ router.get("/documents", async (req: AuthRequest, res) => {
   } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
 
-router.post("/documents/batch", upload.array("files", 50), async (req: AuthRequest, res) => {
+router.post("/documents/batch", upload.array("files", 70), async (req: AuthRequest, res) => {
   try {
     const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {

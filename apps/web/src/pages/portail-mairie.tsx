@@ -894,7 +894,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const batchUploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
       // Send in chunks of 10 (multer limit)
-      const CHUNK = 10;
+      const CHUNK = 70;
       let totalIndexed = 0;
       let totalSkipped = 0;
       for (let i = 0; i < files.length; i += CHUNK) {
