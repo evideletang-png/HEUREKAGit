@@ -41,7 +41,7 @@ import { geocodeAddress } from "../services/geocoding.js";
 
 const upload = multer({
   dest: os.tmpdir(),
-  limits: { fileSize: 50 * 1024 * 1024 }
+  limits: { fileSize: 100 * 1024 * 1024 }
 });
 
 const router: IRouter = Router();
