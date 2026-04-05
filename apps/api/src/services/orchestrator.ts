@@ -121,6 +121,52 @@ function hasReusableParcelContext(parcelRow: typeof parcelsTable.$inferSelect, m
   return metadata.perimeterM != null && metadata.depthM != null && metadata.topography != null;
 }
 
+function buildFallbackZoneArticlesFromParsedRules(parsedRules: any[]) {
+  return parsedRules
+    .map((rule: any, index: number) => {
+      const rawArticle = rule?.article ?? rule?.articleNumber ?? rule?.article_id ?? null;
+      const articleDigits = rawArticle == null ? "" : String(rawArticle).replace(/[^0-9]/g, "");
+      const articleNumber = articleDigits ? parseInt(articleDigits, 10) : index + 1;
+      const sourceText = String(
+        rule?.sourceText
+        ?? rule?.source_text
+        ?? rule?.operational_rule
+        ?? rule?.rule
+        ?? rule?.content
+        ?? ""
+      ).trim();
+      const summary = String(
+        rule?.summary
+        ?? rule?.operational_rule
+        ?? rule?.rule
+        ?? rule?.interpretation
+        ?? sourceText
+      ).trim();
+      const title = String(
+        rule?.title
+        ?? rule?.section
+        ?? (rawArticle ? `Article ${rawArticle}` : `Règle ${index + 1}`)
+      ).trim();
+
+      if (sourceText.length < 25 && summary.length < 25) return null;
+
+      return {
+        articleNumber,
+        title,
+        sourceText,
+        summary,
+        interpretation: summary,
+        impactText: "",
+        vigilanceText: Array.isArray(rule?.exceptions) ? rule.exceptions.join("; ") : "",
+        confidence: "medium",
+        structuredData: rule,
+        relevanceScore: 60,
+        relevanceReason: "Règle extraite directement du contexte réglementaire utilisé pour l'analyse.",
+      };
+    })
+    .filter(Boolean);
+}
+
 /**
  * Knowledge Routing Rules: Mapping piece codes to search priorities
  */
@@ -841,6 +887,14 @@ export async function orchestrateDossierAnalysis(
       );
     } catch (pluErr) {
       logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data", { error: pluErr instanceof Error ? pluErr.message : String(pluErr) });
+    }
+
+    if (!Array.isArray(fullZoneAnalysis.articles) || fullZoneAnalysis.articles.length === 0) {
+      const fallbackArticles = buildFallbackZoneArticlesFromParsedRules(parsedRules);
+      if (fallbackArticles.length > 0) {
+        fullZoneAnalysis.articles = fallbackArticles;
+        logger.info(`[Orchestrator] Using ${fallbackArticles.length} fallback regulatory evidence entries for zone ${finalZone}.`);
+      }
     }
 
     const [existingZone] = await db.select().from(zoneAnalysesTable)
