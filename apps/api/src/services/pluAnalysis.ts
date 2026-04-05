@@ -887,6 +887,16 @@ export async function extractRelevantRules(
         });
       }
 
+      if (chunks.length === 0) {
+        console.warn(`[pluAnalysis] Strict regulatory retrieval returned no chunks for ${cityName} zone ${zoneCode} — falling back to legacy metadata.`);
+        chunks = await queryChunksWithMunicipalityAliases(queryStr, {
+          cityName,
+          zoneCode,
+          limit: 15,
+          jurisdictionContext,
+        });
+      }
+
       if (chunks.length > 0) {
         combinedText = chunks
           .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)

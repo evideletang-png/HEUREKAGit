@@ -41,7 +41,7 @@ export async function buildAnalysisContext(
       and(
         or(
           eq(baseIADocumentsTable.municipalityId, commune),
-          communeName ? eq(baseIADocumentsTable.municipalityId, communeName) : sql`FALSE`,
+          communeName ? sql`lower(${baseIADocumentsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`,
           inArray(baseIADocumentsTable.municipalityId, [GLOBAL_POOL_ID, "NATIONAL"])
         ),
         eq(baseIADocumentsTable.status, "indexed")
@@ -55,7 +55,7 @@ export async function buildAnalysisContext(
       and(
         or(
           eq(townHallDocumentsTable.commune, commune),
-          communeName ? eq(townHallDocumentsTable.commune, communeName) : sql`FALSE`,
+          communeName ? sql`lower(${townHallDocumentsTable.commune}) = lower(${communeName})` : sql`FALSE`,
           // Zone-specific matches if pre-filtered in DB
           eq(townHallDocumentsTable.zone, zoneCode)
         ),

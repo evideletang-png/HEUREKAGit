@@ -950,7 +950,7 @@ async function queueTownHallDocumentIndexing(args: {
 
       let canonicalType: any = "other";
       const dt = (documentType || "").toLowerCase();
-      if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
+      if (dt.includes("plu") || dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
       else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
       else if (dt.includes("annexe")) canonicalType = "plu_annexe";
 
@@ -969,6 +969,7 @@ async function queueTownHallDocumentIndexing(args: {
         fileName: path.basename(args.persistentPath),
         fileHash,
         status: "parsing",
+        rawText,
       }).returning();
 
       await processDocumentForRAG(baseIADoc.id, municipalityKey, rawText, {
