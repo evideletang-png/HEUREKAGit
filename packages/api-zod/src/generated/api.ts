@@ -118,6 +118,18 @@ export const CreateAnalysisBody = zod.object({
   parcelRef: zod.string().optional(),
   lat: zod.number().optional(),
   lng: zod.number().optional(),
+  banId: zod.string().optional(),
+  inseeCode: zod.string().optional(),
+  city: zod.string().optional(),
+  postcode: zod.string().optional(),
+  selectedParcels: zod.array(zod.object({
+    idu: zod.string().optional(),
+    section: zod.string().optional(),
+    numero: zod.string().optional(),
+    parcelRef: zod.string().optional(),
+    contenanceM2: zod.number().optional(),
+    feature: zod.object({}).passthrough().optional(),
+  })).optional(),
   title: zod.string().optional(),
 });
 

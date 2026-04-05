@@ -213,6 +213,7 @@ export async function orchestrateDossierAnalysis(
   let ruleResults: any[] = [];
   let detailedResolvedFields: any[] = [];
   let abfDiagnostic: { isConcerned: boolean; reasons: string[] } = { isConcerned: false, reasons: [] };
+  let sourceLock: any = null;
 
   // 0. Fetch initial info
   let initialAddress = "";
@@ -236,15 +237,26 @@ export async function orchestrateDossierAnalysis(
   } else if (analysisId) {
     const [analysis] = await db.select().from(analysesTable).where(eq(analysesTable.id, analysisId)).limit(1);
     if (!analysis) throw new Error(`Analysis ${analysisId} not found.`);
-    initialAddress = analysis.address;
-    initialCommune = analysis.postalCode || "00000"; // Fallback to postal code if city hidden
+    const existingGeoContext = analysis.geoContextJson
+      ? (() => { try { return JSON.parse(analysis.geoContextJson); } catch { return null; } })()
+      : null;
+    sourceLock = existingGeoContext?.source_lock ?? null;
+    initialAddress = sourceLock?.address || analysis.address;
+    const [existingParcel] = await db.select({ metadataJson: parcelsTable.metadataJson })
+      .from(parcelsTable)
+      .where(eq(parcelsTable.analysisId, analysisId))
+      .limit(1);
+    const parcelMetadata = existingParcel?.metadataJson
+      ? (() => { try { return JSON.parse(existingParcel.metadataJson); } catch { return null; } })()
+      : null;
+    initialCommune = sourceLock?.inseeCode || parcelMetadata?.commune || analysis.city || "00000";
   }
 
   try {
   await setAnalysisStatus("collecting_data");
 
   // 1. IDENTIFY THE ANALYSIS CONTEXT (Step 1)
-  const contextIdentification = await identifyAnalysisContext(initialCommune, initialAddress || undefined);
+  const contextIdentification = await identifyAnalysisContext(initialCommune, initialAddress || undefined, sourceLock);
   const currentCommune = contextIdentification.commune;
   finalZone = contextIdentification.zone;
   
@@ -318,7 +330,41 @@ export async function orchestrateDossierAnalysis(
         .from(analysesTable).where(eq(analysesTable.id, analysisId)).limit(1);
       if (existingParcel && existingAnalysis?.zoneCode) {
         skipGeocoding = true;
-        parcelData = existingParcel;
+        const metadata = existingParcel.metadataJson
+          ? (() => { try { return JSON.parse(existingParcel.metadataJson); } catch { return null; } })()
+          : null;
+        parcelData = {
+          cadastralSection: existingParcel.cadastralSection,
+          parcelNumber: existingParcel.parcelNumber,
+          parcelSurfaceM2: existingParcel.parcelSurfaceM2,
+          geometryJson: existingParcel.geometryJson ? JSON.parse(existingParcel.geometryJson) : null,
+          centroidLat: existingParcel.centroidLat,
+          centroidLng: existingParcel.centroidLng,
+          roadFrontageLengthM: existingParcel.roadFrontageLengthM,
+          sideBoundaryLengthM: existingParcel.sideBoundaryLengthM,
+          metadata: metadata || {},
+          _perimeterM: metadata?.perimeterM ?? null,
+          _depthM: metadata?.depthM ?? null,
+          _isCornerPlot: metadata?.isCornerPlot ?? false,
+          _topography: metadata?.topography ?? null,
+          _classifyBoundariesResult: metadata?.frontRoadName
+            ? { road_boundary_segments: [{ properties: { closest_road_name: metadata.frontRoadName } }] }
+            : null,
+        };
+        const existingBuildings = await db.select().from(buildingsTable)
+          .where(eq(buildingsTable.analysisId, analysisId));
+        buildingData = {
+          buildings: existingBuildings.map((building) => ({
+            footprintM2: building.footprintM2 ?? 0,
+            estimatedFloorAreaM2: building.estimatedFloorAreaM2 ?? 0,
+            avgHeightM: building.avgHeightM ?? 0,
+            avgFloors: building.avgFloors ?? 0,
+            geometryJson: building.geometryJson ? JSON.parse(building.geometryJson) : null,
+          })),
+          rawFeatures: [],
+          analyseParcelleResult: null,
+        };
+        parcelData.buildings = buildingData.buildings;
         finalZone = existingAnalysis.zoneCode;
         logger.info(`[Orchestrator] Skipping geocoding — analysis ${analysisId} already has zone ${finalZone} and parcel data.`);
       }
@@ -367,6 +413,7 @@ export async function orchestrateDossierAnalysis(
                 centroidLng: parcelData.centroidLng ?? null,
                 roadFrontageLengthM: parcelData.roadFrontageLengthM ?? null,
                 sideBoundaryLengthM: parcelData.sideBoundaryLengthM ?? null,
+                metadataJson: parcelData.metadata ? JSON.stringify(parcelData.metadata) : null,
               });
 
               if (buildingData?.buildings?.length > 0) {
@@ -599,20 +646,34 @@ export async function orchestrateDossierAnalysis(
     globalScore: score,
     zoneCode: finalZone,
     geoContextJson: JSON.stringify({
+      source_lock: sourceLock ?? null,
       municipality: currentCommune,
       zone: finalZone,
       financial_analysis: financialAnalysis,
       plu_trace: strictPluAnalysis,
+      data_quality: {
+        address_and_parcel: sourceLock?.lat && sourceLock?.lng ? "validated" : parcelData ? "calculated" : "to_confirm",
+        zoning: finalZone && (sourceLock?.zoneCode || currentCommune) ? "validated" : "to_confirm",
+        buildability: calculations ? "calculated" : "to_confirm",
+        neighbour_context: buildingData?.buildings?.length ? "estimated" : "to_confirm",
+        topography: parcelData?._topography ? "estimated" : "to_confirm",
+        roads: parcelData?._classifyBoundariesResult ? "calculated" : "to_confirm",
+      },
+      parcel: {
+        id: parcelData?.metadata?.idu ?? null,
+        refs: (parcelData?.metadata as any)?.parcelRefs ?? null,
+        parcel_count: (parcelData?.metadata as any)?.parcelCount ?? 1,
+      },
       // Keys the frontend reads directly
       parcel_metrics: {
-        perimeter_m: parcelSurface > 0 ? Math.round(4 * Math.sqrt(parcelSurface)) : null,
-        depth_m: roadFrontage > 0 && parcelSurface > 0 ? Math.round(parcelSurface / roadFrontage) : null,
-        is_corner_plot: sideLength > 0 && roadFrontage > 0 && sideLength / roadFrontage > 0.6,
+        perimeter_m: parcelData?._perimeterM ?? null,
+        depth_m: parcelData?._depthM ?? null,
+        is_corner_plot: parcelData?._isCornerPlot ?? false,
       },
       parcel_boundaries: {
         road_length_m: roadFrontage || null,
         side_length_m: sideLength || null,
-        front_road_name: null,
+        front_road_name: parcelData?._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,
       },
       buildings_on_parcel: {
         count: buildingData?.buildings?.length ?? 0,
@@ -631,15 +692,16 @@ export async function orchestrateDossierAnalysis(
         dominant_alignment: normalizedParams.road_setback?.[0] === 0 ? "alignement_obligatoire" : "retrait",
       },
       roads: {
-        nearest_road_name: parcelData?.metadata?.section ? `Voie cadastrale ${parcelData.metadata.section}` : null,
+        nearest_road_name: parcelData?._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,
         distance_to_road_m: roadFrontage > 0 ? 0 : null,
         road_width_m: null,
         access_possible: roadFrontage > 0,
       },
       topography: {
-        elevation_min: null,
-        elevation_max: null,
-        slope_percent: null,
+        elevation_min: parcelData?._topography?.elevationMin ?? null,
+        elevation_max: parcelData?._topography?.elevationMax ?? null,
+        slope_percent: parcelData?._topography?.slopePercent ?? null,
+        is_flat: parcelData?._topography?.isFlat ?? null,
       },
       plu: strictPluAnalysis?.zoneRules ?? {},
       market_data: marketData ?? null,
@@ -774,46 +836,52 @@ export async function orchestrateDossierAnalysis(
 /**
  * Step 1: Identify Analysis Context (MCP-First)
  */
-async function identifyAnalysisContext(communeInsee: string, address?: string) {
+async function identifyAnalysisContext(communeInsee: string, address?: string, sourceLock?: { lat?: number; lng?: number; inseeCode?: string; zoneCode?: string }) {
   logger.info(`[Step 1] Identification context for INSE ${communeInsee}, Address: ${address}`);
   
-  let detectedCommune = communeInsee;
-  let detectedZone = "UA";
-  let lat = 0;
-  let lng = 0;
+  let detectedCommune = sourceLock?.inseeCode || communeInsee;
+  let detectedZone = sourceLock?.zoneCode || "UA";
+  let lat = typeof sourceLock?.lat === "number" ? sourceLock.lat : 0;
+  let lng = typeof sourceLock?.lng === "number" ? sourceLock.lng : 0;
+
+  if (lat && lng) {
+    logger.info("[Step 1] Using locked analysis context from validated selection.");
+  }
 
   // 1. MCP Geocoding First (with DB cache)
-  const cachedStep1 = address ? await getCachedGeocode(address) : null;
-  if (cachedStep1) {
-    lat = cachedStep1.lat;
-    lng = cachedStep1.lng;
-    detectedCommune = cachedStep1.inseeCode || communeInsee;
-    logger.info(`[Step 1] Geocoding cache hit for "${address}"`);
-  } else {
-    try {
-      const { callMcpTool } = await import("./mcpClient.js");
-      const geocodeResult = await callMcpTool("https://mcp.data.gouv.fr/mcp", "geocode", { q: address });
-      if (geocodeResult && geocodeResult.lat) {
-        lat = geocodeResult.lat;
-        lng = geocodeResult.lng;
-        detectedCommune = geocodeResult.citycode || communeInsee;
-        logger.info(`[MCP Step 1] Geocoding successful: ${lat}, ${lng} (INSEE: ${detectedCommune})`);
-        if (address) await cacheGeocode(address, { lat, lng, label: address, inseeCode: detectedCommune });
-      }
-    } catch (err) {
-      logger.warn("[MCP Step 1] Geocoding MCP failed, falling back to legacy fetch.");
-      const gResults = await geocodeAddress(address || "");
-      if (gResults.length > 0) {
-        lat = gResults[0].lat;
-        lng = gResults[0].lng;
-        detectedCommune = gResults[0].inseeCode || communeInsee;
-        if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score });
+  if (!lat || !lng) {
+    const cachedStep1 = address ? await getCachedGeocode(address) : null;
+    if (cachedStep1) {
+      lat = cachedStep1.lat;
+      lng = cachedStep1.lng;
+      detectedCommune = cachedStep1.inseeCode || communeInsee;
+      logger.info(`[Step 1] Geocoding cache hit for "${address}"`);
+    } else {
+      try {
+        const { callMcpTool } = await import("./mcpClient.js");
+        const geocodeResult = await callMcpTool("https://mcp.data.gouv.fr/mcp", "geocode", { q: address });
+        if (geocodeResult && geocodeResult.lat) {
+          lat = geocodeResult.lat;
+          lng = geocodeResult.lng;
+          detectedCommune = geocodeResult.citycode || communeInsee;
+          logger.info(`[MCP Step 1] Geocoding successful: ${lat}, ${lng} (INSEE: ${detectedCommune})`);
+          if (address) await cacheGeocode(address, { lat, lng, label: address, inseeCode: detectedCommune });
+        }
+      } catch (err) {
+        logger.warn("[MCP Step 1] Geocoding MCP failed, falling back to legacy fetch.");
+        const gResults = await geocodeAddress(address || "");
+        if (gResults.length > 0) {
+          lat = gResults[0].lat;
+          lng = gResults[0].lng;
+          detectedCommune = gResults[0].inseeCode || communeInsee;
+          if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score });
+        }
       }
     }
   }
 
   // 2. Planning (Zone Identification)
-  if (lat && lng) {
+  if (lat && lng && !sourceLock?.zoneCode) {
      const zoneInfo = await getZoningByCoords(lat, lng, detectedCommune);
      detectedZone = zoneInfo?.zoneCode || "UA";
   }

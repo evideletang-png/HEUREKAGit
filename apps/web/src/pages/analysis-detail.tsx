@@ -80,6 +80,36 @@ interface RuleArticle {
   impact_level?: "blocking" | "major" | "minor";
 }
 
+type ReliabilityLevel = "validated" | "calculated" | "estimated" | "to_confirm";
+
+const RELIABILITY_LABELS: Record<ReliabilityLevel, { label: string; className: string }> = {
+  validated: {
+    label: "Validé",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
+  calculated: {
+    label: "Calculé",
+    className: "border-sky-200 bg-sky-50 text-sky-800",
+  },
+  estimated: {
+    label: "Estimé",
+    className: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  to_confirm: {
+    label: "À confirmer",
+    className: "border-border bg-muted/40 text-muted-foreground",
+  },
+};
+
+function ReliabilityBadge({ level }: { level: ReliabilityLevel }) {
+  const meta = RELIABILITY_LABELS[level];
+  return (
+    <Badge variant="outline" className={meta.className}>
+      {meta.label}
+    </Badge>
+  );
+}
+
 export default function AnalysisDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -232,6 +262,25 @@ export default function AnalysisDetailPage() {
     } catch { return []; }
   })();
 
+  const parcelMetadata = (() => {
+    try {
+      if (!parcel?.metadataJson) return null;
+      return typeof parcel.metadataJson === "string"
+        ? JSON.parse(parcel.metadataJson as string)
+        : parcel.metadataJson;
+    } catch {
+      return null;
+    }
+  })();
+
+  const groupedParcelRefs = Array.isArray(parcelMetadata?.parcelRefs)
+    ? (parcelMetadata.parcelRefs as string[]).filter(Boolean)
+    : [];
+  const displayParcelRef = analysis.parcelRef
+    || (groupedParcelRefs.length > 0
+      ? groupedParcelRefs.join(" + ")
+      : (parcel?.cadastralSection && parcel?.parcelNumber ? `${parcel.cadastralSection} ${parcel.parcelNumber}` : null));
+
   // Parse GeoContext JSON
   const gc = (analysis as any).geoContextJson
     ? (() => { try { return typeof (analysis as any).geoContextJson === "string" ? JSON.parse((analysis as any).geoContextJson as string) : (analysis as any).geoContextJson; } catch { return null; } })()
@@ -248,6 +297,15 @@ export default function AnalysisDetailPage() {
   const md = gc?.market_data ?? null;
   const ag = gc?.admin_guide ?? null;
   const fa = gc?.financial_analysis ?? null;
+  const sourceLock = gc?.source_lock ?? null;
+  const dataQuality = gc?.data_quality ?? {};
+
+  const reliabilitySummary: { label: string; level: ReliabilityLevel }[] = [
+    { label: "Adresse & parcelle", level: (dataQuality.address_and_parcel || (sourceLock?.lat && displayParcelRef ? "validated" : parcel ? "calculated" : "to_confirm")) as ReliabilityLevel },
+    { label: "Zone PLU", level: (dataQuality.zoning || (analysis.zoneCode ? "validated" : "to_confirm")) as ReliabilityLevel },
+    { label: "Constructibilité", level: (dataQuality.buildability || (buildability ? "calculated" : "to_confirm")) as ReliabilityLevel },
+    { label: "Contexte urbain", level: (dataQuality.neighbour_context || (nc?.buildings?.length ? "estimated" : "to_confirm")) as ReliabilityLevel },
+  ];
 
   // confidence score is stored as 0-1, display as percentage
   const confidencePct = analysis.confidenceScore != null ? Math.round(analysis.confidenceScore * 100) : null;
@@ -406,10 +464,7 @@ export default function AnalysisDetailPage() {
           <div>
             <p className="text-sm text-muted-foreground mb-1">Réf. Cadastrale</p>
             <p className="font-semibold">
-              {analysis.parcelRef
-                || (parcel?.cadastralSection && parcel?.parcelNumber
-                    ? `${parcel.cadastralSection} ${parcel.parcelNumber}`
-                    : "En recherche...")}
+              {displayParcelRef || "En recherche..."}
             </p>
           </div>
           <div>
@@ -432,12 +487,26 @@ export default function AnalysisDetailPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center justify-end">
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 flex items-center gap-1.5 py-1.5 px-3">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Source Certifiée MCP
-            </Badge>
+        </div>
+
+        <div className="flex flex-col gap-3 pt-4 border-t border-border mt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {sourceLock && (
+              <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 flex items-center gap-1.5 py-1.5 px-3">
+                <Lock className="w-3.5 h-3.5" />
+                Contexte verrouillé avant analyse
+              </Badge>
+            )}
+            {reliabilitySummary.map((item) => (
+              <div key={item.label} className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm">
+                <span className="text-muted-foreground">{item.label}</span>
+                <ReliabilityBadge level={item.level} />
+              </div>
+            ))}
           </div>
+          <p className="text-xs text-muted-foreground">
+            `Validé` = donnée issue d'une sélection ou d'une source identifiée. `Calculé` = résultat dérivé de règles ou de géométrie. `Estimé` = contexte indicatif. `À confirmer` = source incomplète.
+          </p>
         </div>
       </div>
 
@@ -549,6 +618,12 @@ export default function AnalysisDetailPage() {
                     <span className="text-muted-foreground">Numéro</span>
                     <span className="font-medium">{parcel?.parcelNumber || "-"}</span>
                   </div>
+                  {groupedParcelRefs.length > 1 && (
+                    <div className="flex justify-between py-2 border-b border-border/50">
+                      <span className="text-muted-foreground">Groupement foncier</span>
+                      <span className="font-medium text-right">{groupedParcelRefs.join(" + ")}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between py-2 border-b border-border/50">
                     <span className="text-muted-foreground">Surface géométrique</span>
                     <span className="font-medium text-primary">{parcel?.parcelSurfaceM2 ? `${parcel.parcelSurfaceM2} m²` : "-"}</span>
@@ -637,7 +712,10 @@ export default function AnalysisDetailPage() {
                 {/* BÂTIMENTS EXISTANTS */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2"><Building2 className="w-4 h-4" /> Bâti existant sur la parcelle</CardTitle>
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="flex items-center gap-2"><Building2 className="w-4 h-4" /> Bâti existant sur la parcelle</CardTitle>
+                      <ReliabilityBadge level={(dataQuality.address_and_parcel || "to_confirm") as ReliabilityLevel} />
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {bop.count === 0 ? (
@@ -665,7 +743,10 @@ export default function AnalysisDetailPage() {
                 {/* VOIRIE */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2"><Navigation className="w-4 h-4" /> Voirie et accès</CardTitle>
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="flex items-center gap-2"><Navigation className="w-4 h-4" /> Voirie et accès</CardTitle>
+                      <ReliabilityBadge level={(dataQuality.roads || "to_confirm") as ReliabilityLevel} />
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {[
@@ -687,7 +768,10 @@ export default function AnalysisDetailPage() {
                 {/* VOISINAGE */}
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2"><Users className="w-4 h-4" /> Contexte voisinage</CardTitle>
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="flex items-center gap-2"><Users className="w-4 h-4" /> Contexte voisinage</CardTitle>
+                      <ReliabilityBadge level={(dataQuality.neighbour_context || "to_confirm") as ReliabilityLevel} />
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {[
@@ -765,7 +849,10 @@ export default function AnalysisDetailPage() {
                    <CardTitle className="text-2xl text-primary mb-1">Règlement de la Zone {zoneAnalysis?.zoneCode}</CardTitle>
                    <p className="text-muted-foreground">{zoneAnalysis?.zoneLabel}</p>
                  </div>
-                 <ConfidenceBadge confidence="Donnée récupérée" type="data" />
+                 <div className="flex items-center gap-2">
+                   <ConfidenceBadge confidence="Donnée récupérée" type="data" />
+                   <ReliabilityBadge level={(dataQuality.zoning || "to_confirm") as ReliabilityLevel} />
+                 </div>
                </div>
              </CardHeader>
              <CardContent className="pt-6">
@@ -799,7 +886,7 @@ export default function AnalysisDetailPage() {
                           <Card className="md:col-span-4 border-primary/20 bg-primary/5 shadow-sm overflow-hidden">
                             <CardHeader className="py-3 px-6 bg-primary/10 border-b border-primary/10">
                               <CardTitle className="text-sm font-bold flex items-center gap-2 text-primary">
-                                <Sparkles className="w-4 h-4" /> Synthèse Réglementaire - Zone {zoneAnalysis.zoneCode}
+                                <Sparkles className="w-4 h-4" /> Synthèse Réglementaire - Zone {zoneAnalysis?.zoneCode}
                               </CardTitle>
                             </CardHeader>
                             <CardContent className="p-6">
@@ -986,7 +1073,10 @@ export default function AnalysisDetailPage() {
               <Card>
                 <CardHeader className="border-b border-border/50 bg-muted/20">
                   <div className="flex justify-between items-center">
-                    <CardTitle>Potentiel Constructible Théorique</CardTitle>
+                    <div className="flex items-center gap-3">
+                      <CardTitle>Potentiel Constructible Théorique</CardTitle>
+                      <ReliabilityBadge level={(dataQuality.buildability || "to_confirm") as ReliabilityLevel} />
+                    </div>
                     <div className="text-right">
                       <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-1">Score de confiance</p>
                       <span className={`text-2xl font-bold ${buildabilityConfidencePct != null && buildabilityConfidencePct > 70 ? 'text-emerald-600' : 'text-amber-600'}`}>
