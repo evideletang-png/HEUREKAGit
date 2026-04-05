@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { Building2, LogOut, User as UserIcon, LayoutDashboard, ShieldCheck, Scale, Building, FileText } from "lucide-react";
+import { Building2, LogOut, User as UserIcon, LayoutDashboard, ShieldCheck, Scale, Building, FileText, Gavel } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +53,14 @@ export function Navbar() {
                   <Link href="/citoyen">
                     <FileText className="w-4 h-4" />
                     Mes dossiers
+                  </Link>
+                </Button>
+              )}
+              {["citoyen", "user", "mairie", "admin", "super_admin"].includes((user?.role as string) || "") && (
+                <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-slate-700 font-medium">
+                  <Link href="/recours">
+                    <Gavel className="w-4 h-4" />
+                    Recours
                   </Link>
                 </Button>
               )}
@@ -108,6 +116,14 @@ export function Navbar() {
                       <Link href="/citoyen" className="flex items-center w-full">
                         <FileText className="mr-2 h-4 w-4" />
                         <span>Mes dossiers</span>
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  {["citoyen", "user", "mairie", "admin", "super_admin"].includes((user?.role as string) || "") && (
+                    <DropdownMenuItem asChild className="cursor-pointer rounded-md">
+                      <Link href="/recours" className="flex items-center w-full">
+                        <Gavel className="mr-2 h-4 w-4" />
+                        <span>Recours</span>
                       </Link>
                     </DropdownMenuItem>
                   )}

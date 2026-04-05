@@ -19,3 +19,4 @@ export * from "./dossierEvents";
 export * from "./communes";
 export * from "./notifications";
 export * from "./geocodingCache";
+export * from "./appeals";

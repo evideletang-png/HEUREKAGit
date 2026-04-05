@@ -21,6 +21,8 @@ import CitoyenPage from "@/pages/citoyen";
 import CitoyenDossierDetailPage from "@/pages/citoyen-dossier-detail";
 import CitoyenNewDossierPage from "@/pages/citoyen-new-dossier";
 import TasksPage from "@/pages/tasks";
+import AppealsPage from "@/pages/appeals";
+import AppealDetailPage from "@/pages/appeal-detail";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,6 +56,8 @@ function Router() {
       <Route path="/citoyen/nouveau" component={CitoyenNewDossierPage} />
       <Route path="/citoyen/dossier/:id" component={CitoyenDossierDetailPage} />
       <Route path="/tasks" component={TasksPage} />
+      <Route path="/recours" component={AppealsPage} />
+      <Route path="/recours/:id" component={AppealDetailPage} />
 
       <Route component={NotFound} />
     </Switch>
