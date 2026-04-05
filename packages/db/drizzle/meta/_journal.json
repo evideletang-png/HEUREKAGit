@@ -29,6 +29,13 @@
       "when": 1775330000000,
       "tag": "0003_appeals_module",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775409000000,
+      "tag": "0004_town_hall_upload_sessions",
+      "breakpoints": true
     }
   ]
 }

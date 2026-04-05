@@ -7,6 +7,53 @@ import { queryRelevantChunks } from "./embeddingService.js";
 import { logger } from "../utils/logger.js";
 import fs from "fs";
 
+function uniqueMunicipalityAliases(cityName?: string, jurisdictionContext?: JurisdictionContext): string[] {
+  return Array.from(new Set([
+    jurisdictionContext?.commune_insee,
+    cityName,
+    jurisdictionContext?.name,
+  ].filter((value): value is string => !!value && value.trim().length > 0)));
+}
+
+async function queryChunksWithMunicipalityAliases(
+  query: string,
+  options: {
+    cityName?: string;
+    zoneCode?: string;
+    articleId?: string;
+    docTypes?: string[];
+    jurisdictionContext?: JurisdictionContext;
+    includeTrace?: boolean;
+    limit?: number;
+  }
+) {
+  const aliases = uniqueMunicipalityAliases(options.cityName, options.jurisdictionContext);
+  const limit = options.limit || 15;
+  const resultsById = new Map<string, any>();
+
+  for (const municipalityId of aliases) {
+    const chunks = await queryRelevantChunks(query, {
+      municipalityId,
+      zoneCode: options.zoneCode,
+      articleId: options.articleId,
+      docTypes: options.docTypes,
+      jurisdictionContext: options.jurisdictionContext,
+      includeTrace: options.includeTrace,
+      limit,
+    });
+
+    for (const chunk of chunks) {
+      if (!resultsById.has(chunk.id)) {
+        resultsById.set(chunk.id, chunk);
+      }
+    }
+
+    if (resultsById.size >= limit) break;
+  }
+
+  return Array.from(resultsById.values()).slice(0, limit);
+}
+
 /**
  * Estimation rapide du nombre de tokens (1 token ~ 4 caractères pour du français/anglais).
  * On vise une limite de sécurité de 25k tokens pour un quota TPM de 30k.
@@ -294,7 +341,8 @@ export async function analyzePLUZone(
   cityName?: string, 
   customPrompt?: string, 
   projectDescription?: string, 
-  parcelData?: any
+  parcelData?: any,
+  jurisdictionContext?: JurisdictionContext
 ): Promise<ZoneAnalysisResult & { digest?: ZoneDigest | null }> {
   const articleSchema = z.object({
     articleNumber: z.coerce.number(),
@@ -334,9 +382,10 @@ export async function analyzePLUZone(
     if (relevantText.length < 300 && cityName) {
       try {
         const fallbackQuery = `Zone ${zoneCode} règlement emprise hauteur recul stationnement implantation`;
-        let fallbackChunks = await queryRelevantChunks(fallbackQuery, {
-          municipalityId: cityName,
+        let fallbackChunks = await queryChunksWithMunicipalityAliases(fallbackQuery, {
+          cityName,
           zoneCode,
+          jurisdictionContext,
           limit: 20,
         });
         if (fallbackChunks.length === 0) {
@@ -693,8 +742,9 @@ export async function extractRelevantRules(
       const queryStr = `Règles d'urbanisme zone ${zoneCode}${topics.length > 0 ? `. Thématiques: ${topics.join(", ")}` : ""}`;
       console.log(`[pluAnalysis] Base IA semantic search: "${queryStr}" (${cityName})`);
 
-      let chunks = await queryRelevantChunks(queryStr, {
-        municipalityId: cityName,
+      let chunks = await queryChunksWithMunicipalityAliases(queryStr, {
+        cityName,
+        zoneCode,
         limit: 25,
         docTypes: docTypes.length > 0 ? docTypes : undefined,
         jurisdictionContext,
@@ -920,10 +970,11 @@ Structure du champ "data" (ET NON "analysis") :
     };
     
     const targetArticle = articleIdMap[topic];
-    const chunks = await queryRelevantChunks(topic, {
-      municipalityId: cityName || "UNKNOWN",
+    const chunks = await queryChunksWithMunicipalityAliases(topic, {
+      cityName,
       zoneCode,
       articleId: targetArticle,
+      docTypes: undefined,
       jurisdictionContext,
       includeTrace, // PROPAGATE TRACE FLAG
       limit: 5

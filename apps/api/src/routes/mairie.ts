@@ -17,6 +17,7 @@ import {
   ruleArticlesTable,
   zoneAnalysesTable
 } from "@workspace/db";
+import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
@@ -47,6 +48,8 @@ const __dirname = path.dirname(__filename);
 const PRIMARY_UPLOADS_DIR = path.resolve(__dirname, "../../uploads");
 const LEGACY_UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 const TOWN_HALL_UPLOAD_DIRS = Array.from(new Set([PRIMARY_UPLOADS_DIR, LEGACY_UPLOADS_DIR]));
+const TOWN_HALL_UPLOAD_SESSION_DIR = path.join(PRIMARY_UPLOADS_DIR, ".town-hall-upload-sessions");
+const RESUMABLE_UPLOAD_CHUNK_SIZE = 5 * 1024 * 1024;
 
 const router: IRouter = Router();
 
@@ -109,6 +112,39 @@ async function resolveInseeCode(commune: string): Promise<string | null> {
     )).limit(1);
   if (settings?.inseeCode) return settings.inseeCode;
   return null;
+}
+
+async function resolveAuthorizedTownHallCommune(userId: string, requestedCommune?: string) {
+  const [currentUser] = await db.select({ role: usersTable.role, communes: usersTable.communes })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+
+  const assignedCommunes = parseCommunes(currentUser?.communes);
+  const targetCommune = requestedCommune || assignedCommunes[0];
+
+  if (!targetCommune) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: { error: "BAD_REQUEST", message: "Commune requise pour indexer dans la Base IA." }
+    };
+  }
+
+  if (currentUser?.role !== "admin" && !assignedCommunes.some(c => c.toLowerCase() === targetCommune.toLowerCase())) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: { error: "FORBIDDEN", message: "Vous n'avez pas accès à cette commune." }
+    };
+  }
+
+  return {
+    ok: true as const,
+    currentUser,
+    assignedCommunes,
+    targetCommune,
+  };
 }
 
 // ─── DOSSIERS LIST ────────────────────────────────────────────────────────────
@@ -797,6 +833,18 @@ function ensureTownHallUploadsDir() {
   }
 }
 
+function ensureTownHallUploadSessionDir() {
+  ensureTownHallUploadsDir();
+  if (!fs.existsSync(TOWN_HALL_UPLOAD_SESSION_DIR)) {
+    fs.mkdirSync(TOWN_HALL_UPLOAD_SESSION_DIR, { recursive: true });
+  }
+}
+
+function resolveTownHallUploadSessionPath(sessionId: string): string {
+  ensureTownHallUploadSessionDir();
+  return path.join(TOWN_HALL_UPLOAD_SESSION_DIR, `${sessionId}.part`);
+}
+
 function resolveTownHallDocumentPath(id: string, fileName: string | null | undefined): string | null {
   if (!fileName) return null;
   const ext = path.extname(fileName || "");
@@ -854,6 +902,338 @@ function getTownHallDocumentAvailability(doc: {
     availabilityMessage,
   };
 }
+
+async function queueTownHallDocumentIndexing(args: {
+  docId: string;
+  persistentPath: string;
+  mimeType: string;
+  originalName: string;
+  targetCommune: string;
+  category?: string | null;
+  subCategory?: string | null;
+  documentType?: string | null;
+  requestedTags: string[];
+  zone?: string | null;
+}) {
+  setImmediate(async () => {
+    try {
+      const rawText = await extractTextFromFile(args.persistentPath, args.mimeType);
+      const suggestion = autoSuggestClassification(rawText, args.originalName);
+      const classification = normalizeTownHallClassification({
+        category: args.category || suggestion.category,
+        subCategory: args.subCategory || suggestion.subCategory,
+        documentType: args.documentType || suggestion.documentType,
+      });
+      const category = classification.category;
+      const subCategory = classification.subCategory;
+      const documentType = classification.documentType;
+      const tags = args.requestedTags.length > 0 ? args.requestedTags : suggestion.tags;
+
+      await db.update(townHallDocumentsTable)
+        .set({
+          rawText,
+          category,
+          subCategory,
+          documentType,
+          tags,
+          updatedAt: new Date()
+        })
+        .where(eq(townHallDocumentsTable.id, args.docId));
+
+      let canonicalType: any = "other";
+      const dt = (documentType || "").toLowerCase();
+      if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
+      else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
+      else if (dt.includes("annexe")) canonicalType = "plu_annexe";
+
+      const inseeCode = await resolveInseeCode(args.targetCommune);
+      const municipalityKey = inseeCode || args.targetCommune;
+      const uploadBatchId = crypto.randomUUID();
+      const fileHash = createHash("sha256").update(rawText).digest("hex");
+      const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+        batchId: uploadBatchId,
+        municipalityId: municipalityKey,
+        zoneCode: args.zone || null,
+        category: category || "REGULATORY",
+        subCategory: subCategory || "PLU",
+        type: canonicalType === "plu_reglement" || canonicalType === "plu_annexe" ? "plu" :
+          canonicalType === "oap" ? "oap" : "other",
+        fileName: path.basename(args.persistentPath),
+        fileHash,
+        status: "parsing",
+      }).returning();
+
+      await processDocumentForRAG(baseIADoc.id, municipalityKey, rawText, {
+        document_id: baseIADoc.id,
+        document_type: canonicalType,
+        pool_id: `${municipalityKey}-PLU-ACTIVE`,
+        status: "active",
+        commune: municipalityKey,
+        zone: args.zone || undefined,
+      } as any);
+
+      await db.update(baseIADocumentsTable)
+        .set({ status: "indexed" })
+        .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+      logger.debug("[mairie/upload] Successfully processed RAG", { docId: args.docId });
+    } catch (ragErr) {
+      logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: args.docId });
+    }
+  });
+}
+
+router.post("/documents/uploads/init", async (req: AuthRequest, res) => {
+  try {
+    const {
+      fileName,
+      fileSize,
+      mimeType,
+      category,
+      subCategory,
+      documentType,
+      commune,
+      zone,
+      title,
+      tags,
+    } = req.body as {
+      fileName?: string;
+      fileSize?: number;
+      mimeType?: string;
+      category?: string;
+      subCategory?: string;
+      documentType?: string;
+      commune?: string;
+      zone?: string;
+      title?: string;
+      tags?: unknown;
+    };
+
+    if (!fileName || typeof fileSize !== "number" || fileSize <= 0) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Nom et taille du fichier requis." });
+    }
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, commune);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const ext = path.extname(fileName || "") || ".pdf";
+    const storedFileName = `${crypto.randomUUID()}${ext}`;
+    const [session] = await db.insert(townHallUploadSessionsTable).values({
+      userId: req.user!.userId,
+      commune: access.targetCommune,
+      title: title || fileName,
+      originalFileName: fileName,
+      storedFileName,
+      mimeType: mimeType || "application/pdf",
+      fileSize,
+      receivedBytes: 0,
+      category: category || null,
+      subCategory: subCategory || null,
+      documentType: documentType || null,
+      zone: zone || null,
+      tags: parseDocumentTags(tags),
+      status: "uploading",
+    }).returning();
+
+    fs.writeFileSync(resolveTownHallUploadSessionPath(session.id), "");
+
+    return res.json({
+      sessionId: session.id,
+      chunkSize: RESUMABLE_UPLOAD_CHUNK_SIZE,
+      receivedBytes: 0,
+      totalBytes: session.fileSize,
+      status: session.status,
+      targetCommune: access.targetCommune,
+      fileName: session.originalFileName,
+    });
+  } catch (err) {
+    logger.error("[mairie/uploads/init]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible d'initialiser l'upload." });
+  }
+});
+
+router.get("/documents/uploads/:id", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const [session] = await db.select().from(townHallUploadSessionsTable)
+      .where(and(eq(townHallUploadSessionsTable.id, id as string), eq(townHallUploadSessionsTable.userId, req.user!.userId)))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Session d'upload introuvable." });
+    }
+
+    return res.json({
+      sessionId: session.id,
+      receivedBytes: session.receivedBytes,
+      totalBytes: session.fileSize,
+      status: session.status,
+      documentId: session.townHallDocumentId,
+      errorMessage: session.errorMessage,
+      commune: session.commune,
+      fileName: session.originalFileName,
+      category: session.category,
+      subCategory: session.subCategory,
+      documentType: session.documentType,
+      zone: session.zone,
+      mimeType: session.mimeType,
+      title: session.title,
+      tags: parseDocumentTags(session.tags),
+    });
+  } catch (err) {
+    logger.error("[mairie/uploads/status]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de recuperer la session d'upload." });
+  }
+});
+
+router.post("/documents/uploads/:id/chunk", upload.single("chunk"), async (req: AuthRequest, res) => {
+  const file = req.file;
+  try {
+    const { id } = req.params;
+    if (!file) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Chunk requis." });
+    }
+
+    const [session] = await db.select().from(townHallUploadSessionsTable)
+      .where(and(eq(townHallUploadSessionsTable.id, id as string), eq(townHallUploadSessionsTable.userId, req.user!.userId)))
+      .limit(1);
+
+    if (!session) {
+      try { fs.unlinkSync(file.path); } catch {}
+      return res.status(404).json({ error: "NOT_FOUND", message: "Session d'upload introuvable." });
+    }
+
+    if (session.status !== "uploading") {
+      try { fs.unlinkSync(file.path); } catch {}
+      return res.status(409).json({ error: "INVALID_STATUS", message: "Cette session n'accepte plus de chunks." });
+    }
+
+    const start = Number(req.body.start ?? "0");
+    if (!Number.isFinite(start) || start !== session.receivedBytes) {
+      try { fs.unlinkSync(file.path); } catch {}
+      return res.status(409).json({
+        error: "OFFSET_MISMATCH",
+        message: "Le decalage du chunk ne correspond pas a l'etat serveur.",
+        receivedBytes: session.receivedBytes,
+      });
+    }
+
+    fs.appendFileSync(resolveTownHallUploadSessionPath(session.id), fs.readFileSync(file.path));
+    const nextReceivedBytes = Math.min(session.receivedBytes + file.size, session.fileSize);
+    const nextStatus = nextReceivedBytes >= session.fileSize ? "uploaded" : "uploading";
+
+    await db.update(townHallUploadSessionsTable)
+      .set({
+        receivedBytes: nextReceivedBytes,
+        status: nextStatus,
+        updatedAt: new Date(),
+        errorMessage: null,
+      })
+      .where(eq(townHallUploadSessionsTable.id, session.id));
+
+    try { fs.unlinkSync(file.path); } catch {}
+
+    return res.json({
+      sessionId: session.id,
+      receivedBytes: nextReceivedBytes,
+      totalBytes: session.fileSize,
+      status: nextStatus,
+      done: nextReceivedBytes >= session.fileSize,
+    });
+  } catch (err) {
+    try { if (file?.path) fs.unlinkSync(file.path); } catch {}
+    logger.error("[mairie/uploads/chunk]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible d'enregistrer ce chunk." });
+  }
+});
+
+router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const [session] = await db.select().from(townHallUploadSessionsTable)
+      .where(and(eq(townHallUploadSessionsTable.id, id as string), eq(townHallUploadSessionsTable.userId, req.user!.userId)))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Session d'upload introuvable." });
+    }
+
+    if (session.status === "processing" || session.status === "completed") {
+      return res.json({
+        status: "processing",
+        message: "Document recu, indexation en cours.",
+        documentId: session.townHallDocumentId,
+      });
+    }
+
+    if (session.receivedBytes < session.fileSize) {
+      return res.status(409).json({
+        error: "UPLOAD_INCOMPLETE",
+        message: "Le fichier n'est pas encore entierement recu.",
+        receivedBytes: session.receivedBytes,
+        totalBytes: session.fileSize,
+      });
+    }
+
+    const sessionPath = resolveTownHallUploadSessionPath(session.id);
+    if (!fs.existsSync(sessionPath)) {
+      await db.update(townHallUploadSessionsTable)
+        .set({ status: "failed", errorMessage: "Fichier temporaire introuvable.", updatedAt: new Date() })
+        .where(eq(townHallUploadSessionsTable.id, session.id));
+      return res.status(500).json({ error: "FILE_MISSING", message: "Le fichier temporaire de cette session est introuvable." });
+    }
+
+    ensureTownHallUploadsDir();
+    const persistentPath = path.join(PRIMARY_UPLOADS_DIR, session.storedFileName);
+    fs.renameSync(sessionPath, persistentPath);
+
+    const [doc] = await db.insert(townHallDocumentsTable).values({
+      userId: req.user!.userId,
+      commune: session.commune,
+      title: session.title || session.originalFileName,
+      fileName: session.storedFileName,
+      rawText: "",
+      category: session.category || null,
+      subCategory: session.subCategory || null,
+      documentType: session.documentType || null,
+      tags: parseDocumentTags(session.tags),
+      zone: session.zone || null
+    }).returning();
+
+    await db.update(townHallUploadSessionsTable)
+      .set({
+        status: "processing",
+        townHallDocumentId: doc.id,
+        updatedAt: new Date(),
+        errorMessage: null,
+      })
+      .where(eq(townHallUploadSessionsTable.id, session.id));
+
+    res.json({ status: "processing", message: "Document recu, indexation en cours.", documentId: doc.id });
+
+    await queueTownHallDocumentIndexing({
+      docId: doc.id,
+      persistentPath,
+      mimeType: session.mimeType || "application/pdf",
+      originalName: session.originalFileName,
+      targetCommune: session.commune || "",
+      category: session.category,
+      subCategory: session.subCategory,
+      documentType: session.documentType,
+      requestedTags: parseDocumentTags(session.tags),
+      zone: session.zone,
+    });
+
+    await db.update(townHallUploadSessionsTable)
+      .set({ status: "completed", updatedAt: new Date() })
+      .where(eq(townHallUploadSessionsTable.id, session.id));
+    return;
+  } catch (err) {
+    logger.error("[mairie/uploads/complete]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de finaliser cet upload." });
+  }
+});
 
 router.get("/documents", async (req: AuthRequest, res) => {
   try {
@@ -1036,28 +1416,13 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
   try {
     const file = req.file;
     if (!file) { res.status(400).json({ error: "Fichier requis." }); return; }
-    
-    // Validate commune ownership
-    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
-      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-    
-    let targetCommune = req.body.commune as string | undefined;
-    if (!targetCommune && assignedCommunes.length > 0) {
-      targetCommune = assignedCommunes[0];
-    }
 
-    if (!targetCommune) {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
+    if (!access.ok) {
       try { fs.unlinkSync(file.path); } catch {}
-      res.status(400).json({ error: "BAD_REQUEST", message: "Commune requise pour indexer dans la Base IA." });
-      return;
+      return res.status(access.status).json(access.error);
     }
-    
-    if (currentUser[0]?.role !== "admin" && targetCommune && !assignedCommunes.some(c => c.toLowerCase() === targetCommune!.toLowerCase())) {
-      try { fs.unlinkSync(file.path); } catch {}
-      res.status(403).json({ error: "FORBIDDEN", message: "Vous n'avez pas accès à cette commune." });
-      return;
-    }
+    const targetCommune = access.targetCommune;
 
     const ext = path.extname(file.originalname || "") || ".pdf";
     const storedFileName = `${crypto.randomUUID()}${ext}`;
@@ -1090,70 +1455,17 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
 
     res.json({ status: "processing", message: "Document recu, indexation en cours.", documentId: doc.id });
 
-    setImmediate(async () => {
-      try {
-        const rawText = await extractTextFromFile(persistentPath, file.mimetype);
-        const suggestion = autoSuggestClassification(rawText, file.originalname);
-        const classification = normalizeTownHallClassification({
-          category: req.body.category || suggestion.category,
-          subCategory: req.body.subCategory || suggestion.subCategory,
-          documentType: req.body.documentType || suggestion.documentType,
-        });
-        const category = classification.category;
-        const subCategory = classification.subCategory;
-        const documentType = classification.documentType;
-        const tags = requestedTags.length > 0 ? requestedTags : suggestion.tags;
-
-        await db.update(townHallDocumentsTable)
-          .set({
-            rawText,
-            category,
-            subCategory,
-            documentType,
-            tags,
-            updatedAt: new Date()
-          })
-          .where(eq(townHallDocumentsTable.id, doc.id));
-
-        let canonicalType: any = "other";
-        const dt = (documentType || "").toLowerCase();
-        if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
-        else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
-        else if (dt.includes("annexe")) canonicalType = "plu_annexe";
-
-        const inseeCode = await resolveInseeCode(targetCommune!);
-        const municipalityKey = inseeCode || targetCommune!;
-        const uploadBatchId = crypto.randomUUID();
-        const fileHash = createHash("sha256").update(rawText).digest("hex");
-        const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
-          batchId: uploadBatchId,
-          municipalityId: municipalityKey,
-          zoneCode: req.body.zone || null,
-          category: category || "REGULATORY",
-          subCategory: subCategory || "PLU",
-          type: canonicalType === "plu_reglement" || canonicalType === "plu_annexe" ? "plu" :
-                canonicalType === "oap" ? "oap" : "other",
-          fileName: doc.fileName,
-          fileHash,
-          status: "parsing",
-        }).returning();
-
-        await processDocumentForRAG(baseIADoc.id, municipalityKey, rawText, {
-          document_id: baseIADoc.id,
-          document_type: canonicalType,
-          pool_id: `${municipalityKey}-PLU-ACTIVE`,
-          status: "active",
-          commune: municipalityKey,
-          zone: req.body.zone || undefined,
-        } as any);
-
-        await db.update(baseIADocumentsTable)
-          .set({ status: "indexed" })
-          .where(eq(baseIADocumentsTable.id, baseIADoc.id));
-        logger.debug("[mairie/upload] Successfully processed RAG", { docId: doc.id });
-      } catch (ragErr) {
-        logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: doc.id });
-      }
+    await queueTownHallDocumentIndexing({
+      docId: doc.id,
+      persistentPath,
+      mimeType: file.mimetype,
+      originalName: file.originalname,
+      targetCommune,
+      category: req.body.category || null,
+      subCategory: req.body.subCategory || null,
+      documentType: req.body.documentType || null,
+      requestedTags,
+      zone: req.body.zone || null,
     });
     return;
   } catch(err) {

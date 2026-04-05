@@ -817,7 +817,8 @@ export async function orchestrateDossierAnalysis(
         communeName,
         communeCustomPrompt,
         projectDescription,
-        parcelData
+        parcelData,
+        jurisdictionContext
       );
     } catch (pluErr) {
       logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data", { error: pluErr instanceof Error ? pluErr.message : String(pluErr) });

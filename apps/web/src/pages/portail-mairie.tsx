@@ -14,6 +14,7 @@ import { Loader2, Building, FileText, CheckCircle2, AlertTriangle, XCircle, Eye,
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from "@/components/ui/sheet";
+import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
@@ -860,11 +861,122 @@ const KB_STRUCTURE = {
   }
 };
 
+type ResumableTownHallUpload = {
+  sessionId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  commune: string;
+  category?: string;
+  subCategory?: string;
+  docType?: string;
+  title?: string;
+  zone?: string;
+  receivedBytes: number;
+  totalBytes: number;
+  chunkSize: number;
+  status: "uploading" | "uploaded" | "processing" | "completed" | "failed";
+  errorMessage?: string | null;
+  documentId?: string | null;
+  updatedAt: string;
+};
+
+const TOWN_HALL_UPLOADS_STORAGE_KEY = "town-hall-base-ia-uploads-v1";
+const TOWN_HALL_UPLOADS_DB_NAME = "heureka-town-hall-uploads";
+const TOWN_HALL_UPLOADS_STORE = "files";
+const DEFAULT_TOWN_HALL_CHUNK_SIZE = 5 * 1024 * 1024;
+
+function readPersistedTownHallUploads(): ResumableTownHallUpload[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TOWN_HALL_UPLOADS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePersistedTownHallUploads(items: ResumableTownHallUpload[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TOWN_HALL_UPLOADS_STORAGE_KEY, JSON.stringify(items));
+}
+
+function upsertPersistedTownHallUpload(item: ResumableTownHallUpload) {
+  const next = readPersistedTownHallUploads();
+  const idx = next.findIndex((entry) => entry.sessionId === item.sessionId);
+  if (idx >= 0) next[idx] = item;
+  else next.push(item);
+  writePersistedTownHallUploads(next);
+}
+
+function removePersistedTownHallUpload(sessionId: string) {
+  writePersistedTownHallUploads(readPersistedTownHallUploads().filter((item) => item.sessionId !== sessionId));
+}
+
+function openTownHallUploadsDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(TOWN_HALL_UPLOADS_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(TOWN_HALL_UPLOADS_STORE)) {
+        db.createObjectStore(TOWN_HALL_UPLOADS_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB unavailable"));
+  });
+}
+
+async function saveTownHallUploadBlob(sessionId: string, file: Blob) {
+  const db = await openTownHallUploadsDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(TOWN_HALL_UPLOADS_STORE, "readwrite");
+    tx.objectStore(TOWN_HALL_UPLOADS_STORE).put(file, sessionId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Blob storage failed"));
+  });
+  db.close();
+}
+
+async function loadTownHallUploadBlob(sessionId: string): Promise<Blob | null> {
+  const db = await openTownHallUploadsDb();
+  const result = await new Promise<Blob | null>((resolve, reject) => {
+    const tx = db.transaction(TOWN_HALL_UPLOADS_STORE, "readonly");
+    const request = tx.objectStore(TOWN_HALL_UPLOADS_STORE).get(sessionId);
+    request.onsuccess = () => resolve((request.result as Blob | undefined) ?? null);
+    request.onerror = () => reject(request.error || new Error("Blob read failed"));
+  });
+  db.close();
+  return result;
+}
+
+async function removeTownHallUploadBlob(sessionId: string) {
+  const db = await openTownHallUploadsDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(TOWN_HALL_UPLOADS_STORE, "readwrite");
+    tx.objectStore(TOWN_HALL_UPLOADS_STORE).delete(sessionId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Blob cleanup failed"));
+  });
+  db.close();
+}
+
+function formatUploadBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  return `${bytes} o`;
+}
+
 function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
+  const [openItems, setOpenItems] = useState<string[]>([]);
+  const [activeUploads, setActiveUploads] = useState<ResumableTownHallUpload[]>([]);
+  const runningUploadIdsRef = useRef<Set<string>>(new Set());
 
   const { data: pluDocsData, isLoading: loadingPluDocs } = useQuery<{ documents: any[] }>({
     queryKey: ["mairie-documents", currentCommune],
@@ -880,42 +992,176 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     });
   };
 
-  const uploadMutation = useMutation({
-    mutationFn: async ({ files, category, subCategory, docType }: { files: File[], category?: string, subCategory?: string, docType?: string }) => {
-      const results = [];
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append("file", file);
-        if (category && category !== "auto") formData.append("category", category);
-        if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
-        if (docType && docType !== "auto") formData.append("documentType", docType);
-        if (currentCommune !== "all") formData.append("commune", currentCommune);
+  const syncUploadState = (item: ResumableTownHallUpload) => {
+    upsertPersistedTownHallUpload(item);
+    setActiveUploads(readPersistedTownHallUploads());
+  };
 
-        const r = await fetch("/api/mairie/documents", { method: "POST", body: formData });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.message || "Erreur upload");
-        results.push(data);
+  const clearUploadState = async (sessionId: string) => {
+    removePersistedTownHallUpload(sessionId);
+    runningUploadIdsRef.current.delete(sessionId);
+    setActiveUploads(readPersistedTownHallUploads());
+    await removeTownHallUploadBlob(sessionId).catch(() => undefined);
+  };
+
+  const fetchServerUploadState = async (sessionId: string): Promise<ResumableTownHallUpload | null> => {
+    const response = await fetch(`/api/mairie/documents/uploads/${sessionId}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+    return {
+      sessionId: data.sessionId,
+      fileName: data.fileName,
+      fileSize: data.totalBytes,
+      mimeType: data.mimeType || "application/pdf",
+      commune: data.commune,
+      category: data.category || undefined,
+      subCategory: data.subCategory || undefined,
+      docType: data.documentType || undefined,
+      title: data.title || data.fileName,
+      zone: data.zone || undefined,
+      receivedBytes: data.receivedBytes || 0,
+      totalBytes: data.totalBytes || 0,
+      chunkSize: DEFAULT_TOWN_HALL_CHUNK_SIZE,
+      status: data.status || "uploading",
+      errorMessage: data.errorMessage || null,
+      documentId: data.documentId || null,
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
+  const resumeUpload = async (session: ResumableTownHallUpload, sourceBlob?: Blob | null) => {
+    if (runningUploadIdsRef.current.has(session.sessionId)) return;
+    runningUploadIdsRef.current.add(session.sessionId);
+
+    try {
+      const serverSession = await fetchServerUploadState(session.sessionId);
+      let currentSession = serverSession || session;
+      syncUploadState(currentSession);
+
+      if (currentSession.status === "processing" || currentSession.status === "completed") {
+        await clearUploadState(currentSession.sessionId);
+        scheduleDocumentsRefresh();
+        return;
       }
-      return results;
-    },
-    onSuccess: (data, variables) => {
-      if (variables.category && variables.subCategory && variables.docType) {
-        setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+
+      const fileBlob = sourceBlob || await loadTownHallUploadBlob(currentSession.sessionId);
+      if (!fileBlob) {
+        currentSession = {
+          ...currentSession,
+          status: "failed",
+          errorMessage: "Le navigateur n'a plus le fichier local. Reimportez-le pour reprendre l'upload.",
+          updatedAt: new Date().toISOString(),
+        };
+        syncUploadState(currentSession);
+        return;
       }
-      scheduleDocumentsRefresh();
-      const count = Array.isArray(data) ? data.length : variables.files.length;
-      toast({
-        title: count > 1 ? `${count} documents recus` : "Document recu",
-        description: "Indexation en cours. La liste se mettra à jour automatiquement."
+
+      while (currentSession.receivedBytes < currentSession.totalBytes) {
+        const nextChunk = fileBlob.slice(
+          currentSession.receivedBytes,
+          currentSession.receivedBytes + (currentSession.chunkSize || DEFAULT_TOWN_HALL_CHUNK_SIZE),
+        );
+        const formData = new FormData();
+        formData.append("chunk", new File([nextChunk], currentSession.fileName, { type: currentSession.mimeType }));
+        formData.append("start", String(currentSession.receivedBytes));
+
+        const response = await fetch(`/api/mairie/documents/uploads/${currentSession.sessionId}/chunk`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          if (data.error === "OFFSET_MISMATCH") {
+            const reconciledSession = await fetchServerUploadState(currentSession.sessionId);
+            if (!reconciledSession) throw new Error("Impossible de resynchroniser l'upload.");
+            currentSession = reconciledSession;
+            syncUploadState(currentSession);
+            continue;
+          }
+          throw new Error(data.message || "Erreur lors de l'envoi d'un fragment.");
+        }
+
+        currentSession = {
+          ...currentSession,
+          receivedBytes: data.receivedBytes || currentSession.receivedBytes,
+          totalBytes: data.totalBytes || currentSession.totalBytes,
+          status: data.status || currentSession.status,
+          updatedAt: new Date().toISOString(),
+        };
+        syncUploadState(currentSession);
+      }
+
+      const completeResponse = await fetch(`/api/mairie/documents/uploads/${currentSession.sessionId}/complete`, {
+        method: "POST",
       });
-    },
-    onError: (err: any, variables) => {
-      if (variables.category && variables.subCategory && variables.docType) {
-        setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+      const completeData = await completeResponse.json().catch(() => ({}));
+      if (!completeResponse.ok) {
+        throw new Error(completeData.message || "Erreur lors de la finalisation de l'upload.");
       }
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+
+      toast({
+        title: "Document recu",
+        description: `${currentSession.fileName} est maintenant cote serveur. L'indexation continue meme si vous quittez cette page.`,
+      });
+      await clearUploadState(currentSession.sessionId);
+      scheduleDocumentsRefresh();
+    } catch (err: any) {
+      const failedSession: ResumableTownHallUpload = {
+        ...session,
+        status: "failed",
+        errorMessage: err?.message || "Upload interrompu.",
+        updatedAt: new Date().toISOString(),
+      };
+      syncUploadState(failedSession);
+      toast({ title: "Upload interrompu", description: failedSession.errorMessage || "Une erreur est survenue.", variant: "destructive" });
+    } finally {
+      runningUploadIdsRef.current.delete(session.sessionId);
     }
-  });
+  };
+
+  const startUpload = async ({ files, category, subCategory, docType }: { files: File[], category?: string, subCategory?: string, docType?: string }) => {
+    for (const file of files) {
+      const initResponse = await fetch("/api/mairie/documents/uploads/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type || "application/pdf",
+          category,
+          subCategory,
+          documentType: docType,
+          commune: currentCommune !== "all" ? currentCommune : undefined,
+        }),
+      });
+      const initData = await initResponse.json().catch(() => ({}));
+      if (!initResponse.ok) {
+        throw new Error(initData.message || "Impossible d'initialiser l'upload.");
+      }
+
+      const uploadSession: ResumableTownHallUpload = {
+        sessionId: initData.sessionId,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || "application/pdf",
+        commune: initData.targetCommune || currentCommune,
+        category,
+        subCategory,
+        docType,
+        title: file.name,
+        receivedBytes: initData.receivedBytes || 0,
+        totalBytes: initData.totalBytes || file.size,
+        chunkSize: initData.chunkSize || DEFAULT_TOWN_HALL_CHUNK_SIZE,
+        status: initData.status || "uploading",
+        updatedAt: new Date().toISOString(),
+      };
+
+      await saveTownHallUploadBlob(uploadSession.sessionId, file);
+      syncUploadState(uploadSession);
+      await resumeUpload(uploadSession, file);
+    }
+  };
 
   const updateNoteMutation = useMutation({
     mutationFn: async ({ id, note }: { id: string, note: string }) => {
@@ -967,7 +1213,13 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     if (!files || files.length === 0) return;
     
     setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: true }));
-    uploadMutation.mutate({ files: Array.from(files), category, subCategory, docType });
+    void startUpload({ files: Array.from(files), category, subCategory, docType })
+      .catch((err) => {
+        toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      })
+      .finally(() => {
+        setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: false }));
+      });
     e.currentTarget.value = "";
   };
 
@@ -982,6 +1234,56 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   }, [pluDocsData]);
 
   const totalDocuments = pluDocsData?.documents?.length ?? 0;
+  const allDocs = pluDocsData?.documents ?? [];
+
+  const categorySummaries = useMemo(() => {
+    return Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => {
+      const count = Object.entries(cat.subCategories).reduce((sum, [, sub]) => {
+        return sum + sub.types.reduce((typeSum, type) => {
+          return typeSum + (groupedDocs[`${catKey}-${Object.keys(cat.subCategories).find((key) => cat.subCategories[key as keyof typeof cat.subCategories] === sub)}-${type}`] || []).length;
+        }, 0);
+      }, 0);
+
+      return {
+        value: `item-${idx}`,
+        key: catKey,
+        label: cat.label,
+        count,
+      };
+    });
+  }, [groupedDocs]);
+
+  useEffect(() => {
+    const withDocs = categorySummaries.filter((item) => item.count > 0).map((item) => item.value);
+    setOpenItems(withDocs.length > 0 ? withDocs : ["item-0", "item-1"]);
+  }, [categorySummaries]);
+
+  useEffect(() => {
+    setActiveUploads(readPersistedTownHallUploads());
+  }, []);
+
+  useEffect(() => {
+    setActiveUploads(readPersistedTownHallUploads());
+  }, [currentCommune]);
+
+  useEffect(() => {
+    const pendingUploads = readPersistedTownHallUploads().filter((item) => {
+      if (currentCommune === "all") return true;
+      return item.commune?.toLowerCase() === currentCommune.toLowerCase();
+    });
+
+    pendingUploads.forEach((item) => {
+      if (item.status === "uploading" || item.status === "uploaded") {
+        void resumeUpload(item);
+      }
+      if (item.status === "processing" || item.status === "completed") {
+        void clearUploadState(item.sessionId);
+      }
+    });
+  }, [currentCommune]);
+
+  const visibleUploads = activeUploads.filter((item) => currentCommune === "all" || item.commune?.toLowerCase() === currentCommune.toLowerCase());
+  const hasRunningUploads = visibleUploads.some((item) => ["uploading", "uploaded", "processing"].includes(item.status));
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -994,7 +1296,9 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         onChange={(e) => {
           const files = e.target.files;
           if (!files || files.length === 0) return;
-          uploadMutation.mutate({ files: Array.from(files) });
+          void startUpload({ files: Array.from(files) }).catch((err) => {
+            toast({ title: "Erreur", description: err.message, variant: "destructive" });
+          });
           e.currentTarget.value = "";
         }}
       />
@@ -1015,7 +1319,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             variant="outline"
             className="gap-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/5 h-10 px-4"
             onClick={() => document.getElementById('batch-upload')?.click()}
-            disabled={uploadMutation.isPending}
+            disabled={hasRunningUploads || currentCommune === "all"}
           >
             <UploadCloud className="w-4 h-4 text-primary" />
             Importer des documents
@@ -1066,15 +1370,108 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           <Button
             className="gap-2 h-10 px-4"
             onClick={() => document.getElementById("batch-upload")?.click()}
-            disabled={uploadMutation.isPending || currentCommune === "all"}
+            disabled={hasRunningUploads || currentCommune === "all"}
           >
-            {uploadMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+            {hasRunningUploads ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
             Importer mes documents PLU
           </Button>
         </CardContent>
       </Card>
 
-      <Accordion type="multiple" defaultValue={["item-0", "item-1"]} className="space-y-4">
+      {visibleUploads.length > 0 && (
+        <Card className="border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Uploads en cours ou reprenables ({visibleUploads.length})
+            </CardTitle>
+            <CardDescription>
+              Une fois le fichier entierement recu par le serveur, l'indexation continue cote API. Si tu reviens sur cette page apres un refresh, l'upload reprend automatiquement depuis le dernier chunk valide.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {visibleUploads.map((upload) => {
+              const progress = upload.totalBytes > 0 ? Math.min(100, Math.round((upload.receivedBytes / upload.totalBytes) * 100)) : 0;
+              const isRecoverable = upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded";
+              return (
+                <div key={upload.sessionId} className="rounded-xl border bg-background p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{upload.fileName}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {upload.commune} · {formatUploadBytes(upload.receivedBytes)} / {formatUploadBytes(upload.totalBytes)}
+                      </p>
+                    </div>
+                    <Badge variant={upload.status === "failed" ? "destructive" : "secondary"} className="shrink-0">
+                      {upload.status === "failed" ? "Interrompu" : upload.status === "processing" ? "Indexation" : `${progress}%`}
+                    </Badge>
+                  </div>
+                  <Progress value={upload.status === "processing" ? 100 : progress} className="h-2" />
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-muted-foreground">
+                      {upload.errorMessage || (upload.status === "processing"
+                        ? "Le fichier est cote serveur. L'indexation peut continuer meme si tu quittes la page."
+                        : "Le navigateur memorise le fichier pour reprendre l'envoi apres refresh.")}
+                    </p>
+                    {isRecoverable && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void resumeUpload(upload)}
+                        disabled={runningUploadIdsRef.current.has(upload.sessionId)}
+                      >
+                        Reprendre
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {allDocs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FileText className="w-4 h-4 text-primary" />
+              Documents indexes ({allDocs.length})
+            </CardTitle>
+            <CardDescription>
+              Chaque document compte dans le total ci-dessus et reste ouvrable ici, meme s'il est range dans une categorie repliee.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {allDocs.map((doc) => (
+              <div
+                key={doc.id}
+                className="flex items-center justify-between rounded-lg border bg-background px-3 py-2 cursor-pointer hover:border-primary/30 transition-colors"
+                onClick={() => setSelectedDoc(doc)}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{doc.title}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {doc.category} / {doc.subCategory} / {doc.documentType}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {doc.availabilityStatus !== "indexed" && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {doc.availabilityStatus}
+                    </Badge>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedDoc(doc); }}>
+                    Voir
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <Accordion type="multiple" value={openItems} onValueChange={setOpenItems} className="space-y-4">
         {Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => (
           <AccordionItem key={catKey} value={`item-${idx}`} className="border rounded-xl bg-card overflow-hidden shadow-sm">
             <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors border-b">
@@ -1083,7 +1480,12 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   <cat.icon className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="font-bold text-base">{cat.label}</div>
+                  <div className="font-bold text-base flex items-center gap-2">
+                    {cat.label}
+                    {categorySummaries[idx]?.count > 0 && (
+                      <Badge variant="secondary" className="text-[10px]">{categorySummaries[idx].count}</Badge>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground font-normal">Classification IA activée</div>
                 </div>
               </div>
