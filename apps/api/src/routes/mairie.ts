@@ -26,6 +26,7 @@ import multer from "multer";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { fileURLToPath } from "url";
 import { VisionService } from "../services/visionService.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { MessagingService } from "../services/messagingService.js";
@@ -40,6 +41,12 @@ const upload = multer({
   dest: os.tmpdir(),
   limits: { fileSize: 100 * 1024 * 1024 }
 });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PRIMARY_UPLOADS_DIR = path.resolve(__dirname, "../../uploads");
+const LEGACY_UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
+const TOWN_HALL_UPLOAD_DIRS = Array.from(new Set([PRIMARY_UPLOADS_DIR, LEGACY_UPLOADS_DIR]));
 
 const router: IRouter = Router();
 
@@ -683,6 +690,38 @@ interface SuggestedClassification {
   tags: string[];
 }
 
+function normalizeTownHallClassification(input: {
+  category?: string | null;
+  subCategory?: string | null;
+  documentType?: string | null;
+}) {
+  const category = (input.category || "").trim();
+  const subCategory = (input.subCategory || "").trim();
+  const documentType = (input.documentType || "").trim();
+
+  if (!category || category === "OTHER") {
+    return {
+      category: "ANNEXES",
+      subCategory: "MISC",
+      documentType: documentType || "Other",
+    };
+  }
+
+  if (category === "ANNEXES" && !subCategory) {
+    return {
+      category,
+      subCategory: "MISC",
+      documentType: documentType || "Other",
+    };
+  }
+
+  return {
+    category,
+    subCategory,
+    documentType,
+  };
+}
+
 function autoSuggestClassification(text: string, fileName: string): SuggestedClassification {
   const content = (text + " " + fileName).toLowerCase();
   
@@ -728,7 +767,7 @@ function autoSuggestClassification(text: string, fileName: string): SuggestedCla
   }
 
   return {
-    category: "OTHER",
+    category: "ANNEXES",
     subCategory: "MISC",
     documentType: "Other",
     tags: []
@@ -752,15 +791,23 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
   return fs.readFileSync(filePath, "utf-8");
 }
 
+function ensureTownHallUploadsDir() {
+  if (!fs.existsSync(PRIMARY_UPLOADS_DIR)) {
+    fs.mkdirSync(PRIMARY_UPLOADS_DIR, { recursive: true });
+  }
+}
+
 function resolveTownHallDocumentPath(id: string, fileName: string | null | undefined): string | null {
   if (!fileName) return null;
-  const uploadDir = path.resolve(process.cwd(), "uploads");
-  const primaryPath = path.join(uploadDir, fileName);
-  if (fs.existsSync(primaryPath)) return primaryPath;
-
   const ext = path.extname(fileName || "");
-  const legacyPath = path.join(uploadDir, `${id}${ext}`);
-  return fs.existsSync(legacyPath) ? legacyPath : null;
+  for (const uploadDir of TOWN_HALL_UPLOAD_DIRS) {
+    const primaryPath = path.join(uploadDir, fileName);
+    if (fs.existsSync(primaryPath)) return primaryPath;
+
+    const legacyPath = path.join(uploadDir, `${id}${ext}`);
+    if (fs.existsSync(legacyPath)) return legacyPath;
+  }
+  return null;
 }
 
 function hasUsableTownHallText(rawText: string | null | undefined): boolean {
@@ -829,15 +876,20 @@ router.get("/documents", async (req: AuthRequest, res) => {
     
     const filteredDocs = docsForCommune.map(d => {
       const availability = getTownHallDocumentAvailability(d);
+      const classification = normalizeTownHallClassification({
+        category: d.category,
+        subCategory: d.subCategory,
+        documentType: d.documentType,
+      });
       return {
         id: d.id,
         title: d.title,
         fileName: d.fileName,
         createdAt: d.createdAt,
         commune: d.commune,
-        category: d.category,
-        subCategory: d.subCategory,
-        documentType: d.documentType,
+        category: classification.category,
+        subCategory: classification.subCategory,
+        documentType: classification.documentType,
         explanatoryNote: d.explanatoryNote,
         tags: d.tags,
         hasStoredFile: availability.hasStoredFile,
@@ -894,16 +946,35 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             continue;
           }
 
-          const rawText = await extractTextFromFile(file.path, file.mimetype);
+          const ext = path.extname(file.originalname || "") || ".pdf";
+          const storedFileName = `${crypto.randomUUID()}${ext}`;
+          ensureTownHallUploadsDir();
+          const persistentPath = path.join(PRIMARY_UPLOADS_DIR, storedFileName);
+
+          try {
+            fs.copyFileSync(file.path, persistentPath);
+          } catch (copyErr) {
+            logger.error("[mairie/batch] Failed to persist batch upload", copyErr, { fileName: file.originalname });
+            try { fs.unlinkSync(file.path); } catch {}
+            results.push({ fileName: file.originalname, status: "failed_persist" });
+            continue;
+          }
+
+          const rawText = await extractTextFromFile(persistentPath, file.mimetype);
           const suggestion = autoSuggestClassification(rawText, file.originalname);
-          const category = req.body.category || suggestion.category;
-          const subCategory = req.body.subCategory || suggestion.subCategory;
+          const classification = normalizeTownHallClassification({
+            category: req.body.category || suggestion.category,
+            subCategory: req.body.subCategory || suggestion.subCategory,
+            documentType: req.body.documentType || suggestion.documentType,
+          });
+          const category = classification.category;
+          const subCategory = classification.subCategory;
           const tags = req.body.tags ? JSON.parse(req.body.tags) : suggestion.tags;
 
           const [doc] = await db.insert(baseIADocumentsTable).values({
             batchId: batch.id,
             municipalityId: targetCommune || null,
-            fileName: file.originalname,
+            fileName: storedFileName,
             fileHash: hash,
             status: "indexed",
             type: req.body.type || "plu",
@@ -917,11 +988,11 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             userId: req.user!.userId,
             commune: targetCommune || null,
             title: file.originalname,
-            fileName: file.originalname,
+            fileName: storedFileName,
             rawText: rawText,
             category,
             subCategory,
-            documentType: req.body.documentType || suggestion.documentType,
+            documentType: classification.documentType,
             tags,
             zone: req.body.zone || null
           });
@@ -990,9 +1061,8 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
 
     const ext = path.extname(file.originalname || "") || ".pdf";
     const storedFileName = `${crypto.randomUUID()}${ext}`;
-    const uploadDir = path.resolve(process.cwd(), "uploads");
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    const persistentPath = path.join(uploadDir, storedFileName);
+    ensureTownHallUploadsDir();
+    const persistentPath = path.join(PRIMARY_UPLOADS_DIR, storedFileName);
 
     try {
       fs.copyFileSync(file.path, persistentPath);
@@ -1024,9 +1094,14 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
       try {
         const rawText = await extractTextFromFile(persistentPath, file.mimetype);
         const suggestion = autoSuggestClassification(rawText, file.originalname);
-        const category = req.body.category || suggestion.category;
-        const subCategory = req.body.subCategory || suggestion.subCategory;
-        const documentType = req.body.documentType || suggestion.documentType;
+        const classification = normalizeTownHallClassification({
+          category: req.body.category || suggestion.category,
+          subCategory: req.body.subCategory || suggestion.subCategory,
+          documentType: req.body.documentType || suggestion.documentType,
+        });
+        const category = classification.category;
+        const subCategory = classification.subCategory;
+        const documentType = classification.documentType;
         const tags = requestedTags.length > 0 ? requestedTags : suggestion.tags;
 
         await db.update(townHallDocumentsTable)
@@ -1121,10 +1196,9 @@ router.delete("/documents", async (req: AuthRequest, res) => {
       .where(eq(sql`lower(${baseIADocumentsTable.municipalityId})`, requestedLower));
 
     // Cleanup persisted files if present
-    const uploadDir = path.resolve(process.cwd(), "uploads");
     for (const file of docsToDelete) {
-      const p = path.join(uploadDir, file.fileName || "");
-      if (file.fileName && fs.existsSync(p)) {
+      const p = resolveTownHallDocumentPath(file.id, file.fileName);
+      if (p && fs.existsSync(p)) {
         try { fs.unlinkSync(p); } catch {}
       }
     }
@@ -1157,9 +1231,8 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
 
     await db.delete(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id));
 
-    const uploadDir = path.resolve(process.cwd(), "uploads");
-    const filePath = path.join(uploadDir, doc.fileName || "");
-    if (doc.fileName && fs.existsSync(filePath)) {
+    const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
+    if (filePath && fs.existsSync(filePath)) {
       try { fs.unlinkSync(filePath); } catch {}
     }
 
@@ -1200,14 +1273,10 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
-    // 2. Locate the file in physical storage (uploads/)
-    const uploadDir = path.resolve(process.cwd(), "uploads");
-    const primaryPath = path.join(uploadDir, doc.fileName);
-    const ext = path.extname(doc.fileName || "");
-    const legacyPath = path.join(uploadDir, `${id}${ext}`);
-    const filePath = fs.existsSync(primaryPath) ? primaryPath : legacyPath;
+    // 2. Locate the file in physical storage
+    const filePath = resolveTownHallDocumentPath(id, doc.fileName);
 
-    if (!fs.existsSync(filePath)) {
+    if (!filePath || !fs.existsSync(filePath)) {
       console.error(`[mairie/view] Physical file missing in uploads/ for: ${doc.fileName}`);
       return res.status(404).json({ error: "FILE_NOT_FOUND_ON_DISK" });
     }

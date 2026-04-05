@@ -42,31 +42,33 @@ export class NormalizationService {
     };
 
     for (const art of articles) {
-      const artNum = art.article.toString();
+      const rawArticle = (art as any)?.article ?? (art as any)?.articleNumber ?? (art as any)?.title ?? null;
+      const artNum = rawArticle == null ? "" : String(rawArticle).replace(/[^0-9]/g, "");
+      const operationalRule = this.resolveOperationalRule(art);
       
       // Article 6: Position by roads
       if (artNum === "6") {
-        this.extractNumbers(art.operational_rule).forEach(n => params.road_setback.push(n));
+        this.extractNumbers(operationalRule).forEach(n => params.road_setback.push(n));
       }
       // Article 7: Side boundaries
       if (artNum === "7") {
-        this.extractNumbers(art.operational_rule).forEach(n => params.boundary_setback.push(n));
+        this.extractNumbers(operationalRule).forEach(n => params.boundary_setback.push(n));
       }
       // Article 9: Footprint
       if (artNum === "9") {
-        this.extractNumbers(art.operational_rule).forEach(n => params.max_footprint.push(n));
+        this.extractNumbers(operationalRule).forEach(n => params.max_footprint.push(n));
       }
       // Article 10: Height
       if (artNum === "10") {
-        this.extractNumbers(art.operational_rule).forEach(n => params.max_height.push(n));
+        this.extractNumbers(operationalRule).forEach(n => params.max_height.push(n));
       }
       // Article 12: Parking
       if (artNum === "12") {
-        params.parking_requirements.push(art.operational_rule);
+        if (operationalRule) params.parking_requirements.push(operationalRule);
       }
       // Article 13: Greenery
       if (artNum === "13") {
-        params.landscaping_requirements.push(art.operational_rule);
+        if (operationalRule) params.landscaping_requirements.push(operationalRule);
       }
     }
 
@@ -86,7 +88,20 @@ export class NormalizationService {
     return params;
   }
 
-  private static extractNumbers(text: string): number[] {
+  private static resolveOperationalRule(article: PluRule | Record<string, unknown>): string {
+    const candidates = [
+      (article as any)?.operational_rule,
+      (article as any)?.sourceText,
+      (article as any)?.summary,
+      (article as any)?.interpretation,
+      (article as any)?.impactText,
+    ];
+    const firstText = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
+    return typeof firstText === "string" ? firstText : "";
+  }
+
+  private static extractNumbers(text?: string | null): number[] {
+    if (!text) return [];
     const matches = text.match(/\d+([.,]\d+)?/g);
     if (!matches) return [];
     return matches.map(m => parseFloat(m.replace(",", ".")));

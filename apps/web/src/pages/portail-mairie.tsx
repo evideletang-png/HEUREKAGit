@@ -838,6 +838,11 @@ const KB_STRUCTURE = {
         label: "Patrimoine & Environnement",
         subLabel: "ABF, Monuments, Sites classés",
         types: ["ABF perimeter", "Monuments historiques", "Site classé", "ZPPAUP/AVAP"]
+      },
+      MISC: {
+        label: "Divers",
+        subLabel: "Documents non classes automatiquement",
+        types: ["Other"]
       }
     }
   },
@@ -876,25 +881,33 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   };
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ file, category, subCategory, docType }: { file: File, category?: string, subCategory?: string, docType?: string }) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      if (category && category !== "auto") formData.append("category", category);
-      if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
-      if (docType && docType !== "auto") formData.append("documentType", docType);
-      if (currentCommune !== "all") formData.append("commune", currentCommune);
-      
-      const r = await fetch("/api/mairie/documents", { method: "POST", body: formData });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.message || "Erreur upload");
-      return data;
+    mutationFn: async ({ files, category, subCategory, docType }: { files: File[], category?: string, subCategory?: string, docType?: string }) => {
+      const results = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (category && category !== "auto") formData.append("category", category);
+        if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
+        if (docType && docType !== "auto") formData.append("documentType", docType);
+        if (currentCommune !== "all") formData.append("commune", currentCommune);
+
+        const r = await fetch("/api/mairie/documents", { method: "POST", body: formData });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.message || "Erreur upload");
+        results.push(data);
+      }
+      return results;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (data, variables) => {
       if (variables.category && variables.subCategory && variables.docType) {
         setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
       }
       scheduleDocumentsRefresh();
-      toast({ title: "Document reçu", description: "Indexation en cours. La liste se mettra à jour automatiquement." });
+      const count = Array.isArray(data) ? data.length : variables.files.length;
+      toast({
+        title: count > 1 ? `${count} documents recus` : "Document recu",
+        description: "Indexation en cours. La liste se mettra à jour automatiquement."
+      });
     },
     onError: (err: any, variables) => {
       if (variables.category && variables.subCategory && variables.docType) {
@@ -950,22 +963,13 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: string, subCategory: string, docType: string) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
     
     setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: true }));
-    uploadMutation.mutate({ file, category, subCategory, docType });
+    uploadMutation.mutate({ files: Array.from(files), category, subCategory, docType });
+    e.currentTarget.value = "";
   };
-
-  const validSlotKeys = useMemo(() => {
-    return new Set(
-      Object.entries(KB_STRUCTURE).flatMap(([catKey, cat]) =>
-        Object.entries(cat.subCategories).flatMap(([subKey, sub]) =>
-          sub.types.map((type) => `${catKey}-${subKey}-${type}`)
-        )
-      )
-    );
-  }, []);
 
   const groupedDocs = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -976,13 +980,6 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     });
     return map;
   }, [pluDocsData]);
-
-  const unmatchedDocs = useMemo(() => {
-    return (pluDocsData?.documents || []).filter((doc) => {
-      const key = `${doc.category}-${doc.subCategory}-${doc.documentType}`;
-      return !validSlotKeys.has(key);
-    });
-  }, [pluDocsData, validSlotKeys]);
 
   const totalDocuments = pluDocsData?.documents?.length ?? 0;
 
@@ -997,9 +994,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         onChange={(e) => {
           const files = e.target.files;
           if (!files || files.length === 0) return;
-          Array.from(files).forEach(file => {
-            uploadMutation.mutate({ file });
-          });
+          uploadMutation.mutate({ files: Array.from(files) });
           e.currentTarget.value = "";
         }}
       />
@@ -1079,35 +1074,6 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </CardContent>
       </Card>
 
-      {unmatchedDocs.length > 0 && (
-        <Card className="border-amber-500/20 bg-amber-500/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-              Documents hors classification ({unmatchedDocs.length})
-            </CardTitle>
-            <CardDescription>
-              Ces documents existent bien mais ne correspondent à aucune case du tableau ci-dessous.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {unmatchedDocs.slice(0, 6).map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold truncate">{doc.title}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    {doc.category || "—"} / {doc.subCategory || "—"} / {doc.documentType || "—"}
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedDoc(doc)}>Voir</Button>
-              </div>
-            ))}
-            {unmatchedDocs.length > 6 && (
-              <p className="text-[11px] text-muted-foreground">+ {unmatchedDocs.length - 6} autre(s) document(s).</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
       <Accordion type="multiple" defaultValue={["item-0", "item-1"]} className="space-y-4">
         {Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => (
           <AccordionItem key={catKey} value={`item-${idx}`} className="border rounded-xl bg-card overflow-hidden shadow-sm">
@@ -1152,6 +1118,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                   <input 
                                     type="file" 
                                     className="absolute inset-0 opacity-0 cursor-pointer" 
+                                    multiple
                                     accept=".pdf,image/*" 
                                     onChange={(e) => handleFileUpload(e, catKey, subKey, type)}
                                     disabled={isUploading}
@@ -1235,7 +1202,13 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="h-8 gap-2" onClick={() => window.open(`/api/mairie/documents/${selectedDoc?.id}/view`, '_blank')}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-2"
+                  onClick={() => window.open(`/api/mairie/documents/${selectedDoc?.id}/view`, '_blank')}
+                  disabled={selectedDoc?.hasStoredFile === false}
+                >
                   <Zap className="w-3.5 h-3.5" /> Ouvrir plein écran
                 </Button>
               </div>
@@ -1245,7 +1218,17 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           <div className="flex-1 flex overflow-hidden">
             {/* GAUCHE: PDF PREVIEW */}
             <div className="flex-1 bg-muted/30 relative">
-              {selectedDoc ? (
+              {selectedDoc?.hasStoredFile === false ? (
+                <div className="absolute inset-0 flex items-center justify-center p-8">
+                  <div className="max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-amber-800 shadow-sm">
+                    <AlertTriangle className="w-8 h-8 mx-auto mb-3 text-amber-600" />
+                    <h4 className="font-semibold mb-2">Fichier source indisponible</h4>
+                    <p className="text-sm leading-relaxed">
+                      {selectedDoc?.availabilityMessage || "Le PDF n'est plus present sur le disque. Reimporte ce document pour retrouver la previsualisation et son contenu source."}
+                    </p>
+                  </div>
+                </div>
+              ) : selectedDoc ? (
                 <iframe 
                   src={`/api/mairie/documents/${selectedDoc.id}/view#toolbar=0`} 
                   className="w-full h-full border-none"
