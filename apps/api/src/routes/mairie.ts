@@ -734,6 +734,13 @@ interface SuggestedClassification {
   tags: string[];
 }
 
+interface TownHallExtractionContext {
+  originalName?: string;
+  documentType?: string | null;
+  category?: string | null;
+  subCategory?: string | null;
+}
+
 function normalizeTownHallClassification(input: {
   category?: string | null;
   subCategory?: string | null;
@@ -820,18 +827,73 @@ function autoSuggestClassification(text: string, fileName: string): SuggestedCla
 
 // ─── PLU KNOWLEDGE BASE ───────────────────────────────────────────────────────
 
-async function extractTextFromFile(filePath: string, mimetype: string): Promise<string> {
+function shouldRunRegulatoryVision(context: TownHallExtractionContext, currentText: string): boolean {
+  const hint = [
+    context.originalName || "",
+    context.documentType || "",
+    context.category || "",
+    context.subCategory || "",
+    currentText.slice(0, 400),
+  ].join(" ").toLowerCase();
+
+  return currentText.trim().length < 400
+    || hint.includes("zonage")
+    || hint.includes("zoning")
+    || hint.includes("plan")
+    || hint.includes("graphique")
+    || hint.includes("carte")
+    || hint.includes("schéma")
+    || hint.includes("schema")
+    || hint.includes("croquis")
+    || hint.includes("oap");
+}
+
+async function extractTextFromFile(filePath: string, mimetype: string, context: TownHallExtractionContext = {}): Promise<string> {
   if (mimetype === "application/pdf") {
     try {
       const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
       const buffer = fs.readFileSync(filePath);
       const result = await pdfParse(buffer);
-      return result.text;
+      let extractedText = result.text || "";
+
+      if (extractedText.trim().length < 200) {
+        const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 5);
+        if (ocrText.trim().length > extractedText.trim().length) {
+          extractedText = ocrText;
+        }
+      }
+
+      if (shouldRunRegulatoryVision(context, extractedText)) {
+        const visualSummary = await VisionService.analyzeRegulatoryDocument(
+          filePath,
+          [context.documentType, context.originalName].filter(Boolean).join(" · ")
+        );
+        if (visualSummary.trim().length > 80) {
+          extractedText = `${extractedText.trim()}\n\n--- ANALYSE VISUELLE REGLEMENTAIRE ---\n${visualSummary}`.trim();
+        }
+      }
+
+      return extractedText;
     } catch (e) {
       console.error("[pdf-parse]", e);
+      const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 5);
+      if (ocrText.trim().length > 0) {
+        return ocrText;
+      }
       return "[Impossible d'extraire le texte du PDF automatiquement]";
     }
   }
+
+  if (mimetype.startsWith("image/")) {
+    const visualSummary = await VisionService.analyzeRegulatoryDocument(
+      filePath,
+      [context.documentType, context.originalName].filter(Boolean).join(" · ")
+    );
+    return visualSummary.trim().length > 0
+      ? `--- ANALYSE VISUELLE REGLEMENTAIRE ---\n${visualSummary}`
+      : "[Impossible d'extraire le texte de l'image automatiquement]";
+  }
+
   return fs.readFileSync(filePath, "utf-8");
 }
 
@@ -925,7 +987,12 @@ async function queueTownHallDocumentIndexing(args: {
 }) {
   setImmediate(async () => {
     try {
-      const rawText = await extractTextFromFile(args.persistentPath, args.mimeType);
+      const rawText = await extractTextFromFile(args.persistentPath, args.mimeType, {
+        originalName: args.originalName,
+        documentType: args.documentType,
+        category: args.category,
+        subCategory: args.subCategory,
+      });
       const suggestion = autoSuggestClassification(rawText, args.originalName);
       const classification = normalizeTownHallClassification({
         category: args.category || suggestion.category,
@@ -1351,7 +1418,12 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             continue;
           }
 
-          const rawText = await extractTextFromFile(persistentPath, file.mimetype);
+          const rawText = await extractTextFromFile(persistentPath, file.mimetype, {
+            originalName: file.originalname,
+            documentType: req.body.documentType || null,
+            category: req.body.category || null,
+            subCategory: req.body.subCategory || null,
+          });
           const suggestion = autoSuggestClassification(rawText, file.originalname);
           const classification = normalizeTownHallClassification({
             category: req.body.category || suggestion.category,
