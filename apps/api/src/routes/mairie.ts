@@ -15,8 +15,7 @@ import {
   municipalitySettingsTable,
   dossierEventsTable,
   ruleArticlesTable,
-  zoneAnalysesTable,
-  communesTable
+  zoneAnalysesTable
 } from "@workspace/db";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
@@ -35,7 +34,6 @@ import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { geocodeAddress } from "../services/geocoding.js";
-import { recordDecision } from "../services/learningService.js";
 
 // dossierEventsTable is now imported above
 
@@ -72,6 +70,27 @@ function parseCommunes(raw: string | null): string[] {
   } catch { 
     return raw.split(",").map(c => c.trim()).filter(Boolean); 
   }
+}
+
+function canAccessCommune(role: string | null | undefined, assignedCommunes: string[], commune: string | null | undefined): boolean {
+  if (role === "admin" || role === "super_admin") return true;
+  const normalized = (commune || "").toLowerCase().trim();
+  return !!normalized && assignedCommunes.includes(normalized);
+}
+
+async function resolveInseeCode(commune: string): Promise<string | null> {
+  const value = (commune || "").trim();
+  if (!value) return null;
+  if (/^\d{5}$/.test(value)) return value;
+
+  const [settings] = await db.select({ inseeCode: municipalitySettingsTable.inseeCode })
+    .from(municipalitySettingsTable)
+    .where(or(
+      eq(municipalitySettingsTable.commune, value),
+      eq(sql`lower(${municipalitySettingsTable.commune})`, value.toLowerCase())
+    )).limit(1);
+  if (settings?.inseeCode) return settings.inseeCode;
+  return null;
 }
 
 // ─── DOSSIERS LIST ────────────────────────────────────────────────────────────
@@ -173,7 +192,7 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
 
     return res.json({ dossiers: enrichedDossiers });
   } catch (err) {
-    logger.error("[mairie/dossiers]", err);
+    console.error("[mairie/dossiers]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -268,7 +287,7 @@ router.get("/dossiers/:id", async (req: AuthRequest, res) => {
 
     return res.json({ ...dossier, documents: allDocuments, messages: allMessages });
   } catch (err) {
-    logger.error("[mairie/dossiers/:id]", err);
+    console.error("[mairie/dossiers/:id]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -380,59 +399,9 @@ router.post("/dossiers/:id/abf-avis", async (req: AuthRequest, res) => {
       { decision, motivation }
     );
 
-    // Feed learning loop with ABF opinion
-    const [dossier] = await db.select({ commune: dossiersTable.commune })
-      .from(dossiersTable).where(eq(dossiersTable.id, id as string)).limit(1);
-    if (dossier?.commune) {
-      recordDecision(dossier.commune, decision === "favorable", [])
-        .catch(e => logger.warn("[abf-avis] recordDecision failed:", e));
-    }
-
     return res.json({ success: true });
   } catch (err) {
     return res.status(500).json({ error: "ABF_ACTION_FAILED" });
-  }
-});
-
-// POST /dossiers/:id/decision — render a final ACCEPTE or REFUSE decision and feed the learning loop
-router.post("/dossiers/:id/decision", async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-    const { decision, motivation, rejectedCategories } = req.body as {
-      decision: "ACCEPTE" | "REFUSE";
-      motivation?: string;
-      rejectedCategories?: string[];
-    };
-
-    if (decision !== "ACCEPTE" && decision !== "REFUSE") {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "decision doit être ACCEPTE ou REFUSE." });
-    }
-
-    const [dossier] = await db.select({ commune: dossiersTable.commune, status: dossiersTable.status })
-      .from(dossiersTable).where(eq(dossiersTable.id, id as string)).limit(1);
-    if (!dossier) return res.status(404).json({ error: "NOT_FOUND" });
-
-    const newStatus = decision === "ACCEPTE" ? DOSSIER_STATUS.ACCEPTE : DOSSIER_STATUS.REFUSE;
-    await WorkflowService.transitionStatus(
-      id as string,
-      newStatus,
-      req.user!.userId,
-      motivation || `Décision rendue : ${decision}`
-    );
-
-    // Feed learning loop — non-blocking
-    if (dossier.commune) {
-      recordDecision(
-        dossier.commune,
-        decision === "ACCEPTE",
-        rejectedCategories ?? []
-      ).catch(e => logger.warn("[decision] recordDecision failed:", e));
-    }
-
-    return res.json({ success: true, status: newStatus });
-  } catch (err) {
-    logger.error("[mairie/dossiers/:id/decision]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
 
@@ -461,7 +430,7 @@ router.patch("/dossiers/:id/metadata", async (req: AuthRequest, res) => {
     // For now, return OK and let frontend trigger refetch
     return res.json({ success: true, metadata: newMetadata });
   } catch (err) {
-    logger.error("[mairie/dossiers/:id/metadata]", err);
+    console.error("[mairie/dossiers/:id/metadata]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -495,7 +464,7 @@ router.post("/dossiers/:id/re-analyze", async (req: AuthRequest, res) => {
 
     return res.json({ success: true, result });
   } catch (err: any) {
-    logger.error("[mairie/dossiers/:id/re-analyze]", err);
+    console.error("[mairie/dossiers/:id/re-analyze]", err);
     return res.status(500).json({ error: "ORCHESTRATOR_FAILED", message: err.message });
   }
 });
@@ -582,7 +551,7 @@ router.get("/dossiers/:id/summary", async (req: AuthRequest, res) => {
 
     return res.json(synthesis);
   } catch (err) {
-    logger.error("[mairie/dossiers/:id/summary]", err);
+    console.error("[mairie/dossiers/:id/summary]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -607,7 +576,7 @@ router.get("/messages/:dossierId", async (req: AuthRequest, res) => {
 
     res.json({ messages });
   } catch (err) {
-    logger.error("[mairie/messages/:dossierId]", err);
+    console.error("[mairie/messages/:dossierId]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -688,7 +657,7 @@ router.post("/messages/:dossierId", async (req: AuthRequest, res) => {
 
     res.json({ message: inserted });
   } catch (err) {
-    logger.error("[mairie/messages/:dossierId POST]", err);
+    console.error("[mairie/messages/:dossierId POST]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
@@ -765,7 +734,7 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
       const result = await pdfParse(buffer);
       return result.text;
     } catch (e) {
-      logger.error("[pdf-parse]", e);
+      console.error("[pdf-parse]", e);
       return "[Impossible d'extraire le texte du PDF automatiquement]";
     }
   }
@@ -775,20 +744,26 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
 router.get("/documents", async (req: AuthRequest, res) => {
   try {
     const requestedCommune = req.query.commune as string | undefined;
-    
-    let whereClause = eq(townHallDocumentsTable.userId, req.user!.userId);
-    if (requestedCommune) {
-      whereClause = and(whereClause, eq(sql`lower(${townHallDocumentsTable.commune})`, requestedCommune.toLowerCase())) as any;
-    }
 
-    const docs = await db.select().from(townHallDocumentsTable)
-      .where(whereClause)
-      .orderBy(desc(townHallDocumentsTable.createdAt));
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const role = currentUser[0]?.role;
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+
+    const docs = await db.select().from(townHallDocumentsTable).orderBy(desc(townHallDocumentsTable.createdAt));
+    const filteredByAccess = docs.filter((d) => {
+      const docCommune = (d.commune || "").toLowerCase().trim();
+      if (role === "admin" || role === "super_admin") return true;
+      return !!docCommune && assignedCommunes.includes(docCommune);
+    });
+    const docsForCommune = requestedCommune
+      ? filteredByAccess.filter(d => (d.commune || "").toLowerCase().trim() === requestedCommune.toLowerCase().trim())
+      : filteredByAccess;
     
-    const filteredDocs = docs.map(d => ({ 
-      id: d.id, 
-      title: d.title, 
-      fileName: d.fileName, 
+    const filteredDocs = docsForCommune.map(d => ({
+      id: d.id,
+      title: d.title,
+      fileName: d.fileName,
       createdAt: d.createdAt, 
       commune: d.commune,
       category: d.category,
@@ -827,7 +802,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
     res.json({ batchId: batch.id, status: "processing", message: "Traitement par lot démarré." });
 
     // 2. Process Files Background
-    setImmediate(() => { (async () => {
+    setImmediate(async () => {
       try {
         const results = [];
         for (const file of files) {
@@ -884,9 +859,9 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  commune: targetCommune,
                  zone: req.body.zone || null
                });
-               logger.debug("[mairie/batch] Successfully processed RAG", { docId: doc.id });
+               console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
              } catch (ragErr) {
-               logger.error("[mairie/batch] RAG Processing failed", ragErr, { docId: doc.id });
+               console.error(`[mairie/batch] RAG Processing failed for doc ${doc.id}:`, ragErr);
                // We don't block the rest of the batch if RAG fails, but we should log it
                await db.update(baseIADocumentsTable).set({ status: "vectorization_failed" }).where(eq(baseIADocumentsTable.id, doc.id));
              }
@@ -897,53 +872,16 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
         }
 
         await db.update(baseIABatchesTable).set({ status: "completed" }).where(eq(baseIABatchesTable.id, batch.id));
-        logger.info("[mairie/batch] Completed batch", { batchId: batch.id });
+        console.log(`[mairie/batch] Completed batch ${batch.id}`);
       } catch (err) {
-        logger.error("[mairie/batch] Error in background process", err);
+        console.error(`[mairie/batch] Error in background process:`, err);
         await db.update(baseIABatchesTable).set({ status: "failed" }).where(eq(baseIABatchesTable.id, batch.id));
       }
-    })().catch((err: any) => logger.error("[mairie/batch] Unhandled rejection", err)); });
+    });
 
     return;
   } catch (err) {
-    logger.error("[mairie/documents/batch POST]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
-  }
-});
-
-// GET /documents/batch/:id — poll batch ingestion progress
-router.get("/documents/batch/:id", async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-    const [batch] = await db.select().from(baseIABatchesTable)
-      .where(eq(baseIABatchesTable.id, id))
-      .limit(1);
-    if (!batch) return res.status(404).json({ error: "NOT_FOUND", message: "Batch introuvable." });
-
-    // Count per-document statuses
-    const docs = await db.select({
-      id: baseIADocumentsTable.id,
-      fileName: baseIADocumentsTable.fileName,
-      status: baseIADocumentsTable.status,
-      errorMessage: baseIADocumentsTable.errorMessage,
-    }).from(baseIADocumentsTable)
-      .where(eq(baseIADocumentsTable.batchId, id));
-
-    const total   = docs.length;
-    const indexed = docs.filter(d => d.status === "indexed").length;
-    const failed  = docs.filter(d => d.status === "failed" || d.status === "vectorization_failed").length;
-    const pending = total - indexed - failed;
-
-    return res.json({
-      batchId: batch.id,
-      status: batch.status,
-      createdAt: batch.createdAt,
-      updatedAt: batch.updatedAt,
-      progress: { total, indexed, failed, pending },
-      documents: docs,
-    });
-  } catch (err) {
-    logger.error("[mairie/documents/batch GET]", err);
+    console.error("[mairie/documents/batch POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -962,125 +900,184 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
     if (!targetCommune && assignedCommunes.length > 0) {
       targetCommune = assignedCommunes[0];
     }
+
+    if (!targetCommune) {
+      try { fs.unlinkSync(file.path); } catch {}
+      res.status(400).json({ error: "BAD_REQUEST", message: "Commune requise pour indexer dans la Base IA." });
+      return;
+    }
     
     if (currentUser[0]?.role !== "admin" && targetCommune && !assignedCommunes.some(c => c.toLowerCase() === targetCommune!.toLowerCase())) {
       try { fs.unlinkSync(file.path); } catch {}
       res.status(403).json({ error: "FORBIDDEN", message: "Vous n'avez pas accès à cette commune." });
       return;
     }
-    
-    res.json({ status: "processing", message: "Document reçu, analyse en arrière-plan démarrée." });
 
-    setImmediate(() => { (async () => {
+    const rawText = await extractTextFromFile(file.path, file.mimetype);
+    const suggestion = autoSuggestClassification(rawText, file.originalname);
+    const category = req.body.category || suggestion.category;
+    const subCategory = req.body.subCategory || suggestion.subCategory;
+    const documentType = req.body.documentType || suggestion.documentType;
+    const tags = req.body.tags ? (typeof req.body.tags === "string" ? JSON.parse(req.body.tags) : req.body.tags) : suggestion.tags;
+
+    const ext = path.extname(file.originalname || "") || ".pdf";
+    const storedFileName = `${crypto.randomUUID()}${ext}`;
+
+    const [doc] = await db.insert(townHallDocumentsTable).values({
+      userId: req.user!.userId,
+      commune: targetCommune,
+      title: req.body.title || file.originalname,
+      fileName: storedFileName,
+      rawText,
+      category,
+      subCategory,
+      documentType,
+      tags,
+      zone: req.body.zone || null
+    }).returning();
+
+    const uploadDir = path.resolve(process.cwd(), "uploads");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    const persistentPath = path.join(uploadDir, doc.fileName);
+    try {
+      fs.copyFileSync(file.path, persistentPath);
+    } catch (copyErr) {
+      logger.error("[VisionStorage] Failed to store file", copyErr);
+    }
+
+    res.json({ status: "processing", message: "Document reçu, indexation en cours.", documentId: doc.id });
+
+    setImmediate(async () => {
       try {
-        const rawText = await extractTextFromFile(file.path, file.mimetype);
-        const suggestion = autoSuggestClassification(rawText, file.originalname);
-        const category = req.body.category || suggestion.category;
-        const subCategory = req.body.subCategory || suggestion.subCategory;
-        const documentType = req.body.documentType || suggestion.documentType;
-        const tags = req.body.tags ? (typeof req.body.tags === 'string' ? JSON.parse(req.body.tags) : req.body.tags) : suggestion.tags;
+        let canonicalType: any = "other";
+        const dt = (documentType || "").toLowerCase();
+        if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
+        else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
+        else if (dt.includes("annexe")) canonicalType = "plu_annexe";
 
-        const [doc] = await db.insert(townHallDocumentsTable).values({
-          userId: req.user!.userId,
-          commune: targetCommune || null,
-          title: req.body.title || file.originalname,
-          fileName: file.originalname,
-          rawText: rawText,
-          category,
-          subCategory,
-          documentType,
-          tags,
-          zone: req.body.zone || null
+        const inseeCode = await resolveInseeCode(targetCommune!);
+        const municipalityKey = inseeCode || targetCommune!;
+        const uploadBatchId = crypto.randomUUID();
+        const fileHash = createHash("sha256").update(rawText).digest("hex");
+        const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+          batchId: uploadBatchId,
+          municipalityId: municipalityKey,
+          zoneCode: req.body.zone || null,
+          category: category || "REGULATORY",
+          subCategory: subCategory || "PLU",
+          type: canonicalType === "plu_reglement" || canonicalType === "plu_annexe" ? "plu" :
+                canonicalType === "oap" ? "oap" : "other",
+          fileName: doc.fileName,
+          fileHash,
+          status: "parsing",
         }).returning();
-        
-        // Embad generation using RAG pipeline
-        if (targetCommune) {
-            try {
-              // Map suggest classification to canonical document_type
-              let canonicalType: any = "other";
-              const dt = (documentType || "").toLowerCase();
-              if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
-              else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
-              else if (dt.includes("annexe")) canonicalType = "plu_annexe";
 
-              await processDocumentForRAG(doc.id, targetCommune, rawText, {
-                document_type: canonicalType,
-                commune: targetCommune,
-                zone: req.body.zone || null
-              });
-             logger.debug("[mairie/upload] Successfully processed RAG", { docId: doc.id });
-           } catch (ragErr) {
-             logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: doc.id });
-           }
-        }
-        
-        // Store file persistently for Vision (Phase 4)
-        const persistentPath = path.join(process.cwd(), "uploads", `${doc.id}${path.extname(file.originalname)}`);
-        try {
-          fs.copyFileSync(file.path, persistentPath);
-          logger.debug("[VisionStorage] File stored", { path: persistentPath });
-        } catch (copyErr) {
-          logger.error("[VisionStorage] Failed to store file", copyErr);
-        }
+        await processDocumentForRAG(baseIADoc.id, municipalityKey, rawText, {
+          document_id: baseIADoc.id,
+          document_type: canonicalType,
+          pool_id: `${municipalityKey}-PLU-ACTIVE`,
+          status: "active",
+          commune: municipalityKey,
+          zone: req.body.zone || undefined,
+        } as any);
 
-        logger.info("[mairie/upload] Successfully processed", { fileName: file.originalname });
+        await db.update(baseIADocumentsTable)
+          .set({ status: "indexed" })
+          .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+        logger.debug("[mairie/upload] Successfully processed RAG", { docId: doc.id });
+      } catch (ragErr) {
+        logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: doc.id });
+      } finally {
         try { fs.unlinkSync(file.path); } catch {}
-      } catch (err) {
-        logger.error("[mairie/upload] Background error", err);
       }
-    })().catch((err: any) => logger.error("[mairie/upload] Unhandled rejection", err)); });
-
+    });
     return;
   } catch(err) {
-    logger.error("[mairie/documents POST]", err);
+    console.error("[mairie/documents POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", details: err instanceof Error ? err.stack : String(err) });
+  }
+});
+
+router.delete("/documents", async (req: AuthRequest, res) => {
+  try {
+    const requestedCommune = String(req.query.commune || "").trim();
+    if (!requestedCommune) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Paramètre commune requis." });
+    }
+
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const role = currentUser[0]?.role;
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+    const requestedLower = requestedCommune.toLowerCase().trim();
+
+    if (role !== "admin" && role !== "super_admin" && !assignedCommunes.includes(requestedLower)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
+    }
+
+    const docsToDelete = await db.select({ id: townHallDocumentsTable.id, fileName: townHallDocumentsTable.fileName })
+      .from(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, requestedLower));
+
+    const docIds = docsToDelete.map(d => d.id);
+
+    if (docIds.length > 0) {
+      await db.delete(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, docIds));
+    }
+
+    // Remove Base IA docs + embeddings for that commune key.
+    await db.delete(baseIAEmbeddingsTable)
+      .where(eq(sql`lower(${baseIAEmbeddingsTable.metadata}->>'commune')`, requestedLower));
+    await db.delete(baseIADocumentsTable)
+      .where(eq(sql`lower(${baseIADocumentsTable.municipalityId})`, requestedLower));
+
+    // Cleanup persisted files if present
+    const uploadDir = path.resolve(process.cwd(), "uploads");
+    for (const file of docsToDelete) {
+      const p = path.join(uploadDir, file.fileName || "");
+      if (file.fileName && fs.existsSync(p)) {
+        try { fs.unlinkSync(p); } catch {}
+      }
+    }
+
+    return res.json({ success: true, deletedDocuments: docIds.length, commune: requestedCommune });
+  } catch (err) {
+    logger.error("[mairie/documents DELETE bulk]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
 
 router.delete("/documents/:id", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    await db.delete(townHallDocumentsTable)
-      .where(and(eq(townHallDocumentsTable.id, id), eq(townHallDocumentsTable.userId, req.user!.userId)));
-    res.json({ success: true });
-  } catch(err) { res.status(500).json({ error: "INTERNAL_ERROR" }); }
-});
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const role = currentUser[0]?.role;
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
 
-/**
- * GET /gpu/probe?insee=37112
- * Returns the raw GPU API response for debugging response format issues.
- * Requires mairie auth (same as other /gpu/* routes).
- */
-router.get("/gpu/probe", async (req: AuthRequest, res) => {
-  const insee = (req.query.insee as string || "").trim();
-  if (!insee) return res.status(400).json({ error: "insee param required" });
+    const [doc] = await db.select({
+      id: townHallDocumentsTable.id,
+      commune: townHallDocumentsTable.commune,
+      fileName: townHallDocumentsTable.fileName
+    }).from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id)).limit(1);
 
-  const urls = [
-    `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&gridType=insee&active=true&sort=-publicationDate`,
-    `https://www.geoportail-urbanisme.gouv.fr/api/document?codeMunicipalite=${insee}`,
-    `https://www.geoportail-urbanisme.gouv.fr/api/document?grid=${insee}&gridType=insee`,
-  ];
-
-  const results: any[] = [];
-  for (const url of urls) {
-    try {
-      const cmd = `curl -s -k --max-time 15 -H "Accept: application/json" -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" "${url}"`;
-      const raw = execSync(cmd, { maxBuffer: 2 * 1024 * 1024 }).toString().trim();
-      let parsed: any = null;
-      try { parsed = JSON.parse(raw); } catch { parsed = raw.slice(0, 500); }
-      results.push({
-        url,
-        type: Array.isArray(parsed) ? "array" : typeof parsed,
-        keys: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : null,
-        length: Array.isArray(parsed) ? parsed.length : null,
-        sample: Array.isArray(parsed) ? parsed.slice(0, 2) : parsed
-      });
-    } catch (e: any) {
-      results.push({ url, error: e.message });
+    if (!doc) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+    if (!canAccessCommune(role, assignedCommunes, doc.commune)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
-  }
 
-  return res.json({ insee, results });
+    await db.delete(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id));
+
+    const uploadDir = path.resolve(process.cwd(), "uploads");
+    const filePath = path.join(uploadDir, doc.fileName || "");
+    if (doc.fileName && fs.existsSync(filePath)) {
+      try { fs.unlinkSync(filePath); } catch {}
+    }
+
+    return res.json({ success: true });
+  } catch(err) {
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
 });
 
 router.post("/gpu/sync", async (req: AuthRequest, res) => {
@@ -1090,7 +1087,7 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     const commune = (req.query.commune as string || "").trim();
     if (!commune) return res.status(400).json({ error: "Commune requise" });
 
-    logger.info("[GPU] Starting sync", { commune });
+    console.log(`[GPU] Starting sync for commune: '${commune}'`);
 
     // A. Direct INSEE check (5 digits)
     if (/^\d{5}$/.test(commune)) {
@@ -1105,7 +1102,7 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       else if (lowerInput === "nogent-sur-marne" || lowerInput === "nogent sur marne") insee = "94052";
     }
 
-    // C. DB Resolution — check municipalitySettings and communesTable
+    // C. DB Resolution
     if (!insee) {
       const [settings] = await db.select().from(municipalitySettingsTable)
         .where(or(
@@ -1115,34 +1112,13 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       insee = settings?.inseeCode || null;
     }
 
-    // C2. communesTable lookup (used by admin to register communes with INSEE)
-    if (!insee) {
-      const [communeRow] = await db.select({ inseeCode: communesTable.inseeCode })
-        .from(communesTable)
-        .where(or(
-          eq(communesTable.name, commune),
-          eq(sql`lower(${communesTable.name})`, commune.toLowerCase())
-        )).limit(1);
-      insee = communeRow?.inseeCode || null;
-      if (insee) logger.debug("[GPU] Resolved INSEE from communesTable", { commune, insee });
-    }
-
     // D. Dynamic Geocoding Resolution (FINAL FALLBACK)
-    let geocodedLon: number | null = null;
-    let geocodedLat: number | null = null;
     if (!insee) {
-      logger.debug("[GPU] Dynamic resolution via geocoding", { commune });
+      console.log(`[GPU] Dynamic resolution for: '${commune}'`);
       const geocodeResults = await geocodeAddress(commune, "municipality");
       if (geocodeResults.length > 0) {
         insee = geocodeResults[0].inseeCode || null;
-        geocodedLon = geocodeResults[0].lng ?? null;
-        geocodedLat = geocodeResults[0].lat ?? null;
-        logger.info("[GPU] Geocoding resolved INSEE", { commune, insee, lon: geocodedLon, lat: geocodedLat });
-        // Cache in municipalitySettings for future lookups
-        if (insee) {
-          await db.insert(municipalitySettingsTable).values({ commune, inseeCode: insee })
-            .onConflictDoUpdate({ target: municipalitySettingsTable.commune, set: { inseeCode: insee } });
-        }
+        console.log(`[GPU] Geocoding resolved '${commune}' to INSEE ${insee} (${geocodeResults[0].label})`);
       }
     }
 
@@ -1153,29 +1129,17 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
       });
     }
 
-    logger.debug("[GPU] Final INSEE code resolved", { insee });
+    console.log(`[GPU] Final INSEE code resolved: ${insee}`);
 
-    // 1. Fetch all documents — try INSEE first, fall back to coordinates if available
-    let allDocs = await GPUProviderService.getDocumentsByInsee(insee);
-    if (allDocs.length === 0 && geocodedLon !== null && geocodedLat !== null) {
-      logger.warn("[GPU] INSEE search returned 0 docs — trying coordinate fallback", { lon: geocodedLon, lat: geocodedLat });
-      allDocs = await GPUProviderService.getDocumentsByCoords(geocodedLon, geocodedLat);
-    }
+    // 1. Fetch all documents for this commune
+    const allDocs = await GPUProviderService.getDocumentsByInsee(insee);
 
-    // 2. Keep approved/active documents — GPU uses multiple status values for "in force"
-    const ACTIVE_STATUSES = ["document.production", "document.opposable", "document.approuve", "document.en_vigueur", "production", "opposable", "approuve"];
-    let activeDocs = allDocs.filter(d => d.status && ACTIVE_STATUSES.some(s => d.status.toLowerCase().includes(s.replace("document.", ""))));
-    // If nothing matches known statuses, take all documents (the API `active=true` param already filters)
-    if (activeDocs.length === 0 && allDocs.length > 0) {
-      logger.warn("[GPU] No docs matched known active statuses — ingesting all returned docs", { statuses: allDocs.map(d => d.status) });
-      activeDocs = allDocs;
-    }
-    logger.info("[GPU] Active documents", { active: activeDocs.length, total: allDocs.length });
+    // 2. Keep only the active document(s)
+    const activeDocs = allDocs.filter(d => d.status === "document.production");
+    console.log(`[GPU] ${activeDocs.length} active document(s) (document.production) out of ${allDocs.length} total`);
 
     if (activeDocs.length === 0) {
-      // Return diagnostic info so the caller can see what the GPU API actually returned
-      const diagnostic = await GPUProviderService.diagnose(insee);
-      return res.json({ success: true, count: 0, documents: [], insee, message: `Aucun document trouvé sur le GPU pour INSEE ${insee}.`, diagnostic });
+      return res.json({ success: true, count: 0, documents: [], message: "Aucun document actif trouvé (document.production) pour cette commune." });
     }
 
     let count = 0;
@@ -1184,15 +1148,15 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
     for (const gpuDoc of activeDocs) {
-      logger.debug("[GPU] Processing doc", { docId: gpuDoc.id, name: gpuDoc.originalName });
+      console.log(`[GPU] Processing doc ${gpuDoc.id} — ${gpuDoc.originalName}`);
 
       // 3. Fetch the file list for this document
       const allFiles = await GPUProviderService.getFilesByDocumentId(gpuDoc.id);
-      logger.debug("[GPU] Total files in document", { count: allFiles.length });
+      console.log(`[GPU]   Total files in document: ${allFiles.length}`);
 
       // 4. Filter to regulatory-relevant files
       const criticalFiles = GPUProviderService.filterCriticalFiles(allFiles);
-      logger.debug("[GPU] Critical files to ingest", { count: criticalFiles.length });
+      console.log(`[GPU]   Critical files to ingest: ${criticalFiles.length}`);
 
       for (const file of criticalFiles) {
         const note = await GPUProviderService.generateExplanatoryNote(file.name, file.title);
@@ -1200,19 +1164,18 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
         // 5. Download the PDF via curl (adding -L to follow redirects)
         const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const destPath = path.join(uploadDir, safeFilename);
-        let downloadOk = false;
         try {
           const curlDownload = `curl -s -L -k --max-time 60 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -o "${destPath}" "${file.url}"`;
           execSync(curlDownload, { timeout: 65000 });
           const size = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
-          if (size > 5000) {
-            downloadOk = true;
-            logger.debug("[GPU] Downloaded file", { file: safeFilename, bytes: size });
+          if (size > 5000) { // Increased threshold to avoid capturing tiny HTML redirect pages
+            console.log(`[GPU]   Downloaded: ${safeFilename} (${(size/1024).toFixed(1)} KB)`);
           } else {
-            logger.warn("[GPU] Download suspicious — file too small, skipping text extraction", { bytes: size, file: safeFilename });
+            console.warn(`[GPU]   Download suspicious (${size} bytes): ${safeFilename}`);
           }
         } catch (downloadErr: any) {
-          logger.error("[GPU] Download failed", downloadErr, { file: file.name });
+          console.error(`[GPU]   Download failed for ${file.name}: ${downloadErr.message}`);
+          // Continue anyway — we still catalog the document
         }
 
         // 6. Smart Classification for Frontend (matching KB_STRUCTURE in portail-mairie.tsx)
@@ -1241,25 +1204,7 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
           documentType = "Monuments historiques";
         }
 
-        // 6b. Extract text from the downloaded file
-        let rawText = "";
-        if (downloadOk && fs.existsSync(destPath)) {
-          try {
-            rawText = await extractTextFromFile(destPath, "application/pdf");
-            logger.debug("[GPU] Text extracted", { file: safeFilename, chars: rawText.length });
-          } catch (textErr) {
-            logger.warn("[GPU] Text extraction failed", { file: safeFilename, err: textErr });
-          }
-        }
-
-        // 6c. File hash for dedup
-        let fileHash = "";
-        try {
-          const buf = fs.readFileSync(destPath);
-          fileHash = createHash("sha256").update(buf).digest("hex");
-        } catch {}
-
-        // 7. Upsert into townHallDocumentsTable (dedup by fileName + commune)
+        // 7. Upsert into DB (skip if already exists for THIS user by filename+commune)
         const existing = await db.select({ id: townHallDocumentsTable.id })
           .from(townHallDocumentsTable)
           .where(and(
@@ -1270,151 +1215,33 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
           .limit(1);
 
         if (existing.length > 0) {
-          logger.debug("[GPU] Already in townHallDocuments, skipping", { file: safeFilename });
+          console.log(`[GPU]   Already in DB for this user, skipping: ${safeFilename}`);
           continue;
         }
 
-        const [insertedDoc] = await db.insert(townHallDocumentsTable).values({
+        await db.insert(townHallDocumentsTable).values({
           userId: req.user!.userId,
           commune: commune,
           title: file.name,
           fileName: safeFilename,
-          rawText,
-          category,
-          subCategory,
-          documentType,
+          rawText: "",
+          category: category,
+          subCategory: subCategory,
+          documentType: documentType,
           explanatoryNote: note,
           tags: [],
           isRegulatory: true,
-          isOpposable: true,
-        }).returning();
-
-        // 8. Register in baseIADocumentsTable and embed into base_ia_embeddings
-        //    All document types are registered — graphical/map files get a synthetic
-        //    description so the context builder can find and reference them.
-        if (insee) {
-          try {
-            // Determine document_type for Base IA metadata
-            let baseIADocType: "plu_reglement" | "oap" | "plu_annexe" | "other" = "other";
-            if (documentType === "Written regulation") baseIADocType = "plu_reglement";
-            else if (documentType === "OAP" || documentType === "PADD") baseIADocType = "oap";
-            else if (category === "ANNEXES") baseIADocType = "plu_annexe";
-
-            const isMapOrGraphic = documentType === "Zoning map" ||
-              safeFilename.toLowerCase().includes("graphique") ||
-              safeFilename.toLowerCase().includes("zonage") ||
-              safeFilename.toLowerCase().includes("carte");
-
-            const sourceAuthority =
-              baseIADocType === "plu_reglement" ? 9 :
-              baseIADocType === "oap"           ? 8 :
-              isMapOrGraphic                    ? 7 :   // Maps: high authority as spatial reference
-              baseIADocType === "plu_annexe"    ? 6 : 5;
-
-            const poolId = `${insee}-PLU-ACTIVE`;
-
-            // Check if already indexed in Base IA (by file hash)
-            const existingBaseIA = fileHash
-              ? await db.select({ id: baseIADocumentsTable.id })
-                  .from(baseIADocumentsTable)
-                  .where(eq(baseIADocumentsTable.fileHash, fileHash))
-                  .limit(1)
-              : [];
-
-            if (existingBaseIA.length === 0) {
-              // For graphical/map files with no extractable text: create a synthetic
-              // description chunk so the AI knows the document exists and can reference it.
-              let ingestText = rawText;
-              if (rawText.length < 200 && downloadOk) {
-                if (isMapOrGraphic) {
-                  ingestText = [
-                    `[Document graphique — Plan de zonage PLU]`,
-                    `Commune : ${commune} (INSEE: ${insee})`,
-                    `Fichier : ${file.name}`,
-                    `Type : ${documentType || "Plan graphique"}`,
-                    req.query.zone ? `Zone : ${req.query.zone}` : "",
-                    `Statut : Document opposable — Source officielle GPU`,
-                    note ? `Description : ${note}` : "",
-                    `Ce document est le plan graphique de zonage de la commune. Il délimite les zones (U, AU, N, A) et leurs sous-zones. Se référer au règlement écrit pour les règles applicables par zone.`,
-                  ].filter(Boolean).join("\n");
-                } else {
-                  // Non-graphic PDF with little text — try Vision OCR (pdftoppm → GPT-4o)
-                  try {
-                    ingestText = await VisionService.extractTextFromScannedPDF(destPath, 5);
-                    if (ingestText.length > 100) {
-                      logger.info("[GPU] Vision OCR succeeded for scanned PDF", { file: safeFilename, chars: ingestText.length });
-                    } else {
-                      ingestText = "";
-                    }
-                  } catch (visionErr) {
-                    logger.warn("[GPU] Vision OCR failed for low-text PDF", { file: safeFilename });
-                  }
-                }
-              }
-
-              if (ingestText.length > 50) {
-                const syncBatchId = crypto.randomUUID();
-                const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
-                  batchId: syncBatchId,
-                  municipalityId: insee,
-                  zoneCode: req.query.zone as string || null,
-                  category: "REGULATORY",
-                  subCategory: isMapOrGraphic ? "PLANS" : "PLU",
-                  type: baseIADocType === "plu_reglement" || baseIADocType === "plu_annexe" ? "plu" :
-                        baseIADocType === "oap" ? "oap" : "other",
-                  fileName: safeFilename,
-                  fileHash: fileHash || null,
-                  status: "parsing",
-                  rawText: ingestText,
-                }).returning();
-
-                await processDocumentForRAG(baseIADoc.id, insee, ingestText, {
-                  document_id: baseIADoc.id,
-                  document_type: isMapOrGraphic ? "plu_annexe" : baseIADocType,
-                  pool_id: poolId,
-                  status: "active",
-                  commune: insee,          // always store INSEE code, not display name
-                  zone: req.query.zone as string || undefined,
-                  source_authority: sourceAuthority,
-                } as any);
-
-                await db.update(baseIADocumentsTable)
-                  .set({ status: "indexed" })
-                  .where(eq(baseIADocumentsTable.id, baseIADoc.id));
-
-                // Also update townHallDocuments with the text we have
-                if (ingestText !== rawText && insertedDoc) {
-                  await db.update(townHallDocumentsTable)
-                    .set({ rawText: ingestText })
-                    .where(eq(townHallDocumentsTable.id, insertedDoc.id));
-                }
-
-                logger.info("[GPU] ✅ Indexed into Base IA", {
-                  file: safeFilename, pool: poolId,
-                  type: isMapOrGraphic ? "map/graphic" : baseIADocType,
-                  chars: ingestText.length,
-                });
-              } else {
-                logger.warn("[GPU] Skipping embed — no usable text even after fallbacks", { file: safeFilename });
-              }
-            } else {
-              logger.debug("[GPU] Already in Base IA (hash match), skipping embed", { file: safeFilename });
-            }
-          } catch (ragErr) {
-            logger.error("[GPU] Base IA ingestion failed", ragErr, { file: safeFilename });
-            // Don't abort — townHallDocuments record already saved
-          }
-        }
-
+          isOpposable: true
+        });
         count++;
         results.push({ name: file.title || file.name, fileName: safeFilename });
       }
     }
 
-    logger.info("[GPU] Sync complete", { count, commune });
+    console.log(`[GPU] Sync complete: ${count} document(s) ingested for ${commune}`);
     return res.json({ success: true, count, documents: results });
   } catch (err) {
-    logger.error("[mairie/gpu/sync]", err);
+    console.error("[mairie/gpu/sync]", err);
     return res.status(500).json({ error: "GPU_SYNC_FAILED", message: err instanceof Error ? err.message : "Erreur de sync" });
   }
 });
@@ -1423,24 +1250,35 @@ router.post("/gpu/sync", async (req: AuthRequest, res) => {
 router.get("/documents/:id/view", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    
+
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const role = currentUser[0]?.role;
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+
     // 1. Fetch document record to get the actual fileName
-    const [doc] = await db.select({ fileName: townHallDocumentsTable.fileName })
+    const [doc] = await db.select({ fileName: townHallDocumentsTable.fileName, commune: townHallDocumentsTable.commune })
       .from(townHallDocumentsTable)
       .where(eq(townHallDocumentsTable.id, id))
       .limit(1);
 
     if (!doc || !doc.fileName) {
-      logger.warn("[mairie/view] Document record or filename not found", { docId: id });
+      console.warn(`[mairie/view] Document record or filename not found for ID: ${id}`);
       return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+    }
+    if (!canAccessCommune(role, assignedCommunes, doc.commune)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
     // 2. Locate the file in physical storage (uploads/)
     const uploadDir = path.resolve(process.cwd(), "uploads");
-    const filePath = path.join(uploadDir, doc.fileName);
-    
+    const primaryPath = path.join(uploadDir, doc.fileName);
+    const ext = path.extname(doc.fileName || "");
+    const legacyPath = path.join(uploadDir, `${id}${ext}`);
+    const filePath = fs.existsSync(primaryPath) ? primaryPath : legacyPath;
+
     if (!fs.existsSync(filePath)) {
-      logger.error("[mairie/view] Physical file missing", null, { fileName: doc.fileName });
+      console.error(`[mairie/view] Physical file missing in uploads/ for: ${doc.fileName}`);
       return res.status(404).json({ error: "FILE_NOT_FOUND_ON_DISK" });
     }
 
@@ -1448,7 +1286,7 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
     res.setHeader('Content-Disposition', 'inline');
     return fs.createReadStream(filePath).pipe(res);
   } catch (err) {
-    logger.error("[mairie/view] Critical error", err, { docId: req.params.id });
+    console.error(`[mairie/view] Critical error for ID ${req.params.id}:`, err);
     return res.status(500).json({ error: "VIEW_FAILED" });
   }
 });
@@ -1457,7 +1295,21 @@ router.patch("/documents/:id/metadata", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
     const { explanatoryNote } = req.body;
-    
+
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const role = currentUser[0]?.role;
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+
+    const [doc] = await db.select({ commune: townHallDocumentsTable.commune })
+      .from(townHallDocumentsTable)
+      .where(eq(townHallDocumentsTable.id, id))
+      .limit(1);
+    if (!doc) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+    if (!canAccessCommune(role, assignedCommunes, doc.commune)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
+    }
+
     await db.update(townHallDocumentsTable)
       .set({ explanatoryNote, updatedAt: new Date() })
       .where(eq(townHallDocumentsTable.id, id));
@@ -1487,7 +1339,7 @@ router.get("/prompts/:commune", async (req: AuthRequest, res) => {
     
     res.json({ prompt: rows.length > 0 ? rows[0] : null });
   } catch(err) {
-    logger.error("[mairie/prompts GET]", err);
+    console.error("[mairie/prompts GET]", err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1528,7 +1380,7 @@ router.post("/prompts/:commune", async (req: AuthRequest, res) => {
     
     res.json({ prompt });
   } catch(err) {
-    logger.error("[mairie/prompts POST]", err);
+    console.error("[mairie/prompts POST]", err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1552,7 +1404,7 @@ router.get("/settings/:commune", async (req: AuthRequest, res) => {
     
     res.json({ settings: settings || null });
   } catch(err) {
-    logger.error("[mairie/settings GET]", err);
+    console.error("[mairie/settings GET]", err);
     res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1604,7 +1456,7 @@ router.post("/settings/:commune", async (req: AuthRequest, res) => {
     
     return res.json({ settings: result });
   } catch(err) {
-    logger.error("[mairie/settings POST]", err);
+    console.error("[mairie/settings POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1650,7 +1502,7 @@ router.delete("/dossiers/:id", async (req: AuthRequest, res) => {
 
     return res.json({ success: true, message: "Dossier supprimé avec succès" });
   } catch (err) {
-    logger.error("[mairie/dossiers DELETE]", err);
+    console.error("[mairie/dossiers DELETE]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -1684,7 +1536,7 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
     const responseSent = res.json({ status: "processing", message: "L'analyse graphique par GPT-4o Vision a démarré." });
 
     // 4. Background processing
-    setImmediate(() => { (async () => {
+    setImmediate(async () => {
       try {
         const visualDescription = await VisionService.analyzePlan(filePath);
         
@@ -1698,10 +1550,10 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
           })
           .where(eq(documentReviewsTable.id, id as any));
         
-        logger.info("[Vision] Analysis completed", { docId: id });
+        console.log(`[Vision] Analysis completed for doc ${id}`);
         return;
       } catch (visionErr: any) {
-        logger.error("[Vision] Analysis failed", visionErr, { docId: id });
+        console.error(`[Vision] Analysis failed for doc ${id}:`, visionErr);
         await db.update(documentReviewsTable)
           .set({ 
             status: "failed", 
@@ -1710,282 +1562,11 @@ router.post("/documents/:id/vision", async (req: AuthRequest, res) => {
           })
           .where(eq(documentReviewsTable.id, id as any));
       }
-    })().catch((err: any) => logger.error("[mairie/vision] Unhandled rejection", err)); });
+    });
 
     return responseSent;
   } catch (err) {
-    logger.error("[mairie/vision POST]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
-  }
-});
-
-// ─── BASE IA BACKFILL & COVERAGE ─────────────────────────────────────────────
-
-/**
- * POST /gpu/reindex?commune=xxx
- * Backfills all existing town_hall_documents records that have no Base IA
- * embeddings yet (rawText empty or never indexed). Runs in background.
- * Accepts optional ?commune= to scope to a single commune.
- */
-router.post("/gpu/reindex", async (req: AuthRequest, res) => {
-  try {
-    const commune = (req.query.commune as string || "").trim() || null;
-
-    // Resolve to a set of commune values to query by
-    const whereClause = commune
-      ? or(
-          eq(townHallDocumentsTable.commune, commune),
-          eq(sql`lower(${townHallDocumentsTable.commune})`, commune.toLowerCase())
-        )
-      : undefined;
-
-    const docs = await db.select({
-      id: townHallDocumentsTable.id,
-      commune: townHallDocumentsTable.commune,
-      fileName: townHallDocumentsTable.fileName,
-      rawText: townHallDocumentsTable.rawText,
-      documentType: townHallDocumentsTable.documentType,
-      category: townHallDocumentsTable.category,
-      subCategory: townHallDocumentsTable.subCategory,
-      isRegulatory: townHallDocumentsTable.isRegulatory,
-    }).from(townHallDocumentsTable)
-      .where(whereClause);
-
-    res.json({
-      message: `Reindex démarré en arrière-plan pour ${docs.length} documents.`,
-      total: docs.length,
-      commune: commune || "toutes",
-    });
-
-    setImmediate(() => { (async () => {
-      let indexed = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      for (const doc of docs) {
-        try {
-          if (!doc.commune) { skipped++; continue; }
-
-          // Resolve INSEE for this commune
-          let insee: string | null = null;
-          if (/^\d{5}$/.test(doc.commune)) {
-            insee = doc.commune;
-          } else {
-            const [settings] = await db.select({ inseeCode: municipalitySettingsTable.inseeCode })
-              .from(municipalitySettingsTable)
-              .where(or(
-                eq(municipalitySettingsTable.commune, doc.commune),
-                eq(sql`lower(${municipalitySettingsTable.commune})`, doc.commune.toLowerCase())
-              )).limit(1);
-            if (settings?.inseeCode) {
-              insee = settings.inseeCode;
-            } else {
-              // communesTable fallback
-              const [communeRow] = await db.select({ inseeCode: communesTable.inseeCode })
-                .from(communesTable)
-                .where(or(
-                  eq(communesTable.name, doc.commune),
-                  eq(sql`lower(${communesTable.name})`, doc.commune.toLowerCase())
-                )).limit(1);
-              if (communeRow?.inseeCode) {
-                insee = communeRow.inseeCode;
-              } else {
-                // Geocoding fallback
-                const geo = await geocodeAddress(doc.commune, "municipality");
-                if (geo.length > 0) insee = geo[0].inseeCode || null;
-              }
-            }
-          }
-
-          if (!insee) {
-            logger.warn("[Reindex] Could not resolve INSEE for commune, skipping", { commune: doc.commune, docId: doc.id });
-            skipped++;
-            continue;
-          }
-
-          // Check if already indexed in Base IA
-          const alreadyIndexed = await db.select({ id: baseIADocumentsTable.id })
-            .from(baseIADocumentsTable)
-            .where(
-              // Match by fileName + municipalityId (no hash available for legacy records)
-              and(
-                eq(baseIADocumentsTable.municipalityId, insee),
-                eq(baseIADocumentsTable.fileName, doc.fileName || "")
-              )
-            ).limit(1);
-
-          if (alreadyIndexed.length > 0) {
-            skipped++;
-            continue;
-          }
-
-          // Get or re-extract raw text
-          let rawText = doc.rawText || "";
-          if (rawText.length < 100) {
-            const uploadDir = path.resolve(process.cwd(), "uploads");
-            const filePath = path.join(uploadDir, doc.fileName || "");
-            if (fs.existsSync(filePath)) {
-              try {
-                rawText = await extractTextFromFile(filePath, "application/pdf");
-                // Persist back to townHallDocuments
-                if (rawText.length > 0) {
-                  await db.update(townHallDocumentsTable)
-                    .set({ rawText })
-                    .where(eq(townHallDocumentsTable.id, doc.id));
-                }
-              } catch (e) {
-                logger.warn("[Reindex] Text extraction failed", { file: doc.fileName });
-              }
-            }
-          }
-
-          // Determine type metadata
-          const isMapOrGraphic = (doc.documentType || "").toLowerCase().includes("zoning") ||
-            (doc.fileName || "").toLowerCase().includes("graphique") ||
-            (doc.fileName || "").toLowerCase().includes("zonage");
-
-          let baseIADocType: "plu_reglement" | "oap" | "plu_annexe" | "other" = "other";
-          if ((doc.documentType || "").toLowerCase().includes("regulation") ||
-              (doc.documentType || "").toLowerCase().includes("reglement")) baseIADocType = "plu_reglement";
-          else if ((doc.documentType || "").toLowerCase().includes("oap") ||
-                   (doc.documentType || "").toLowerCase().includes("padd")) baseIADocType = "oap";
-          else if (doc.category === "ANNEXES") baseIADocType = "plu_annexe";
-
-          // Synthetic description for maps with no text
-          let ingestText = rawText;
-          if (rawText.length < 100 && isMapOrGraphic) {
-            ingestText = [
-              `[Document graphique — Plan de zonage PLU]`,
-              `Commune : ${doc.commune} (INSEE: ${insee})`,
-              `Fichier : ${doc.fileName}`,
-              `Type : ${doc.documentType || "Plan graphique"}`,
-              `Statut : Document opposable — Source officielle`,
-            ].join("\n");
-          }
-
-          if (ingestText.length < 50) { skipped++; continue; }
-
-          const sourceAuthority =
-            baseIADocType === "plu_reglement" ? 9 :
-            baseIADocType === "oap"           ? 8 :
-            isMapOrGraphic                    ? 7 :
-            baseIADocType === "plu_annexe"    ? 6 : 5;
-
-          const poolId = `${insee}-PLU-ACTIVE`;
-
-          const reindexBatchId = crypto.randomUUID();
-          const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
-            batchId: reindexBatchId,
-            municipalityId: insee,
-            category: "REGULATORY",
-            subCategory: isMapOrGraphic ? "PLANS" : "PLU",
-            type: baseIADocType === "plu_reglement" || baseIADocType === "plu_annexe" ? "plu" :
-                  baseIADocType === "oap" ? "oap" : "other",
-            fileName: doc.fileName || "",
-            status: "parsing",
-            rawText: ingestText,
-          }).returning();
-
-          await processDocumentForRAG(baseIADoc.id, insee, ingestText, {
-            document_id: baseIADoc.id,
-            document_type: isMapOrGraphic ? "plu_annexe" : baseIADocType,
-            pool_id: poolId,
-            status: "active",
-            commune: insee,          // always store INSEE code, not display name
-            source_authority: sourceAuthority,
-          } as any);
-
-          await db.update(baseIADocumentsTable)
-            .set({ status: "indexed" })
-            .where(eq(baseIADocumentsTable.id, baseIADoc.id));
-
-          indexed++;
-          logger.info("[Reindex] ✅ Indexed", { docId: doc.id, file: doc.fileName, pool: poolId });
-        } catch (e) {
-          failed++;
-          logger.error("[Reindex] Failed to index doc", e, { docId: doc.id });
-        }
-      }
-
-      logger.info("[Reindex] Complete", { indexed, skipped, failed, total: docs.length });
-    })().catch((e: any) => logger.error("[Reindex] Unhandled rejection", e)); });
-
-    return;
-  } catch (err) {
-    logger.error("[mairie/gpu/reindex]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
-  }
-});
-
-/**
- * GET /base-ia/coverage?commune=xxx
- * Returns chunk counts per zone for a commune so you can verify
- * the Base IA has enough content before running an analysis.
- */
-router.get("/base-ia/coverage", async (req: AuthRequest, res) => {
-  try {
-    const commune = (req.query.commune as string || "").trim();
-    if (!commune) return res.status(400).json({ error: "commune requis" });
-
-    // Resolve INSEE
-    let insee: string | null = /^\d{5}$/.test(commune) ? commune : null;
-    if (!insee) {
-      const [settings] = await db.select({ inseeCode: municipalitySettingsTable.inseeCode })
-        .from(municipalitySettingsTable)
-        .where(or(
-          eq(municipalitySettingsTable.commune, commune),
-          eq(sql`lower(${municipalitySettingsTable.commune})`, commune.toLowerCase())
-        )).limit(1);
-      insee = settings?.inseeCode || null;
-    }
-    if (!insee) {
-      const geo = await geocodeAddress(commune, "municipality");
-      if (geo.length > 0) insee = geo[0].inseeCode || null;
-    }
-
-    if (!insee) {
-      return res.status(400).json({ error: "COMMUNE_NOT_RESOLVED", message: `Impossible de résoudre le code INSEE pour '${commune}'.` });
-    }
-
-    // Count Base IA documents and embeddings
-    const docs = await db.select({
-      id: baseIADocumentsTable.id,
-      fileName: baseIADocumentsTable.fileName,
-      type: baseIADocumentsTable.type,
-      status: baseIADocumentsTable.status,
-      zoneCode: baseIADocumentsTable.zoneCode,
-    }).from(baseIADocumentsTable)
-      .where(eq(baseIADocumentsTable.municipalityId, insee));
-
-    // Count embeddings per zone from base_ia_embeddings
-    const embeddingRows = await db.execute(
-      sql`SELECT metadata->>'zone' AS zone, COUNT(*) AS chunk_count
-          FROM base_ia_embeddings
-          WHERE municipality_id = ${insee}
-          GROUP BY metadata->>'zone'
-          ORDER BY chunk_count DESC`
-    );
-
-    const totalChunks = (embeddingRows.rows as any[]).reduce((sum, r) => sum + Number(r.chunk_count), 0);
-    const indexed = docs.filter(d => d.status === "indexed").length;
-    const failed  = docs.filter(d => d.status === "failed" || d.status === "vectorization_failed").length;
-
-    return res.json({
-      commune,
-      insee,
-      documents: { total: docs.length, indexed, failed },
-      embeddings: {
-        totalChunks,
-        byZone: (embeddingRows.rows as any[]).map(r => ({
-          zone: r.zone || "(global)",
-          chunks: Number(r.chunk_count),
-        })),
-      },
-      ready: totalChunks > 0,
-      documentList: docs,
-    });
-  } catch (err) {
-    logger.error("[mairie/base-ia/coverage]", err);
+    console.error("[mairie/vision POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });

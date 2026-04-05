@@ -866,6 +866,15 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     queryFn: () => apiFetch(`/api/mairie/documents${currentCommune !== "all" ? `?commune=${encodeURIComponent(currentCommune)}` : ""}`),
   });
 
+  const scheduleDocumentsRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+    [1500, 4000, 9000].forEach((delayMs) => {
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      }, delayMs);
+    });
+  };
+
   const uploadMutation = useMutation({
     mutationFn: async ({ file, category, subCategory, docType }: { file: File, category?: string, subCategory?: string, docType?: string }) => {
       const formData = new FormData();
@@ -880,13 +889,17 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       if (!r.ok) throw new Error(data.message || "Erreur upload");
       return data;
     },
-    onSuccess: (data, variables) => {
-      setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
-      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
-      toast({ title: "Document ajouté", description: `Le document ${variables.docType} a été indexé.` });
+    onSuccess: (_, variables) => {
+      if (variables.category && variables.subCategory && variables.docType) {
+        setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+      }
+      scheduleDocumentsRefresh();
+      toast({ title: "Document reçu", description: "Indexation en cours. La liste se mettra à jour automatiquement." });
     },
     onError: (err: any, variables) => {
-      setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+      if (variables.category && variables.subCategory && variables.docType) {
+        setUploadingSlots(prev => ({ ...prev, [`${variables.category}-${variables.subCategory}-${variables.docType}`]: false }));
+      }
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
     }
   });
@@ -899,38 +912,11 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
-      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
       toast({ title: "Synchronisation GPU terminée", description: `${data.count} documents récupérés.` });
     },
     onError: (err: any) => {
       toast({ title: "Erreur Sync", description: err.message, variant: "destructive" });
     }
-  });
-
-  const reindexMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/mairie/gpu/reindex?commune=${encodeURIComponent(currentCommune)}`, { method: "POST" });
-      if (!r.ok) throw new Error("Reindex failed");
-      return r.json();
-    },
-    onSuccess: (data) => {
-      toast({ title: "Réindexation démarrée", description: `${data.total} documents en cours de traitement en arrière-plan.` });
-      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] }), 5000);
-    },
-    onError: (err: any) => {
-      toast({ title: "Erreur réindexation", description: err.message, variant: "destructive" });
-    }
-  });
-
-  const { data: coverageData, isLoading: loadingCoverage } = useQuery<{
-    commune: string; insee: string; ready: boolean;
-    documents: { total: number; indexed: number; failed: number };
-    embeddings: { totalChunks: number; byZone: { zone: string; chunks: number }[] };
-  }>({
-    queryKey: ["base-ia-coverage", currentCommune],
-    queryFn: () => apiFetch(`/api/mairie/base-ia/coverage?commune=${encodeURIComponent(currentCommune)}`),
-    enabled: currentCommune !== "all",
-    refetchInterval: 30000,
   });
 
   const updateNoteMutation = useMutation({
@@ -958,6 +944,23 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       toast({ title: "Supprimé", description: "Document retiré de la base." });
+    }
+  });
+
+  const clearAllMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/mairie/documents?commune=${encodeURIComponent(currentCommune)}`, { method: "DELETE" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.message || "Suppression globale impossible");
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      toast({ title: "Base IA nettoyée", description: `${data.deletedDocuments || 0} document(s) supprimé(s).` });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
     }
   });
 
@@ -1010,25 +1013,14 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </div>
         
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="gap-2 border-primary/20 hover:bg-primary/5 h-10 px-4"
             onClick={() => syncGpuMutation.mutate()}
             disabled={syncGpuMutation.isPending || currentCommune === "all"}
           >
             {syncGpuMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-emerald-600" />}
             Sync GPU
-          </Button>
-
-          <Button
-            variant="outline"
-            className="gap-2 border-primary/20 hover:bg-primary/5 h-10 px-4"
-            onClick={() => reindexMutation.mutate()}
-            disabled={reindexMutation.isPending || currentCommune === "all"}
-            title="Réindexer les documents existants dans la Base IA"
-          >
-            {reindexMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4 text-violet-500" />}
-            Réindexer Base IA
           </Button>
 
           <Button
@@ -1054,56 +1046,22 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
               }}
             />
           </Button>
+
+          <Button
+            variant="outline"
+            className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/5 h-10 px-4"
+            disabled={clearAllMutation.isPending || currentCommune === "all"}
+            onClick={() => {
+              if (currentCommune === "all") return;
+              if (!confirm(`Supprimer tous les documents Base IA de ${currentCommune} ? Cette action est irréversible.`)) return;
+              clearAllMutation.mutate();
+            }}
+          >
+            {clearAllMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            Tout supprimer
+          </Button>
         </div>
       </div>
-
-      {/* ── Base IA Coverage Card ── */}
-      {currentCommune !== "all" && (
-        <div className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
-          loadingCoverage ? "bg-muted/30" :
-          coverageData?.ready ? "bg-emerald-500/5 border-emerald-500/20" :
-          "bg-amber-500/5 border-amber-500/20"
-        }`}>
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {loadingCoverage ? (
-              <Loader2 className="w-5 h-5 text-muted-foreground animate-spin flex-shrink-0" />
-            ) : coverageData?.ready ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-            ) : (
-              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-            )}
-            <div className="min-w-0">
-              <p className="font-medium text-sm">
-                {loadingCoverage ? "Vérification de la Base IA…" :
-                 coverageData?.ready
-                   ? `Base IA opérationnelle — ${coverageData.embeddings.totalChunks.toLocaleString()} chunks indexés`
-                   : "Base IA vide — aucun chunk indexé pour cette commune"}
-              </p>
-              {coverageData && !loadingCoverage && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {coverageData.documents.indexed} doc{coverageData.documents.indexed !== 1 ? "s" : ""} indexé{coverageData.documents.indexed !== 1 ? "s" : ""}
-                  {coverageData.documents.failed > 0 && ` · ${coverageData.documents.failed} en erreur`}
-                  {coverageData.embeddings.byZone.length > 0 && (
-                    <> · Zones&nbsp;:&nbsp;{coverageData.embeddings.byZone.slice(0, 5).map(z => `${z.zone} (${z.chunks})`).join(", ")}{coverageData.embeddings.byZone.length > 5 ? "…" : ""}</>
-                  )}
-                </p>
-              )}
-            </div>
-          </div>
-          {coverageData && !coverageData.ready && !loadingCoverage && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-shrink-0 gap-1.5 border-amber-500/30 hover:border-amber-500 text-amber-700"
-              onClick={() => reindexMutation.mutate()}
-              disabled={reindexMutation.isPending}
-            >
-              {reindexMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BrainCircuit className="w-3.5 h-3.5" />}
-              Réindexer maintenant
-            </Button>
-          )}
-        </div>
-      )}
 
       {unmatchedDocs.length > 0 && (
         <Card className="border-amber-500/20 bg-amber-500/5">
@@ -1134,7 +1092,6 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </CardContent>
         </Card>
       )}
-
       <Accordion type="multiple" defaultValue={["item-0", "item-1"]} className="space-y-4">
         {Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => (
           <AccordionItem key={catKey} value={`item-${idx}`} className="border rounded-xl bg-card overflow-hidden shadow-sm">
