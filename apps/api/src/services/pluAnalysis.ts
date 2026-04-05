@@ -258,6 +258,73 @@ export interface ZoneDigest {
   summary: string;
 }
 
+function coerceArticleConfidence(raw: unknown): "high" | "medium" | "low" | "unknown" {
+  if (typeof raw === "string") {
+    const normalized = raw.toLowerCase();
+    if (normalized === "high" || normalized === "medium" || normalized === "low" || normalized === "unknown") {
+      return normalized;
+    }
+  }
+  return "unknown";
+}
+
+function extractArticleCandidates(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.articles)) return payload.articles;
+  if (Array.isArray(payload?.data?.articles)) return payload.data.articles;
+  if (Array.isArray(payload?.rules)) return payload.rules;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.content?.articles)) return payload.content.articles;
+  if (Array.isArray(payload?.content)) return payload.content;
+  return [];
+}
+
+function coerceZoneArticles(payload: any): ArticleAnalysis[] {
+  return extractArticleCandidates(payload).map((raw: any, index: number) => {
+    const rawArticle = raw?.articleNumber ?? raw?.article ?? raw?.article_id ?? raw?.title ?? `${index + 1}`;
+    const numericArticle = parseInt(String(rawArticle).replace(/[^0-9]/g, ""), 10);
+    const articleNumber = Number.isFinite(numericArticle) && numericArticle > 0 ? numericArticle : index + 1;
+    const sourceText = String(
+      raw?.sourceText
+      ?? raw?.source_text
+      ?? raw?.texte_source
+      ?? raw?.source
+      ?? raw?.content
+      ?? raw?.operational_rule
+      ?? ""
+    );
+    const summary = String(
+      raw?.summary
+      ?? raw?.operational_rule
+      ?? raw?.interpretation
+      ?? raw?.analysis
+      ?? sourceText
+    );
+    const interpretation = String(
+      raw?.interpretation
+      ?? raw?.operational_rule
+      ?? raw?.analysis
+      ?? summary
+    );
+
+    return {
+      articleNumber,
+      title: String(raw?.title ?? `Article ${rawArticle}`),
+      sourceText,
+      interpretation,
+      summary,
+      impactText: String(raw?.impactText ?? raw?.impact ?? raw?.analysis ?? ""),
+      vigilanceText: String(
+        raw?.vigilanceText
+        ?? raw?.vigilance
+        ?? (Array.isArray(raw?.exceptions) ? raw.exceptions.join("; ") : "")
+      ),
+      confidence: coerceArticleConfidence(raw?.confidence),
+      structuredData: raw && typeof raw === "object" ? raw : undefined,
+    };
+  });
+}
+
 /**
  * Triage Pass: Produces a structured digest of zone-wide constraints.
  */
@@ -472,9 +539,9 @@ export async function analyzePLUZone(
 
     const parsedString = completion.choices[0]?.message?.content || "{}";
     const parsed = JSON.parse(parsedString);
-    
+
     // 2. Relevance Scoring & Ranking
-    let rawArticles = Array.isArray(parsed.articles) ? parsed.articles : [];
+    const rawArticles = coerceZoneArticles(parsed);
     const rankedArticles = rankRulesByRelevance(rawArticles, projectDescription || "", parcelData);
 
     const result: any = {
@@ -482,12 +549,12 @@ export async function analyzePLUZone(
       zoneLabel: String(parsed.zoneLabel || zoneLabel),
       articles: rankedArticles,
       digest,
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      calculationVariables: parsed.calculationVariables || { 
+      issues: Array.isArray(parsed.issues) ? parsed.issues : Array.isArray(parsed?.data?.issues) ? parsed.data.issues : [],
+      calculationVariables: parsed.calculationVariables || parsed?.data?.calculationVariables || {
         maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null,
         minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null 
       },
-      globalConstraints: Array.isArray(parsed.globalConstraints) ? parsed.globalConstraints : [],
+      globalConstraints: Array.isArray(parsed.globalConstraints) ? parsed.globalConstraints : Array.isArray(parsed?.data?.globalConstraints) ? parsed.data.globalConstraints : [],
     };
 
     return result;
@@ -825,7 +892,15 @@ CONSIGNES DE FILTRAGE :
     const rawData = result?.data || result?.content || result?.articles || resultText || "[]";
     console.log(`[pluAnalysis] [${cityName}] Extraction Result (first 500 chars): ${JSON.stringify(rawData).substring(0, 500)}...`);
 
-    const finalData = result?.data || result?.content || result?.articles || resultText || "Aucune règle extraite.";
+    const finalData =
+      result?.data?.articles
+      || result?.articles
+      || result?.rules
+      || result?.content?.articles
+      || result?.content
+      || result?.data
+      || resultText
+      || "Aucune règle extraite.";
     return typeof finalData === "string" ? finalData : JSON.stringify(finalData);
   } catch (err) {
     console.error("[extractRelevantRules] IA Error:", err);

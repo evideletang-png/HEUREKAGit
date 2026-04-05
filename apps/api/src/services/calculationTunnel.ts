@@ -78,7 +78,7 @@ export class CalculationTunnel {
       synthesis = `La parcelle de ${surface}m² autorise théoriquement une emprise totale de ${Math.round(maxAuthorizedFootprint)}m². `;
       synthesis += `L'emprise existante étant de ${Math.round(existingFootprint)}m², il reste un potentiel de ${Math.round(remainingFootprint!)}m² constructible au sol.`;
     } else if (surface > 0) {
-      synthesis = `Parcelle de ${surface}m² identifiée. Les règles d'emprise (Art. 9), hauteur (Art. 10) et reculs ne sont pas encore indexées — synchronisez le GPU depuis le portail mairie pour obtenir le calcul complet.`;
+      synthesis = `Parcelle de ${surface}m² identifiée. Les règles d'emprise (Art. 9), hauteur (Art. 10) et reculs ne sont pas encore suffisamment extraites depuis la Base IA mairie pour produire un calcul complet.`;
     } else {
       synthesis = "Données parcellaires insuffisantes pour calculer le potentiel constructible.";
     }

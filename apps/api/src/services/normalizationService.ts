@@ -56,7 +56,7 @@ export class NormalizationService {
       }
       // Article 9: Footprint
       if (artNum === "9") {
-        this.extractNumbers(operationalRule).forEach(n => params.max_footprint.push(n));
+        this.extractFootprintValues(operationalRule).forEach(n => params.max_footprint.push(n));
       }
       // Article 10: Height
       if (artNum === "10") {
@@ -105,5 +105,18 @@ export class NormalizationService {
     const matches = text.match(/\d+([.,]\d+)?/g);
     if (!matches) return [];
     return matches.map(m => parseFloat(m.replace(",", ".")));
+  }
+
+  private static extractFootprintValues(text?: string | null): number[] {
+    const values = this.extractNumbers(text);
+    if (!text) return values;
+    const normalized = text.toLowerCase();
+    const isPercentageRule = normalized.includes("%")
+      || normalized.includes("pourcent")
+      || normalized.includes("ces")
+      || normalized.includes("coefficient d'emprise");
+
+    if (!isPercentageRule) return values;
+    return values.map((value) => (value > 1 ? value / 100 : value));
   }
 }
