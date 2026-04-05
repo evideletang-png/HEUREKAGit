@@ -178,15 +178,27 @@ import { MessagingService } from "./messagingService.js";
 /**
  * Resolves the full legal context for a given commune.
  */
-export async function resolveJurisdictionContext(communeInsee: string): Promise<JurisdictionContext> {
-  const [communeRecord] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, communeInsee)).limit(1);
+export async function resolveJurisdictionContext(communeInsee: string, communeNameHint?: string): Promise<JurisdictionContext> {
+  let communeRecord = (await db.select().from(communesTable).where(eq(communesTable.inseeCode, communeInsee)).limit(1))[0];
+
+  if (!communeRecord && communeNameHint) {
+    communeRecord = (await db.select().from(communesTable)
+      .where(sql`lower(${communesTable.name}) = lower(${communeNameHint})`)
+      .limit(1))[0];
+  }
+
+  if (!communeRecord && communeInsee && !/^\d{5}$/.test(communeInsee)) {
+    communeRecord = (await db.select().from(communesTable)
+      .where(sql`lower(${communesTable.name}) = lower(${communeInsee})`)
+      .limit(1))[0];
+  }
   
   if (!communeRecord) {
-    logger.warn(`[Jurisdiction] Unknown commune ${communeInsee}. Falling back to Global ONLY.`);
+    logger.warn(`[Jurisdiction] Unknown commune ${communeInsee}${communeNameHint ? ` (${communeNameHint})` : ""}. Falling back to Global ONLY.`);
     return {
       commune_insee: communeInsee,
       jurisdiction_id: "GLOBAL",
-      name: "Unknown",
+      name: communeNameHint || "Unknown",
       plan_scope: "national",
       active_pool_ids: [GLOBAL_POOL_ID]
     };
@@ -256,6 +268,7 @@ export async function orchestrateDossierAnalysis(
   // 0. Fetch initial info
   let initialAddress = "";
   let initialCommune = "00000";
+  let initialCityName = "";
   let typeProcedure = "PCMI";
   let isCUa = false;
   let status = "BROUILLON";
@@ -265,6 +278,7 @@ export async function orchestrateDossierAnalysis(
     if (!dossier) throw new Error(`Dossier ${dossierId} not found.`);
     initialAddress = dossier.address || "";
     initialCommune = forcedCommune || dossier.commune || "00000";
+    initialCityName = typeof dossier.commune === "string" ? dossier.commune : "";
     typeProcedure = dossier.typeProcedure;
     isCUa = typeProcedure === "CUa";
     status = dossier.status;
@@ -280,6 +294,7 @@ export async function orchestrateDossierAnalysis(
       : null;
     sourceLock = existingGeoContext?.source_lock ?? null;
     initialAddress = sourceLock?.address || analysis.address;
+    initialCityName = analysis.city || "";
     const [existingParcel] = await db.select({ metadataJson: parcelsTable.metadataJson })
       .from(parcelsTable)
       .where(eq(parcelsTable.analysisId, analysisId))
@@ -307,13 +322,17 @@ export async function orchestrateDossierAnalysis(
   finalZone = contextIdentification.zone;
   
   // 1.1 Resolve Jurisdiction
-  const jurisdictionContext = await resolveJurisdictionContext(currentCommune);
+  const jurisdictionContext = await resolveJurisdictionContext(currentCommune, initialCityName);
+  const regulatoryCommune = jurisdictionContext.commune_insee || currentCommune;
+  const regulatoryCommuneName = (jurisdictionContext.name && jurisdictionContext.name !== "Unknown")
+    ? jurisdictionContext.name
+    : (initialCityName || currentCommune);
 
   // 2. REBUILD DOCUMENT TARGETING LOGIC (Step 2)
   const targetedDocs = await rebuildDocumentTargeting(docs, finalZone);
 
   // 3. Build Regulatory Context (RAG)
-  const context = await buildAnalysisContext(currentCommune, finalZone, jurisdictionContext);
+  const context = await buildAnalysisContext(regulatoryCommune, finalZone, jurisdictionContext);
 
   await setAnalysisStatus("parsing_documents");
 
@@ -335,7 +354,7 @@ export async function orchestrateDossierAnalysis(
         {
           dossierDocs: processedDocsMetadata,
           regulatoryRules: context.relevantRules,
-          commune: currentCommune,
+          commune: regulatoryCommuneName,
           zoneCode: finalZone
         } as any
       ));
@@ -494,7 +513,7 @@ export async function orchestrateDossierAnalysis(
         const zoningInfo = await getZoningByCoords(bestMatch.lat, bestMatch.lng, currentCommune);
         if (zoningInfo && zoningInfo.zoneCode !== finalZone) {
           finalZone = zoningInfo.zoneCode;
-          const newContext = await buildAnalysisContext(currentCommune, finalZone, jurisdictionContext);
+          const newContext = await buildAnalysisContext(regulatoryCommune, finalZone, jurisdictionContext);
           context.relevantRules = newContext.relevantRules;
           context.relevantDocs = newContext.relevantDocs;
         }
@@ -518,11 +537,11 @@ export async function orchestrateDossierAnalysis(
 
   // 7. RULE EXTRACTION & NORMALIZATION (Step 3, 4, 5)
   // Resolve commune name for AI extraction (mismatch fix for 37203 vs Rochecorbon)
-  let communeName = currentCommune;
+  let communeName = regulatoryCommuneName;
   try {
-    const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, currentCommune)).limit(1);
+    const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, regulatoryCommune)).limit(1);
     if (c) communeName = c.name;
-    logger.info(`[Orchestrator] Resolved ${currentCommune} to ${communeName} for extraction`);
+    logger.info(`[Orchestrator] Resolved ${regulatoryCommune} to ${communeName} for extraction`);
   } catch (e) {}
 
   const regulatoryContext = context.relevantDocs.map(d => d.rawText || "").join("\n\n");
@@ -610,7 +629,7 @@ export async function orchestrateDossierAnalysis(
   // 9. MCP ENRICHMENT
   try {
     const { fetchMarketData, fetchAdminGuide } = await import("./mcpIntegration.js");
-    marketData = await fetchMarketData(currentCommune);
+    marketData = await fetchMarketData(regulatoryCommune);
     adminGuide = await fetchAdminGuide(typeProcedure);
   } catch (mcpErr) {}
 

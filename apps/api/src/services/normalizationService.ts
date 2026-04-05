@@ -43,8 +43,8 @@ export class NormalizationService {
 
     for (const art of articles) {
       const rawArticle = (art as any)?.article ?? (art as any)?.articleNumber ?? (art as any)?.title ?? null;
-      const artNum = rawArticle == null ? "" : String(rawArticle).replace(/[^0-9]/g, "");
       const operationalRule = this.resolveOperationalRule(art);
+      const artNum = this.resolveArticleNumber(rawArticle, art, operationalRule);
       
       // Article 6: Position by roads
       if (artNum === "6") {
@@ -91,6 +91,7 @@ export class NormalizationService {
   private static resolveOperationalRule(article: PluRule | Record<string, unknown>): string {
     const candidates = [
       (article as any)?.operational_rule,
+      (article as any)?.rule,
       (article as any)?.sourceText,
       (article as any)?.summary,
       (article as any)?.interpretation,
@@ -98,6 +99,25 @@ export class NormalizationService {
     ];
     const firstText = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
     return typeof firstText === "string" ? firstText : "";
+  }
+
+  private static resolveArticleNumber(rawArticle: unknown, article: PluRule | Record<string, unknown>, operationalRule: string): string {
+    const explicit = rawArticle == null ? "" : String(rawArticle).replace(/[^0-9]/g, "");
+    if (explicit) return explicit;
+
+    const title = String((article as any)?.title ?? (article as any)?.section ?? "").toLowerCase();
+    const fullText = `${title} ${operationalRule}`.toLowerCase();
+
+    if (fullText.includes("stationnement")) return "12";
+    if (fullText.includes("espace vert") || fullText.includes("plantation") || fullText.includes("pleine terre")) return "13";
+    if (fullText.includes("hauteur")) return "10";
+    if (fullText.includes("emprise") || fullText.includes("ces") || fullText.includes("coefficient d'emprise")) return "9";
+    if (fullText.includes("limite séparative") || fullText.includes("limites séparatives")) return "7";
+    if (fullText.includes("voie") || fullText.includes("voirie") || fullText.includes("recul")) return "6";
+    if (fullText.includes("réseau") || fullText.includes("reseau")) return "4";
+    if (fullText.includes("desserte")) return "3";
+
+    return "";
   }
 
   private static extractNumbers(text?: string | null): number[] {

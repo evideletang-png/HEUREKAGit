@@ -33,6 +33,7 @@ import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
+import { AUTHORITY_POLICY } from "@workspace/ai-core";
 
 // dossierEventsTable is now imported above
 
@@ -97,6 +98,13 @@ function parseDocumentTags(raw: unknown): string[] {
     }
   }
   return [];
+}
+
+function authorityForCanonicalType(canonicalType: string): number {
+  if (canonicalType === "plu_reglement") return AUTHORITY_POLICY.REGULATION_LOCAL;
+  if (canonicalType === "oap") return AUTHORITY_POLICY.PLANNING_OAP;
+  if (canonicalType === "plu_annexe") return AUTHORITY_POLICY.ANNEX_TECHNICAL;
+  return AUTHORITY_POLICY.UNKNOWN;
 }
 
 async function resolveInseeCode(commune: string): Promise<string | null> {
@@ -970,6 +978,8 @@ async function queueTownHallDocumentIndexing(args: {
         status: "active",
         commune: municipalityKey,
         zone: args.zone || undefined,
+        source_authority: authorityForCanonicalType(canonicalType),
+        provenance: "base_ia_plu",
       } as any);
 
       await db.update(baseIADocumentsTable)
@@ -1380,10 +1390,17 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
           // Process the document for RAG (Chunking + Embeddings)
           if (targetCommune) {
              try {
+               const canonicalType = (req.body.type === "plu"
+                 ? "plu_reglement"
+                 : (req.body.type === "annexe" ? "plu_annexe" : "other"));
                await processDocumentForRAG(doc.id, targetCommune, rawText, {
-                 document_type: (req.body.type === "plu" ? "plu_reglement" : (req.body.type === "annexe" ? "plu_annexe" : "other")),
+                 document_id: doc.id,
+                 document_type: canonicalType,
+                 pool_id: `${targetCommune}-PLU-ACTIVE`,
+                 status: "active",
                  commune: targetCommune,
-                 zone: req.body.zone || null
+                 zone: req.body.zone || undefined,
+                 source_authority: authorityForCanonicalType(canonicalType),
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
              } catch (ragErr) {

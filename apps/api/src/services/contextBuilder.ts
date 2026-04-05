@@ -75,6 +75,9 @@ export async function buildAnalysisContext(
     let chunks = await queryRelevantChunks(embeddingQuery, {
       municipalityId: commune,
       zoneCode,
+      docTypes: ["plu_reglement", "plu_annexe"],
+      minAuthority: 7,
+      strictZone: true,
       jurisdictionContext,
       limit: 30,
     });
@@ -84,6 +87,20 @@ export async function buildAnalysisContext(
       chunks = await queryRelevantChunks(embeddingQuery, {
         municipalityId: communeName,
         zoneCode,
+        docTypes: ["plu_reglement", "plu_annexe"],
+        minAuthority: 7,
+        strictZone: true,
+        jurisdictionContext,
+        limit: 30,
+      });
+    }
+
+    if (chunks.length === 0) {
+      chunks = await queryRelevantChunks(embeddingQuery, {
+        municipalityId: commune,
+        zoneCode,
+        docTypes: ["plu_reglement", "plu_annexe"],
+        minAuthority: 7,
         jurisdictionContext,
         limit: 30,
       });

@@ -25,6 +25,8 @@ async function queryChunksWithMunicipalityAliases(
     jurisdictionContext?: JurisdictionContext;
     includeTrace?: boolean;
     limit?: number;
+    minAuthority?: number;
+    strictZone?: boolean;
   }
 ) {
   const aliases = uniqueMunicipalityAliases(options.cityName, options.jurisdictionContext);
@@ -40,6 +42,8 @@ async function queryChunksWithMunicipalityAliases(
       jurisdictionContext: options.jurisdictionContext,
       includeTrace: options.includeTrace,
       limit,
+      minAuthority: options.minAuthority,
+      strictZone: options.strictZone,
     });
 
     for (const chunk of chunks) {
@@ -290,11 +294,13 @@ function coerceZoneArticles(payload: any): ArticleAnalysis[] {
       ?? raw?.texte_source
       ?? raw?.source
       ?? raw?.content
+      ?? raw?.rule
       ?? raw?.operational_rule
       ?? ""
     );
     const summary = String(
       raw?.summary
+      ?? raw?.rule
       ?? raw?.operational_rule
       ?? raw?.interpretation
       ?? raw?.analysis
@@ -309,7 +315,7 @@ function coerceZoneArticles(payload: any): ArticleAnalysis[] {
 
     return {
       articleNumber,
-      title: String(raw?.title ?? `Article ${rawArticle}`),
+      title: String(raw?.title ?? raw?.section ?? `Article ${rawArticle}`),
       sourceText,
       interpretation,
       summary,
@@ -453,11 +459,26 @@ export async function analyzePLUZone(
           cityName,
           zoneCode,
           jurisdictionContext,
+          docTypes: ["plu_reglement", "plu_annexe"],
+          minAuthority: 7,
+          strictZone: true,
           limit: 20,
         });
         if (fallbackChunks.length === 0) {
+          fallbackChunks = await queryChunksWithMunicipalityAliases(fallbackQuery, {
+            cityName,
+            zoneCode,
+            jurisdictionContext,
+            docTypes: ["plu_reglement", "plu_annexe"],
+            minAuthority: 7,
+            limit: 20,
+          });
+        }
+        if (fallbackChunks.length === 0) {
           fallbackChunks = await queryRelevantChunks(fallbackQuery, {
             municipalityId: GLOBAL_POOL_ID,
+            docTypes: ["plu_reglement", "plu_annexe"],
+            minAuthority: 7,
             limit: 10,
           });
         }
@@ -541,7 +562,30 @@ export async function analyzePLUZone(
     const parsed = JSON.parse(parsedString);
 
     // 2. Relevance Scoring & Ranking
-    const rawArticles = coerceZoneArticles(parsed);
+    let rawArticles = coerceZoneArticles(parsed);
+    const hasSubstantiveArticles = rawArticles.some((article) =>
+      article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40
+    );
+
+    if (!hasSubstantiveArticles) {
+      const fallbackRulesJson = await extractRelevantRules(relevantText, {
+        zoneCode,
+        cityName,
+        docTypes: ["plu_reglement", "plu_annexe"],
+        jurisdictionContext,
+      });
+
+      try {
+        const fallbackParsed = JSON.parse(fallbackRulesJson);
+        const fallbackArticles = coerceZoneArticles(fallbackParsed);
+        if (fallbackArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
+          rawArticles = fallbackArticles;
+        }
+      } catch {
+        // Keep primary extraction output if fallback payload is not valid JSON.
+      }
+    }
+
     const rankedArticles = rankRulesByRelevance(rawArticles, projectDescription || "", parcelData);
 
     const result: any = {
@@ -798,6 +842,7 @@ export async function extractRelevantRules(
   }
 ): Promise<string> {
   const { zoneCode, cityName, topics = [], docTypes = [] } = context;
+  const regulatoryDocTypes = docTypes.length > 0 ? docTypes : ["plu_reglement", "plu_annexe"];
   
   let combinedText = "";
   const { jurisdictionContext } = context;
@@ -812,16 +857,31 @@ export async function extractRelevantRules(
       let chunks = await queryChunksWithMunicipalityAliases(queryStr, {
         cityName,
         zoneCode,
+        docTypes: regulatoryDocTypes,
+        minAuthority: 7,
+        strictZone: true,
         limit: 25,
-        docTypes: docTypes.length > 0 ? docTypes : undefined,
         jurisdictionContext,
       });
+
+      if (chunks.length === 0) {
+        chunks = await queryChunksWithMunicipalityAliases(queryStr, {
+          cityName,
+          zoneCode,
+          docTypes: regulatoryDocTypes,
+          minAuthority: 7,
+          limit: 25,
+          jurisdictionContext,
+        });
+      }
 
       // Fallback: GLOBAL_POOL_ID if the commune isn't yet indexed in Base IA
       if (chunks.length === 0) {
         console.warn(`[pluAnalysis] No Base IA chunks for ${cityName} zone ${zoneCode} — retrying with global pool`);
         chunks = await queryRelevantChunks(queryStr, {
           municipalityId: GLOBAL_POOL_ID,
+          docTypes: regulatoryDocTypes,
+          minAuthority: 7,
           limit: 15,
           jurisdictionContext,
         });

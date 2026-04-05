@@ -12,6 +12,8 @@ export interface SearchFilter {
   articleId?: string; // Optional exact article target
   jurisdictionContext?: JurisdictionContext; // Mandatory for strict scoping
   includeTrace?: boolean; // Flag to enable detailed debug tracing
+  minAuthority?: number;
+  strictZone?: boolean;
 }
 
 export type ChunkMetadata = KnowledgeMetadata;
@@ -87,11 +89,24 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
     or(
       inArray(sql`${baseIAEmbeddingsTable.metadata}->>'pool_id'`, poolIds),
       eq(baseIAEmbeddingsTable.municipalityId, filters.municipalityId) // Legacy fallback
-    )
+    ),
+    filters.docTypes && filters.docTypes.length > 0
+      ? inArray(sql`${baseIAEmbeddingsTable.metadata}->>'document_type'`, filters.docTypes)
+      : undefined,
+    typeof filters.minAuthority === "number"
+      ? sql`COALESCE((${baseIAEmbeddingsTable.metadata}->>'source_authority')::numeric, 1) >= ${filters.minAuthority}`
+      : undefined,
   ];
 
-  // Zone filter is NULL-inclusive: docs without zone metadata match any zone query
-  const whereClause = and(...baseConditions, filters.zoneCode ? sql`(${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode} OR ${baseIAEmbeddingsTable.metadata}->>'zone' IS NULL)` : undefined);
+  const zoneCondition = filters.zoneCode
+    ? (
+      filters.strictZone
+        ? sql`${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode}`
+        : sql`(${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode} OR ${baseIAEmbeddingsTable.metadata}->>'zone' IS NULL)`
+    )
+    : undefined;
+
+  const whereClause = and(...baseConditions, zoneCondition);
 
   // 6. EXECUTE SEARCH
   const rawResults = await db
