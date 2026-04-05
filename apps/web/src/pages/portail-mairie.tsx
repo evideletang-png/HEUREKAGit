@@ -904,21 +904,6 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     }
   });
 
-  const syncGpuMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/mairie/gpu/sync?commune=${encodeURIComponent(currentCommune)}`, { method: "POST" });
-      if (!r.ok) throw new Error("Sync GPU failed");
-      return r.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
-      toast({ title: "Synchronisation GPU terminée", description: `${data.count} documents récupérés.` });
-    },
-    onError: (err: any) => {
-      toast({ title: "Erreur Sync", description: err.message, variant: "destructive" });
-    }
-  });
-
   const updateNoteMutation = useMutation({
     mutationFn: async ({ id, note }: { id: string, note: string }) => {
       const r = await fetch(`/api/mairie/documents/${id}/metadata`, {
@@ -999,8 +984,26 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     });
   }, [pluDocsData, validSlotKeys]);
 
+  const totalDocuments = pluDocsData?.documents?.length ?? 0;
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
+      <input
+        id="batch-upload"
+        type="file"
+        className="hidden"
+        multiple
+        accept=".pdf"
+        onChange={(e) => {
+          const files = e.target.files;
+          if (!files || files.length === 0) return;
+          Array.from(files).forEach(file => {
+            uploadMutation.mutate({ file });
+          });
+          e.currentTarget.value = "";
+        }}
+      />
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -1015,36 +1018,12 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <Button
             variant="outline"
-            className="gap-2 border-primary/20 hover:bg-primary/5 h-10 px-4"
-            onClick={() => syncGpuMutation.mutate()}
-            disabled={syncGpuMutation.isPending || currentCommune === "all"}
-          >
-            {syncGpuMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 text-emerald-600" />}
-            Sync GPU
-          </Button>
-
-          <Button
-            variant="outline"
             className="gap-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/5 h-10 px-4"
             onClick={() => document.getElementById('batch-upload')?.click()}
             disabled={uploadMutation.isPending}
           >
             <UploadCloud className="w-4 h-4 text-primary" />
-            Batch Upload
-            <input 
-              id="batch-upload"
-              type="file" 
-              className="hidden" 
-              multiple 
-              accept=".pdf"
-              onChange={(e) => {
-                const files = e.target.files;
-                if (!files || files.length === 0) return;
-                Array.from(files).forEach(file => {
-                  uploadMutation.mutate({ file });
-                });
-              }}
-            />
+            Importer des documents
           </Button>
 
           <Button
@@ -1062,6 +1041,43 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </Button>
         </div>
       </div>
+
+      <Card className="border-primary/20 bg-primary/5">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base flex items-center gap-2">
+            <UploadCloud className="w-4 h-4 text-primary" />
+            Onboarding Base IA
+          </CardTitle>
+          <CardDescription>
+            Le flux automatique GPU a ete retire. La source officielle de la base PLU est maintenant l'import manuel des documents souhaites pendant l'onboarding mairie.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="grid gap-2 text-sm text-muted-foreground">
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5">1</Badge>
+              <span>Selectionnez la commune puis importez les reglements, plans de zonage, annexes et servitudes utiles.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5">2</Badge>
+              <span>Chaque document importe est indexe automatiquement pour alimenter l'analyse et l'assistant IA.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5">3</Badge>
+              <span>{currentCommune === "all" ? "Choisissez d'abord une commune pour importer un corpus cible." : totalDocuments > 0 ? `${totalDocuments} document(s) deja presents dans cette base.` : "Aucun document indexe pour cette commune pour le moment."}</span>
+            </div>
+          </div>
+
+          <Button
+            className="gap-2 h-10 px-4"
+            onClick={() => document.getElementById("batch-upload")?.click()}
+            disabled={uploadMutation.isPending || currentCommune === "all"}
+          >
+            {uploadMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+            Importer mes documents PLU
+          </Button>
+        </CardContent>
+      </Card>
 
       {unmatchedDocs.length > 0 && (
         <Card className="border-amber-500/20 bg-amber-500/5">
@@ -1615,7 +1631,7 @@ export default function PortailMairiePage() {
                 <TabsTrigger value="config" className="gap-2"><Settings className="w-3.5 h-3.5" /> Config Prompt</TabsTrigger>
               </TabsList>
 
-              {communes.length > 0 && (activeTab === "dossiers" || activeTab === "config" || activeTab === "finance") && (
+              {communes.length > 0 && (activeTab === "dossiers" || activeTab === "plu" || activeTab === "config" || activeTab === "finance") && (
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Commune :</span>
                   <Select value={selectedCommune} onValueChange={setSelectedCommune}>

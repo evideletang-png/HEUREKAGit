@@ -26,14 +26,11 @@ import multer from "multer";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execSync } from "child_process";
 import { VisionService } from "../services/visionService.js";
-import { GPUProviderService } from "../services/gpuProviderService.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
-import { geocodeAddress } from "../services/geocoding.js";
 
 // dossierEventsTable is now imported above
 
@@ -755,6 +752,62 @@ async function extractTextFromFile(filePath: string, mimetype: string): Promise<
   return fs.readFileSync(filePath, "utf-8");
 }
 
+function resolveTownHallDocumentPath(id: string, fileName: string | null | undefined): string | null {
+  if (!fileName) return null;
+  const uploadDir = path.resolve(process.cwd(), "uploads");
+  const primaryPath = path.join(uploadDir, fileName);
+  if (fs.existsSync(primaryPath)) return primaryPath;
+
+  const ext = path.extname(fileName || "");
+  const legacyPath = path.join(uploadDir, `${id}${ext}`);
+  return fs.existsSync(legacyPath) ? legacyPath : null;
+}
+
+function hasUsableTownHallText(rawText: string | null | undefined): boolean {
+  const text = (rawText || "").trim();
+  if (text.length < 100) return false;
+  return !text.startsWith("[Impossible d'extraire le texte du PDF automatiquement]");
+}
+
+function getTownHallDocumentAvailability(doc: {
+  id: string;
+  title?: string | null;
+  fileName: string | null;
+  rawText: string | null;
+}) {
+  const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
+  const hasStoredFile = !!filePath;
+  const hasExtractedText = hasUsableTownHallText(doc.rawText);
+
+  let availabilityStatus: "indexed" | "processing" | "indexed_without_source_file" | "missing_file" | "broken" = "processing";
+  let availabilityMessage = "Document recu, indexation en cours.";
+
+  if (hasStoredFile && hasExtractedText) {
+    availabilityStatus = "indexed";
+    availabilityMessage = "Document disponible et exploitable par l'analyse.";
+  } else if (!hasStoredFile && hasExtractedText) {
+    availabilityStatus = "indexed_without_source_file";
+    availabilityMessage = "Le texte du document est indexe, mais le fichier source est introuvable sur le disque.";
+  } else if (hasStoredFile && !hasExtractedText) {
+    availabilityStatus = "processing";
+    availabilityMessage = "Le fichier est present, mais le texte n'est pas encore exploitable pour l'analyse.";
+  } else if (doc.fileName) {
+    availabilityStatus = "missing_file";
+    availabilityMessage = "Le fichier source est introuvable et aucun texte exploitable n'a ete indexe.";
+  } else {
+    availabilityStatus = "broken";
+    availabilityMessage = "Le document est incomplet et doit etre reimporte.";
+  }
+
+  return {
+    filePath,
+    hasStoredFile,
+    hasExtractedText,
+    availabilityStatus,
+    availabilityMessage,
+  };
+}
+
 router.get("/documents", async (req: AuthRequest, res) => {
   try {
     const requestedCommune = req.query.commune as string | undefined;
@@ -774,17 +827,25 @@ router.get("/documents", async (req: AuthRequest, res) => {
       ? filteredByAccess.filter(d => (d.commune || "").toLowerCase().trim() === requestedCommune.toLowerCase().trim())
       : filteredByAccess;
     
-    const filteredDocs = docsForCommune.map(d => ({
-      id: d.id,
-      title: d.title,
-      fileName: d.fileName,
-      createdAt: d.createdAt, 
-      commune: d.commune,
-      category: d.category,
-      subCategory: d.subCategory,
-      documentType: d.documentType,
-      tags: d.tags
-    }));
+    const filteredDocs = docsForCommune.map(d => {
+      const availability = getTownHallDocumentAvailability(d);
+      return {
+        id: d.id,
+        title: d.title,
+        fileName: d.fileName,
+        createdAt: d.createdAt,
+        commune: d.commune,
+        category: d.category,
+        subCategory: d.subCategory,
+        documentType: d.documentType,
+        explanatoryNote: d.explanatoryNote,
+        tags: d.tags,
+        hasStoredFile: availability.hasStoredFile,
+        hasExtractedText: availability.hasExtractedText,
+        availabilityStatus: availability.availabilityStatus,
+        availabilityMessage: availability.availabilityMessage,
+      };
+    });
     return res.json({ documents: filteredDocs });
   } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
@@ -1109,169 +1170,10 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
 });
 
 router.post("/gpu/sync", async (req: AuthRequest, res) => {
-  try {
-    // 1. Resolve INSEE logic (Dynamic & Robust)
-    let insee: string | null = null;
-    const commune = (req.query.commune as string || "").trim();
-    if (!commune) return res.status(400).json({ error: "Commune requise" });
-
-    console.log(`[GPU] Starting sync for commune: '${commune}'`);
-
-    // A. Direct INSEE check (5 digits)
-    if (/^\d{5}$/.test(commune)) {
-      insee = commune;
-    }
-
-    // B. Hardcoded / Common Mapping
-    if (!insee) {
-      const lowerInput = commune.toLowerCase();
-      if (lowerInput === "rochecorbon") insee = "37203";
-      else if (lowerInput === "saint-avertin" || lowerInput === "saint avertin") insee = "37208";
-      else if (lowerInput === "nogent-sur-marne" || lowerInput === "nogent sur marne") insee = "94052";
-    }
-
-    // C. DB Resolution
-    if (!insee) {
-      const [settings] = await db.select().from(municipalitySettingsTable)
-        .where(or(
-          eq(municipalitySettingsTable.commune, commune),
-          eq(sql`lower(${municipalitySettingsTable.commune})`, commune.toLowerCase())
-        )).limit(1);
-      insee = settings?.inseeCode || null;
-    }
-
-    // D. Dynamic Geocoding Resolution (FINAL FALLBACK)
-    if (!insee) {
-      console.log(`[GPU] Dynamic resolution for: '${commune}'`);
-      const geocodeResults = await geocodeAddress(commune, "municipality");
-      if (geocodeResults.length > 0) {
-        insee = geocodeResults[0].inseeCode || null;
-        console.log(`[GPU] Geocoding resolved '${commune}' to INSEE ${insee} (${geocodeResults[0].label})`);
-      }
-    }
-
-    if (!insee) {
-      return res.status(400).json({
-        error: "COMMUNE_NOT_RESOLVED",
-        message: `Impossible de résoudre le code INSEE pour '${commune}'. Spécifiez le code INSEE à 5 chiffres directement.`
-      });
-    }
-
-    console.log(`[GPU] Final INSEE code resolved: ${insee}`);
-
-    // 1. Fetch all documents for this commune
-    const allDocs = await GPUProviderService.getDocumentsByInsee(insee);
-
-    // 2. Keep only the active document(s)
-    const activeDocs = allDocs.filter(d => d.status === "document.production");
-    console.log(`[GPU] ${activeDocs.length} active document(s) (document.production) out of ${allDocs.length} total`);
-
-    if (activeDocs.length === 0) {
-      return res.json({ success: true, count: 0, documents: [], message: "Aucun document actif trouvé (document.production) pour cette commune." });
-    }
-
-    let count = 0;
-    const results = [];
-    const uploadDir = path.resolve(process.cwd(), "uploads");
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-    for (const gpuDoc of activeDocs) {
-      console.log(`[GPU] Processing doc ${gpuDoc.id} — ${gpuDoc.originalName}`);
-
-      // 3. Fetch the file list for this document
-      const allFiles = await GPUProviderService.getFilesByDocumentId(gpuDoc.id);
-      console.log(`[GPU]   Total files in document: ${allFiles.length}`);
-
-      // 4. Filter to regulatory-relevant files
-      const criticalFiles = GPUProviderService.filterCriticalFiles(allFiles);
-      console.log(`[GPU]   Critical files to ingest: ${criticalFiles.length}`);
-
-      for (const file of criticalFiles) {
-        const note = await GPUProviderService.generateExplanatoryNote(file.name, file.title);
-
-        // 5. Download the PDF via curl (adding -L to follow redirects)
-        const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const destPath = path.join(uploadDir, safeFilename);
-        try {
-          const curlDownload = `curl -s -L -k --max-time 60 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -o "${destPath}" "${file.url}"`;
-          execSync(curlDownload, { timeout: 65000 });
-          const size = fs.existsSync(destPath) ? fs.statSync(destPath).size : 0;
-          if (size > 5000) { // Increased threshold to avoid capturing tiny HTML redirect pages
-            console.log(`[GPU]   Downloaded: ${safeFilename} (${(size/1024).toFixed(1)} KB)`);
-          } else {
-            console.warn(`[GPU]   Download suspicious (${size} bytes): ${safeFilename}`);
-          }
-        } catch (downloadErr: any) {
-          console.error(`[GPU]   Download failed for ${file.name}: ${downloadErr.message}`);
-          // Continue anyway — we still catalog the document
-        }
-
-        // 6. Smart Classification for Frontend (matching KB_STRUCTURE in portail-mairie.tsx)
-        let category = "REGULATORY";
-        let subCategory = "PLU";
-        let documentType = "Administrative Act";
-
-        const fileNameLower = file.name.toLowerCase();
-        if (fileNameLower.includes("reglement") && !fileNameLower.includes("graphique")) {
-          documentType = "Written regulation";
-        } else if (fileNameLower.includes("padd")) {
-          documentType = "PADD";
-        } else if (fileNameLower.includes("oap") || fileNameLower.includes("orientation")) {
-          documentType = "OAP";
-        } else if (fileNameLower.includes("graphique") || fileNameLower.includes("zonage")) {
-          category = "ZONING";
-          subCategory = "PLANS";
-          documentType = "Zoning map";
-        } else if (fileNameLower.includes("ppri") || fileNameLower.includes("risques")) {
-          category = "ANNEXES";
-          subCategory = "RISKS";
-          documentType = "Risk Map";
-        } else if (fileNameLower.includes("sup") || fileNameLower.includes("servitude") || fileNameLower.includes("monument") || fileNameLower.includes("unesco") || fileNameLower.includes("heritage")) {
-          category = "ANNEXES";
-          subCategory = "HERITAGE";
-          documentType = "Monuments historiques";
-        }
-
-        // 7. Upsert into DB (skip if already exists for THIS user by filename+commune)
-        const existing = await db.select({ id: townHallDocumentsTable.id })
-          .from(townHallDocumentsTable)
-          .where(and(
-            eq(townHallDocumentsTable.userId, req.user!.userId),
-            eq(townHallDocumentsTable.fileName, safeFilename),
-            eq(townHallDocumentsTable.commune, commune)
-          ))
-          .limit(1);
-
-        if (existing.length > 0) {
-          console.log(`[GPU]   Already in DB for this user, skipping: ${safeFilename}`);
-          continue;
-        }
-
-        await db.insert(townHallDocumentsTable).values({
-          userId: req.user!.userId,
-          commune: commune,
-          title: file.name,
-          fileName: safeFilename,
-          rawText: "",
-          category: category,
-          subCategory: subCategory,
-          documentType: documentType,
-          explanatoryNote: note,
-          tags: [],
-          isRegulatory: true,
-          isOpposable: true
-        });
-        count++;
-        results.push({ name: file.title || file.name, fileName: safeFilename });
-      }
-    }
-
-    console.log(`[GPU] Sync complete: ${count} document(s) ingested for ${commune}`);
-    return res.json({ success: true, count, documents: results });
-  } catch (err) {
-    console.error("[mairie/gpu/sync]", err);
-    return res.status(500).json({ error: "GPU_SYNC_FAILED", message: err instanceof Error ? err.message : "Erreur de sync" });
-  }
+  return res.status(410).json({
+    error: "FEATURE_REMOVED",
+    message: "La synchronisation GPU a ete retiree. Importez les documents souhaites manuellement pendant l'onboarding de la Base IA."
+  });
 });
 
 

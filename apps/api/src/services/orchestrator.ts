@@ -493,11 +493,21 @@ export async function orchestrateDossierAnalysis(
   const { NormalizationService } = await import("./normalizationService.js");
   const normalizedParams = await NormalizationService.normalizeRules(parsedRules);
 
+  const hasPluSourceData = (regulatoryContext || "").trim().length >= 200 || parsedRules.length > 0;
+  const missingPluSourceMessage = hasPluSourceData
+    ? null
+    : `Aucun document PLU opposable indexe pour la zone ${finalZone} sur la commune ${communeName}.`;
+
   await setAnalysisStatus("calculating");
 
   // 8. CALCULATION TUNNEL (Step 6)
-  const { CalculationTunnel } = await import("./calculationTunnel.js");
-  calculations = await CalculationTunnel.runTunnel(parcelData || {}, resolvedProjectData, normalizedParams);
+  if (hasPluSourceData) {
+    const { CalculationTunnel } = await import("./calculationTunnel.js");
+    calculations = await CalculationTunnel.runTunnel(parcelData || {}, resolvedProjectData, normalizedParams);
+  } else {
+    calculations = null;
+    logger.warn(`[Orchestrator] Skipping buildability tunnel for analysis ${analysisId || dossierId || "N/A"} — no opposable PLU source available for zone ${finalZone}.`);
+  }
 
   // 8b. PERSIST BUILDABILITY RESULTS
   if (analysisId && calculations) {
@@ -658,6 +668,9 @@ export async function orchestrateDossierAnalysis(
         neighbour_context: buildingData?.buildings?.length ? "estimated" : "to_confirm",
         topography: parcelData?._topography ? "estimated" : "to_confirm",
         roads: parcelData?._classifyBoundariesResult ? "calculated" : "to_confirm",
+      },
+      missing_requirements: {
+        plu_source: missingPluSourceMessage,
       },
       parcel: {
         id: parcelData?.metadata?.idu ?? null,

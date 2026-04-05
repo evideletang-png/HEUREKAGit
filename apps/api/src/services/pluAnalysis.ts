@@ -719,6 +719,11 @@ export async function extractRelevantRules(
     }
   }
 
+  if (combinedText.trim().length < 200) {
+    console.warn(`[pluAnalysis] No meaningful PLU source text for ${cityName || "commune inconnue"} zone ${zoneCode} — returning empty ruleset.`);
+    return "[]";
+  }
+
   const systemContent = `Tu es l'Expert-Documentaliste en Urbanisme. Ton rôle est de LIRE des extraits d'un règlement PLU complet (potentiellement issu de recherche sémantique) et d'en EXTRAIRE les règles applicables d'articles de la zone **${zoneCode}**${cityName ? ` pour la commune de **${cityName}**` : ""}.
   
 CONSIGNES DE FILTRAGE :

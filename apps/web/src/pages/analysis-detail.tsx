@@ -285,6 +285,16 @@ export default function AnalysisDetailPage() {
   const gc = (analysis as any).geoContextJson
     ? (() => { try { return typeof (analysis as any).geoContextJson === "string" ? JSON.parse((analysis as any).geoContextJson as string) : (analysis as any).geoContextJson; } catch { return null; } })()
     : null;
+  const zoneIssues = (() => {
+    try {
+      if (!(zoneAnalysis as any)?.issuesJson) return [];
+      return typeof (zoneAnalysis as any).issuesJson === "string"
+        ? JSON.parse((zoneAnalysis as any).issuesJson)
+        : (zoneAnalysis as any).issuesJson;
+    } catch {
+      return [];
+    }
+  })();
 
   const pm = gc?.parcel_metrics ?? {};
   const pb = gc?.parcel_boundaries ?? {};
@@ -299,6 +309,9 @@ export default function AnalysisDetailPage() {
   const fa = gc?.financial_analysis ?? null;
   const sourceLock = gc?.source_lock ?? null;
   const dataQuality = gc?.data_quality ?? {};
+  const missingRequirements = gc?.missing_requirements ?? {};
+  const missingPluIssue = zoneIssues.find((issue: any) => issue?.type === "NO_PLU_DATA" || issue?.code === "NO_PLU_DATA")
+    || (missingRequirements?.plu_source ? { message: missingRequirements.plu_source } : null);
 
   const reliabilitySummary: { label: string; level: ReliabilityLevel }[] = [
     { label: "Adresse & parcelle", level: (dataQuality.address_and_parcel || (sourceLock?.lat && displayParcelRef ? "validated" : parcel ? "calculated" : "to_confirm")) as ReliabilityLevel },
@@ -594,7 +607,7 @@ export default function AnalysisDetailPage() {
           <TabsTrigger value="marche" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm font-bold border-2 border-transparent data-[state=active]:border-primary bg-primary/5 text-primary"><Activity className="w-4 h-4 mr-2"/> Calcul des Taxes 🏛️</TabsTrigger>
           <TabsTrigger value="geocontext" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!gc}><Layers className="w-4 h-4 mr-2"/> Géo-contexte</TabsTrigger>
           <TabsTrigger value="urbanisme" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!zoneAnalysis}><BookOpen className="w-4 h-4 mr-2"/> Urbanisme</TabsTrigger>
-          <TabsTrigger value="calcul" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!buildability}><Calculator className="w-4 h-4 mr-2"/> Constructibilité</TabsTrigger>
+          <TabsTrigger value="calcul" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!buildability && !missingPluIssue}><Calculator className="w-4 h-4 mr-2"/> Constructibilité</TabsTrigger>
           <TabsTrigger value="rapport" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!data.report}><FileText className="w-4 h-4 mr-2"/> Rapport</TabsTrigger>
           <TabsTrigger value="implantation" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!gc}><Pencil className="w-4 h-4 mr-2"/> Implantation</TabsTrigger>
           <TabsTrigger value="chat" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm"><MessageSquare className="w-4 h-4 mr-2"/> Assistant IA</TabsTrigger>
@@ -856,6 +869,19 @@ export default function AnalysisDetailPage() {
                </div>
              </CardHeader>
              <CardContent className="pt-6">
+               {missingPluIssue && (
+                 <div className="flex flex-col items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-amber-800 mb-6">
+                   <div className="flex items-center gap-2 font-semibold">
+                     <AlertTriangle className="w-4 h-4" />
+                     Base PLU indisponible pour cette zone
+                   </div>
+                   <p className="text-sm">{missingPluIssue.message}</p>
+                   <p className="text-xs text-amber-700">
+                     Tant qu'aucun document PLU opposable n'est indexé pour la commune, l'interprétation détaillée des articles et la constructibilité restent volontairement incomplètes.
+                   </p>
+                 </div>
+               )}
+
                {/* NOUVEL AFFICHAGE DES ARTICLES (TUNNEL STEP 3) */}
                {(analysis as any).metadata?.pluAnalysis?.controles && (
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
@@ -931,9 +957,9 @@ export default function AnalysisDetailPage() {
                 {(!((zoneAnalysis as any)?.articles?.length > 0)) && (
                   <div className="flex flex-col items-center justify-center py-12 text-center bg-amber-50/60 rounded-xl border border-amber-200/60 mb-4">
                     <AlertTriangle className="w-8 h-8 text-amber-500 mb-3" />
-                    <h4 className="font-semibold text-amber-800 mb-1">Aucun document PLU indexé</h4>
+                    <h4 className="font-semibold text-amber-800 mb-1">Aucun article exploitable pour la zone</h4>
                     <p className="text-sm text-amber-700 max-w-sm">
-                      Les articles du règlement de zone seront disponibles après la synchronisation GPU depuis le portail mairie.
+                      {missingPluIssue?.message || "Les articles du reglement de zone seront disponibles apres import manuel des documents PLU dans la Base IA mairie."}
                     </p>
                   </div>
                 )}
@@ -1068,6 +1094,23 @@ export default function AnalysisDetailPage() {
 
         {/* TAB 3: CALCUL */}
         <TabsContent value="calcul" className="space-y-6 focus-visible:outline-none">
+          {!buildability && missingPluIssue && (
+            <Card className="border-amber-200 bg-amber-50/80">
+              <CardHeader>
+                <CardTitle className="text-amber-800 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  Constructibilité indisponible faute de base PLU
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-amber-800 space-y-2">
+                <p>{missingPluIssue.message}</p>
+                <p>
+                  Le système ne calcule plus de constructibilité théorique quand aucun document PLU opposable n'est disponible pour la commune ou la zone identifiée.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               <Card>
@@ -1165,7 +1208,7 @@ export default function AnalysisDetailPage() {
                   </h4>
                   <p className="text-primary-foreground/80 text-sm leading-relaxed">
                     {buildability?.resultSummary || (parcel?.parcelSurfaceM2
-                      ? `Parcelle de ${parcel.parcelSurfaceM2}m² identifiée. Synchronisez le GPU pour obtenir les règles d'emprise et de hauteur.`
+                      ? `Parcelle de ${parcel.parcelSurfaceM2}m² identifiee. Importez les documents PLU de la commune dans la Base IA pour obtenir les regles d'emprise et de hauteur.`
                       : "Relancez l'analyse pour calculer le potentiel constructible.")}
                   </p>
                 </CardContent>
