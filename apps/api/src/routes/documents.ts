@@ -674,7 +674,7 @@ router.post("/:id/compare", authenticate, async (req: AuthRequest, res) => {
       // Re-analyze full dossier for consistency
       const cityNameFallback = (currentAnalysis as any)?.city || effectiveCommune || doc.commune || "Nogent-sur-Marne";
       logger.info("[Reprocess] Calling orchestrateDossierAnalysis", { dossierId: doc.dossierId, commune: cityNameFallback });
-      const result = await orchestrateDossierAnalysis(doc.dossierId!, doc.userId, cityNameFallback);
+      const result = await orchestrateDossierAnalysis(doc.dossierId!, [], { userId: doc.userId });
       logger.info("[Reprocess] Orchestration finished", { status: result.status, globalScore: result.globalScore });
       
       // Use the global analysis result for this document (fallback to specific if available)
@@ -933,7 +933,7 @@ router.post("/:id/reprocess", authenticate, async (req: any, res) => {
       const commune = doc.commune || "Nogent-sur-Marne";
       
       logger.info("[Reprocess] Starting orchestration", { dossierId, commune });
-      const result = await orchestrateDossierAnalysis(dossierId, userId, commune);
+      const result = await orchestrateDossierAnalysis(dossierId, [], { userId });
       logger.info("[Reprocess] Orchestration finished", { dossierId, status: result.status });
 
       // Save ALL dynamic data to the document

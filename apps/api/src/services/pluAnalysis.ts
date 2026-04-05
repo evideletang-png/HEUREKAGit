@@ -141,9 +141,12 @@ export interface ZoneAnalysisResult {
   zoneLabel: string;
   articles: ArticleAnalysis[];
   issues?: {
-    article: string;
-    msg: string;
-    severity: "bloquante" | "majeure" | "mineure";
+    article?: string;
+    msg?: string;
+    severity?: "bloquante" | "majeure" | "mineure";
+    type?: string;
+    code?: string;
+    message?: string;
   }[];
   calculationVariables: {
     maxFootprintRatio?: number | null;
@@ -292,7 +295,7 @@ export async function analyzePLUZone(
   customPrompt?: string, 
   projectDescription?: string, 
   parcelData?: any
-): Promise<ZoneAnalysisResult & { digest?: ZoneDigest }> {
+): Promise<ZoneAnalysisResult & { digest?: ZoneDigest | null }> {
   const articleSchema = z.object({
     articleNumber: z.coerce.number(),
     title: z.string(),
@@ -355,7 +358,14 @@ export async function analyzePLUZone(
             digest: null,
             calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
             globalConstraints: [],
-            issues: [{ type: "NO_PLU_DATA", message: `Aucun document PLU indexé pour ${cityName}. Lancez une synchronisation GPU depuis le portail mairie.` }],
+            issues: [{
+              article: "GLOBAL",
+              msg: `Aucun document PLU indexé pour ${cityName}. Importez les documents dans la Base IA mairie.`,
+              severity: "bloquante",
+              type: "NO_PLU_DATA",
+              code: "NO_PLU_DATA",
+              message: `Aucun document PLU indexé pour ${cityName}. Importez les documents dans la Base IA mairie.`,
+            }],
           };
         }
       } catch (embErr) {
@@ -373,7 +383,14 @@ export async function analyzePLUZone(
         digest: null,
         calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
         globalConstraints: [],
-        issues: [{ type: "NO_PLU_DATA", message: `Aucun document PLU indexé pour ${cityName || zoneCode}. Lancez une synchronisation GPU depuis le portail mairie.` }],
+        issues: [{
+          article: "GLOBAL",
+          msg: `Aucun document PLU indexé pour ${cityName || zoneCode}. Importez les documents dans la Base IA mairie.`,
+          severity: "bloquante",
+          type: "NO_PLU_DATA",
+          code: "NO_PLU_DATA",
+          message: `Aucun document PLU indexé pour ${cityName || zoneCode}. Importez les documents dans la Base IA mairie.`,
+        }],
       };
     }
 

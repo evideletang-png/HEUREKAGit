@@ -28,8 +28,8 @@ export async function runDecisionEngine(
 
   const result = await orchestrateDossierAnalysis(
     options.dossierId,
-    options.userId,
-    options.commune
+    [],
+    { userId: options.userId }
   );
 
   // Inject metadata into the business decision

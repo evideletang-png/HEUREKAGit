@@ -84,7 +84,7 @@ async function cacheGeocode(address: string, result: { lat: number; lng: number;
       set: { lat: result.lat, lng: result.lng, label: result.label, banId: result.banId, inseeCode: result.inseeCode, cityName: result.cityName, score: result.score, expiresAt },
     });
   } catch (e) {
-    logger.warn("[GeocodeCache] Write failed:", e);
+    logger.warn("[GeocodeCache] Write failed", { error: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -184,10 +184,17 @@ export async function resolveJurisdictionContext(communeInsee: string): Promise<
  */
 export async function orchestrateDossierAnalysis(
   dossierId: string | null, 
-  docs: any[], 
-  userInfo: { userId: string; email?: string },
-  analysisId: string | null = null
+  docsOrUser: any[] | string | { userId: string; email?: string },
+  userInfoOrCommune?: { userId: string; email?: string } | string,
+  analysisIdOrLegacy: string | null | boolean = null
 ): Promise<OrchestrationResult> {
+  const docs = Array.isArray(docsOrUser) ? docsOrUser : [];
+  const userInfo = Array.isArray(docsOrUser)
+    ? ((typeof userInfoOrCommune === "object" && userInfoOrCommune) ? userInfoOrCommune : { userId: "SYSTEM" })
+    : (typeof docsOrUser === "string" ? { userId: docsOrUser } : docsOrUser);
+  const forcedCommune = !Array.isArray(docsOrUser) && typeof userInfoOrCommune === "string" ? userInfoOrCommune : null;
+  const analysisId = Array.isArray(docsOrUser) && typeof analysisIdOrLegacy === "string" ? analysisIdOrLegacy : null;
+
   logger.info(`>>> [8-Step Tunnel] Starting Orchestration. Dossier: ${dossierId || "N/A"}, Analysis: ${analysisId || "N/A"}`);
 
   // Helper: update analyses.status for progress tracking
@@ -197,7 +204,7 @@ export async function orchestrateDossierAnalysis(
       await db.update(analysesTable).set({ status: s, updatedAt: new Date() }).where(eq(analysesTable.id, analysisId));
       logger.info(`[Orchestrator] Analysis ${analysisId} status → ${s}`);
     } catch (e) {
-      logger.warn("[Orchestrator] Could not update analysis status:", e);
+      logger.warn("[Orchestrator] Could not update analysis status", { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -226,7 +233,7 @@ export async function orchestrateDossierAnalysis(
     const [dossier] = await db.select().from(dossiersTable).where(eq(dossiersTable.id, dossierId)).limit(1);
     if (!dossier) throw new Error(`Dossier ${dossierId} not found.`);
     initialAddress = dossier.address || "";
-    initialCommune = dossier.commune || "00000";
+    initialCommune = forcedCommune || dossier.commune || "00000";
     typeProcedure = dossier.typeProcedure;
     isCUa = typeProcedure === "CUa";
     status = dossier.status;
@@ -249,7 +256,15 @@ export async function orchestrateDossierAnalysis(
     const parcelMetadata = existingParcel?.metadataJson
       ? (() => { try { return JSON.parse(existingParcel.metadataJson); } catch { return null; } })()
       : null;
-    initialCommune = sourceLock?.inseeCode || parcelMetadata?.commune || analysis.city || "00000";
+    initialCommune = forcedCommune || sourceLock?.inseeCode || parcelMetadata?.commune || analysis.city || "00000";
+  }
+
+  if (docs.length === 0) {
+    if (dossierId) {
+      docs.push(...await db.select().from(documentReviewsTable).where(eq(documentReviewsTable.dossierId, dossierId)));
+    } else if (analysisId) {
+      docs.push(...await db.select().from(documentReviewsTable).where(eq(documentReviewsTable.analysisId, analysisId)));
+    }
   }
 
   try {
@@ -369,15 +384,23 @@ export async function orchestrateDossierAnalysis(
         logger.info(`[Orchestrator] Skipping geocoding — analysis ${analysisId} already has zone ${finalZone} and parcel data.`);
       }
     } catch (e) {
-      logger.warn("[Orchestrator] Could not check existing parcel:", e);
+      logger.warn("[Orchestrator] Could not check existing parcel", { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
   if (!skipGeocoding && initialAddress) {
     try {
       // Check cache first
-      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string } | null =
-        await getCachedGeocode(initialAddress);
+      const cachedGeocode = await getCachedGeocode(initialAddress);
+      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string } | null = cachedGeocode
+        ? {
+            lat: cachedGeocode.lat,
+            lng: cachedGeocode.lng,
+            label: cachedGeocode.label,
+            banId: cachedGeocode.banId ?? undefined,
+            inseeCode: cachedGeocode.inseeCode ?? undefined,
+          }
+        : null;
       if (bestMatch) {
         logger.info(`[Orchestrator] Geocoding cache hit for "${initialAddress}"`);
       } else {
@@ -431,7 +454,7 @@ export async function orchestrateDossierAnalysis(
               }
               logger.info(`[Orchestrator] Parcel + buildings persisted for analysis ${analysisId}`);
             } catch (persistErr) {
-              logger.warn("[Orchestrator] Could not persist parcel/buildings:", persistErr);
+              logger.warn("[Orchestrator] Could not persist parcel/buildings", { error: persistErr instanceof Error ? persistErr.message : String(persistErr) });
             }
           }
         }
@@ -548,7 +571,7 @@ export async function orchestrateDossierAnalysis(
       }
       logger.info(`[Orchestrator] Buildability results persisted for analysis ${analysisId}`);
     } catch (bErr) {
-      logger.warn("[Orchestrator] Could not persist buildability results:", bErr);
+      logger.warn("[Orchestrator] Could not persist buildability results", { error: bErr instanceof Error ? bErr.message : String(bErr) });
     }
   }
 
@@ -716,7 +739,7 @@ export async function orchestrateDossierAnalysis(
         slope_percent: parcelData?._topography?.slopePercent ?? null,
         is_flat: parcelData?._topography?.isFlat ?? null,
       },
-      plu: strictPluAnalysis?.zoneRules ?? {},
+      plu: strictPluAnalysis,
       market_data: marketData ?? null,
       admin_guide: adminGuide ?? null,
     }),
@@ -748,7 +771,7 @@ export async function orchestrateDossierAnalysis(
         logger.info(`[Orchestrator] Loaded custom prompt for commune ${communeName}`);
       }
     } catch (e) {
-      logger.warn("[Orchestrator] Could not load commune custom prompt:", e);
+      logger.warn("[Orchestrator] Could not load commune custom prompt", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // Call the new analyzePLUZone with Triage & Scoring
@@ -765,7 +788,7 @@ export async function orchestrateDossierAnalysis(
         parcelData
       );
     } catch (pluErr) {
-      logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data:", pluErr);
+      logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data", { error: pluErr instanceof Error ? pluErr.message : String(pluErr) });
     }
 
     const [existingZone] = await db.select().from(zoneAnalysesTable)

@@ -49,7 +49,7 @@ async function runRochecorbonAnalysis() {
   });
 
   // 3. EXECUTE ORCHESTRATION
-  const result = await orchestrateDossierAnalysis(dossierId, "admin-user", insee, true);
+  const result = await orchestrateDossierAnalysis(dossierId, [], { userId: "admin-user" });
 
   console.log("\n--- ANALYSIS RESULTS ---");
   console.log(`Status: ${result.status}`);

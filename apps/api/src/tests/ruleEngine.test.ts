@@ -35,7 +35,7 @@ async function testRuleEngine() {
 
   // Test 4: Unit handling
   const res4 = evaluateFormalRules({ hauteur: 13 }, rules1);
-  assert(res4[0].reason.includes("maximum de 12"), "Reason should mention the threshold");
+  assert(res4[0].justification.includes("maximum de 12"), "Reason should mention the threshold");
 
   console.log("✅ RuleEngine Unit Tests Passed!");
 }

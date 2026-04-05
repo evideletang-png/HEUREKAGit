@@ -178,7 +178,7 @@ async function fetchFromDataGouv(inseeCode: string, communeName: string): Promis
       }
     }
   } catch (err) {
-    logger.warn("[PLUAutoFetch] data.gouv.fr fetch failed:", err);
+    logger.warn("[PLUAutoFetch] data.gouv.fr fetch failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
   return results;
@@ -232,6 +232,7 @@ export async function autoFetchPLU(
           subCategory: "PLU",
           type: doc.docType === "oap" ? "oap" : "plu",
           fileName: doc.fileName,
+          fileHash: crypto.createHash("sha256").update(doc.rawText).digest("hex"),
           status: "parsing",
           rawText: doc.rawText,
         }).returning();

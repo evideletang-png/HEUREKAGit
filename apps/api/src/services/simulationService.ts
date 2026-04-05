@@ -39,7 +39,7 @@ export function simulateProjectModifications(
     let scoreImpact = 0;
     let delta = "";
 
-    const rule = rules.find(r => r.id === nc.ruleId);
+    const rule = rules.find(r => r.id === nc.rule_id);
     if (!rule) return;
 
     const category = rule.category;
@@ -48,7 +48,7 @@ export function simulateProjectModifications(
       case "hauteur":
         if (rule.max !== undefined) {
           suggestedValue = rule.max;
-          delta = `Reduire de ${(nc.actual - suggestedValue).toFixed(2)}m`;
+          delta = `Reduire de ${(((nc.actual_value as number) ?? 0) - suggestedValue).toFixed(2)}m`;
           scoreImpact = 30; // Weight for height
         }
         break;
@@ -56,7 +56,7 @@ export function simulateProjectModifications(
       case "recul":
         if (rule.min !== undefined) {
           suggestedValue = rule.min;
-          delta = `Augmenter de ${(suggestedValue - (nc.actual || 0)).toFixed(2)}m`;
+          delta = `Augmenter de ${(suggestedValue - ((nc.actual_value as number) || 0)).toFixed(2)}m`;
           scoreImpact = 20; // Weight for setback
         }
         break;
@@ -64,7 +64,7 @@ export function simulateProjectModifications(
       case "emprise":
         if (rule.max !== undefined) {
           suggestedValue = rule.max;
-          delta = `Reduire de ${(nc.actual - suggestedValue).toFixed(2)}m²`;
+          delta = `Reduire de ${(((nc.actual_value as number) ?? 0) - suggestedValue).toFixed(2)}m²`;
           scoreImpact = 15;
         }
         break;
@@ -72,9 +72,9 @@ export function simulateProjectModifications(
 
     if (suggestedValue !== null) {
       suggestions.push({
-        issueId: nc.ruleId,
+        issueId: nc.rule_id,
         category: category,
-        currentValue: nc.actual,
+        currentValue: nc.actual_value,
         suggestedValue,
         delta,
         scoreImpact,
