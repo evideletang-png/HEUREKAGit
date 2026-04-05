@@ -78,6 +78,20 @@ function canAccessCommune(role: string | null | undefined, assignedCommunes: str
   return !!normalized && assignedCommunes.includes(normalized);
 }
 
+function parseDocumentTags(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String).map(tag => tag.trim()).filter(Boolean);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String).map(tag => tag.trim()).filter(Boolean);
+    } catch {
+      return raw.split(",").map(tag => tag.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 async function resolveInseeCode(commune: string): Promise<string | null> {
   const value = (commune || "").trim();
   if (!value) return null;
@@ -913,42 +927,58 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
       return;
     }
 
-    const rawText = await extractTextFromFile(file.path, file.mimetype);
-    const suggestion = autoSuggestClassification(rawText, file.originalname);
-    const category = req.body.category || suggestion.category;
-    const subCategory = req.body.subCategory || suggestion.subCategory;
-    const documentType = req.body.documentType || suggestion.documentType;
-    const tags = req.body.tags ? (typeof req.body.tags === "string" ? JSON.parse(req.body.tags) : req.body.tags) : suggestion.tags;
-
     const ext = path.extname(file.originalname || "") || ".pdf";
     const storedFileName = `${crypto.randomUUID()}${ext}`;
+    const uploadDir = path.resolve(process.cwd(), "uploads");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    const persistentPath = path.join(uploadDir, storedFileName);
 
+    try {
+      fs.copyFileSync(file.path, persistentPath);
+    } catch (copyErr) {
+      try { fs.unlinkSync(file.path); } catch {}
+      logger.error("[VisionStorage] Failed to store file", copyErr);
+      return res.status(500).json({ error: "FILE_STORAGE_FAILED", message: "Le fichier n'a pas pu etre enregistre." });
+    }
+
+    const requestedTags = parseDocumentTags(req.body.tags);
     const [doc] = await db.insert(townHallDocumentsTable).values({
       userId: req.user!.userId,
       commune: targetCommune,
       title: req.body.title || file.originalname,
       fileName: storedFileName,
-      rawText,
-      category,
-      subCategory,
-      documentType,
-      tags,
+      rawText: "",
+      category: req.body.category || null,
+      subCategory: req.body.subCategory || null,
+      documentType: req.body.documentType || null,
+      tags: requestedTags,
       zone: req.body.zone || null
     }).returning();
 
-    const uploadDir = path.resolve(process.cwd(), "uploads");
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    const persistentPath = path.join(uploadDir, doc.fileName);
-    try {
-      fs.copyFileSync(file.path, persistentPath);
-    } catch (copyErr) {
-      logger.error("[VisionStorage] Failed to store file", copyErr);
-    }
+    try { fs.unlinkSync(file.path); } catch {}
 
-    res.json({ status: "processing", message: "Document reçu, indexation en cours.", documentId: doc.id });
+    res.json({ status: "processing", message: "Document recu, indexation en cours.", documentId: doc.id });
 
     setImmediate(async () => {
       try {
+        const rawText = await extractTextFromFile(persistentPath, file.mimetype);
+        const suggestion = autoSuggestClassification(rawText, file.originalname);
+        const category = req.body.category || suggestion.category;
+        const subCategory = req.body.subCategory || suggestion.subCategory;
+        const documentType = req.body.documentType || suggestion.documentType;
+        const tags = requestedTags.length > 0 ? requestedTags : suggestion.tags;
+
+        await db.update(townHallDocumentsTable)
+          .set({
+            rawText,
+            category,
+            subCategory,
+            documentType,
+            tags,
+            updatedAt: new Date()
+          })
+          .where(eq(townHallDocumentsTable.id, doc.id));
+
         let canonicalType: any = "other";
         const dt = (documentType || "").toLowerCase();
         if (dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
@@ -987,8 +1017,6 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
         logger.debug("[mairie/upload] Successfully processed RAG", { docId: doc.id });
       } catch (ragErr) {
         logger.error("[mairie/upload] RAG vectorization failed", ragErr, { docId: doc.id });
-      } finally {
-        try { fs.unlinkSync(file.path); } catch {}
       }
     });
     return;

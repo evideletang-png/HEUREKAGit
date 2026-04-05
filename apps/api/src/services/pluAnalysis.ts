@@ -96,8 +96,8 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
 
   // 3. Extract and combine
   if (segments.length === 0) {
-    console.warn(`[pluAnalysis] No matching sections found for ${zoneCode}. Falling back to first 30k chars.`);
-    return text.substring(0, 30000);
+    console.warn(`[pluAnalysis] No matching sections found for ${zoneCode}. Returning no zone excerpt instead of broad fallback.`);
+    return "";
   }
 
   // Sort and merge

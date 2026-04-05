@@ -62,9 +62,10 @@ export async function buildAnalysisContext(
         eq(townHallDocumentsTable.isOpposable, true)
       )
     );
+  const usableTownHallDocs = townHallDocs.filter((doc) => (doc.rawText || "").trim().length >= 100);
 
   // Combine static document sources
-  const relevantDocs = [...baseIADocs, ...townHallDocs];
+  const relevantDocs = [...baseIADocs, ...usableTownHallDocs];
 
   // 3b. ALWAYS run semantic search against base_ia_embeddings for zone-specific PLU chunks.
   // This is the primary knowledge source — it returns the most relevant indexed PLU text

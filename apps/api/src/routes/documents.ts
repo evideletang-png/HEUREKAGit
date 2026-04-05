@@ -476,7 +476,8 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
           if (cityName) {
             const thDocs = await db.select().from(townHallDocumentsTable)
               .where(eq(sql`lower(${townHallDocumentsTable.commune})`, cityName.toLowerCase()));
-            townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + thDocs.map(d => d.rawText).join("\n\n---\n\n");
+            const usableTownHallDocs = thDocs.filter(d => (d.rawText || "").trim().length >= 100);
+            townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + usableTownHallDocs.map(d => d.rawText).join("\n\n---\n\n");
 
             const thPrompts = await db.select().from(townHallPromptsTable)
               .where(eq(sql`lower(${townHallPromptsTable.commune})`, cityName.toLowerCase())).limit(1);
@@ -486,7 +487,8 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
           // If no analysis but commune is provided, fetch town hall context directly
           const thDocs = await db.select().from(townHallDocumentsTable)
             .where(eq(sql`lower(${townHallDocumentsTable.commune})`, effectiveCommune.toLowerCase()));
-          townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + thDocs.map(d => d.rawText).join("\n\n---\n\n");
+          const usableTownHallDocs = thDocs.filter(d => (d.rawText || "").trim().length >= 100);
+          townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + usableTownHallDocs.map(d => d.rawText).join("\n\n---\n\n");
 
           const thPrompts = await db.select().from(townHallPromptsTable)
             .where(eq(sql`lower(${townHallPromptsTable.commune})`, effectiveCommune.toLowerCase())).limit(1);
@@ -534,9 +536,9 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
           .set({
             comparisonResultJson: comparisonResult ? JSON.stringify(comparisonResult) : null,
             address: effectiveCommune && !adresse ? `${effectiveCommune}, France` : adresse,
-            parcelRef: (parcel?.cadastralSection && parcel?.parcelNumber) 
+            parcelRef: (parcel?.cadastralSection && parcel?.parcelNumber)
               ? `${parcel.cadastralSection}${parcel.parcelNumber}`
-              : (zoneCode ? `SEC-${Math.floor(Math.random() * 9999)}` : null),
+              : null,
             zoneCode: zoneCode || null,
             zoneLabel: zoneLabel || null,
             status: "completed",
@@ -650,7 +652,8 @@ router.post("/:id/compare", authenticate, async (req: AuthRequest, res) => {
         if (cityName) {
           const thDocs = await db.select().from(townHallDocumentsTable)
             .where(eq(sql`lower(${townHallDocumentsTable.commune})`, cityName.toLowerCase()));
-          townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + thDocs.map(d => d.rawText).join("\n\n---\n\n");
+          const usableTownHallDocs = thDocs.filter(d => (d.rawText || "").trim().length >= 100);
+          townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + usableTownHallDocs.map(d => d.rawText).join("\n\n---\n\n");
 
           const thPrompts = await db.select().from(townHallPromptsTable)
             .where(eq(sql`lower(${townHallPromptsTable.commune})`, cityName.toLowerCase())).limit(1);
@@ -660,7 +663,8 @@ router.post("/:id/compare", authenticate, async (req: AuthRequest, res) => {
         // Direct context from commune
         const thDocs = await db.select().from(townHallDocumentsTable)
           .where(eq(sql`lower(${townHallDocumentsTable.commune})`, effectiveCommune.toLowerCase()));
-        townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + thDocs.map(d => d.rawText).join("\n\n---\n\n");
+        const usableTownHallDocs = thDocs.filter(d => (d.rawText || "").trim().length >= 100);
+        townHallDocumentsText = (townHallDocumentsText ? townHallDocumentsText + "\n\n---\n\n" : "") + usableTownHallDocs.map(d => d.rawText).join("\n\n---\n\n");
 
         const thPrompts = await db.select().from(townHallPromptsTable)
           .where(eq(sql`lower(${townHallPromptsTable.commune})`, effectiveCommune.toLowerCase())).limit(1);

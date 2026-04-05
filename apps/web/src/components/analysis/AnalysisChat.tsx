@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Loader2, Bot, User, Sparkles, RotateCcw } from "lucide-react";
+import { Send, Loader2, User, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,6 +27,41 @@ const SUGGESTED_QUESTIONS = [
 interface Props {
   analysisId: string;
   analysisStatus: string;
+}
+
+function BuildingBotAvatar({ compact = false, className = "" }: { compact?: boolean; className?: string }) {
+  const size = compact ? "w-8 h-8" : "w-12 h-12";
+  const body = compact ? "w-5 h-5" : "w-7 h-7";
+  const arm = compact ? "h-3 w-1" : "h-4 w-1.5";
+  const hand = compact ? "w-1.5 h-1.5" : "w-2 h-2";
+  const eye = compact ? "w-1 h-1" : "w-1.5 h-1.5";
+  const smile = compact ? "w-2.5 h-1.5" : "w-3.5 h-2";
+  const windowCell = compact ? "w-1 h-1" : "w-1.5 h-1.5";
+
+  return (
+    <div className={`relative ${size} ${className}`}>
+      <div className="absolute left-1/2 top-0 h-2 w-4 -translate-x-1/2 rounded-t-full bg-amber-300 shadow-sm" />
+      <div className={`absolute left-0 top-4 ${arm} -rotate-[25deg] rounded-full bg-amber-500`} />
+      <div className={`absolute left-[-2px] top-6 ${hand} rounded-full bg-amber-300`} />
+      <div className={`absolute right-0 top-4 ${arm} rotate-[25deg] rounded-full bg-amber-500`} />
+      <div className={`absolute right-[-2px] top-6 ${hand} rounded-full bg-amber-300`} />
+      <div className={`absolute bottom-0 left-1/2 ${body} -translate-x-1/2 rounded-[0.85rem] border border-slate-700/20 bg-gradient-to-b from-sky-300 via-sky-500 to-sky-700 shadow-[0_8px_16px_rgba(15,23,42,0.18)]`}>
+        <div className="absolute inset-x-1 top-1 h-1 rounded-full bg-white/30" />
+        <div className="absolute left-1/2 top-2.5 flex -translate-x-1/2 gap-1">
+          <span className={`${eye} rounded-full bg-slate-900`} />
+          <span className={`${eye} rounded-full bg-slate-900`} />
+        </div>
+        <div className={`absolute left-1/2 top-4 -translate-x-1/2 rounded-b-full border-b-2 border-slate-900 ${smile}`} />
+        <div className="absolute inset-x-1 bottom-1 grid grid-cols-2 gap-1">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <span key={index} className={`${windowCell} rounded-[2px] bg-white/80 shadow-[0_0_0_1px_rgba(255,255,255,0.18)]`} />
+          ))}
+        </div>
+      </div>
+      <div className="absolute bottom-[-1px] left-1/2 h-1 w-3 -translate-x-[120%] rounded-full bg-slate-700" />
+      <div className="absolute bottom-[-1px] left-1/2 h-1 w-3 translate-x-[20%] rounded-full bg-slate-700" />
+    </div>
+  );
 }
 
 export function AnalysisChat({ analysisId, analysisStatus }: Props) {
@@ -143,13 +178,13 @@ export function AnalysisChat({ analysisId, analysisStatus }: Props) {
     <div className="flex flex-col gap-4 h-[calc(100vh-340px)] min-h-[500px]">
       {/* Header */}
       <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex items-start gap-3">
-        <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-          <Sparkles className="w-5 h-5 text-white" />
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-100 via-white to-sky-100 border border-primary/15 flex items-center justify-center flex-shrink-0 shadow-sm">
+          <BuildingBotAvatar />
         </div>
         <div>
           <p className="font-semibold text-primary">Assistant HEUREKA IA</p>
           <p className="text-sm text-muted-foreground">
-            Posez vos questions sur la faisabilité de votre projet. L'IA croise les données cadastrales, PLU et urbanistiques de cette parcelle.
+            Posez vos questions sur la faisabilite de votre projet. L'IA croise cette analyse avec les documents disponibles et cite les elements factuels utilises.
           </p>
         </div>
       </div>
@@ -178,7 +213,7 @@ export function AnalysisChat({ analysisId, analysisStatus }: Props) {
             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === "user" ? "bg-primary/10" : "bg-primary"}`}>
               {msg.role === "user"
                 ? <User className="w-4 h-4 text-primary" />
-                : <Bot className="w-4 h-4 text-white" />
+                : <BuildingBotAvatar compact className="scale-[0.95]" />
               }
             </div>
             <div className={`flex-1 max-w-[85%] ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
@@ -220,7 +255,7 @@ export function AnalysisChat({ analysisId, analysisStatus }: Props) {
         </div>
       </form>
       <p className="text-xs text-muted-foreground text-center">
-        L'IA s'appuie sur les données de cette analyse. Les réponses sont indicatives — vérifiez auprès des services d'urbanisme.
+        L'IA s'appuie sur les donnees de cette analyse et doit citer ses appuis factuels. Les reponses restent indicatives et doivent etre confirmees par les services d'urbanisme.
       </p>
     </div>
   );
