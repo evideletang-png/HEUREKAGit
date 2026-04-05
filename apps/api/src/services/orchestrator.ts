@@ -35,6 +35,7 @@ import { communesTable } from "@workspace/db";
 import { geocodeAddress } from "./geocoding.js";
 import { getZoningByCoords } from "./planning.js";
 import { getParcelByCoords, getBuildingsByParcel } from "./parcel.js";
+import type { ParcelData } from "./parcel.js";
 import { DVFService } from "./dvfService.js";
 
 // ─── Geocoding cache helpers ────────────────────────────────────────────────
@@ -89,6 +90,36 @@ async function cacheGeocode(address: string, result: { lat: number; lng: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+
+function parseJsonSafely<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function buildPersistedParcelMetadata(parcelData: ParcelData) {
+  return {
+    ...(parcelData.metadata || {}),
+    parcelRefs: Array.isArray((parcelData.metadata as any)?.parcelRefs) ? (parcelData.metadata as any).parcelRefs : undefined,
+    parcelCount: (parcelData.metadata as any)?.parcelCount || 1,
+    perimeterM: parcelData._perimeterM ?? null,
+    depthM: parcelData._depthM ?? null,
+    isCornerPlot: parcelData._isCornerPlot ?? false,
+    topography: parcelData._topography ?? null,
+    frontRoadName: parcelData._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,
+  };
+}
+
+function hasReusableParcelContext(parcelRow: typeof parcelsTable.$inferSelect, metadata: Record<string, any> | null) {
+  if (!parcelRow.geometryJson || parcelRow.centroidLat == null || parcelRow.centroidLng == null) {
+    return false;
+  }
+  if (!metadata) return false;
+  return metadata.perimeterM != null && metadata.depthM != null && metadata.topography != null;
+}
 
 /**
  * Knowledge Routing Rules: Mapping piece codes to search priorities
@@ -343,11 +374,10 @@ export async function orchestrateDossierAnalysis(
         .where(eq(parcelsTable.analysisId, analysisId)).limit(1);
       const [existingAnalysis] = await db.select({ zoneCode: analysesTable.zoneCode })
         .from(analysesTable).where(eq(analysesTable.id, analysisId)).limit(1);
-      if (existingParcel && existingAnalysis?.zoneCode) {
+      const metadata = parseJsonSafely<Record<string, any>>(existingParcel?.metadataJson ?? null);
+      const canReuseStoredParcel = !!existingParcel && !!existingAnalysis?.zoneCode && hasReusableParcelContext(existingParcel, metadata);
+      if (canReuseStoredParcel && existingParcel) {
         skipGeocoding = true;
-        const metadata = existingParcel.metadataJson
-          ? (() => { try { return JSON.parse(existingParcel.metadataJson); } catch { return null; } })()
-          : null;
         parcelData = {
           cadastralSection: existingParcel.cadastralSection,
           parcelNumber: existingParcel.parcelNumber,
@@ -380,8 +410,10 @@ export async function orchestrateDossierAnalysis(
           analyseParcelleResult: null,
         };
         parcelData.buildings = buildingData.buildings;
-        finalZone = existingAnalysis.zoneCode;
+        finalZone = existingAnalysis.zoneCode ?? finalZone;
         logger.info(`[Orchestrator] Skipping geocoding — analysis ${analysisId} already has zone ${finalZone} and parcel data.`);
+      } else if (existingParcel && existingAnalysis?.zoneCode) {
+        logger.info(`[Orchestrator] Stored parcel context incomplete for analysis ${analysisId}; recomputing geodata to restore missing metrics.`);
       }
     } catch (e) {
       logger.warn("[Orchestrator] Could not check existing parcel", { error: e instanceof Error ? e.message : String(e) });
@@ -436,7 +468,7 @@ export async function orchestrateDossierAnalysis(
                 centroidLng: parcelData.centroidLng ?? null,
                 roadFrontageLengthM: parcelData.roadFrontageLengthM ?? null,
                 sideBoundaryLengthM: parcelData.sideBoundaryLengthM ?? null,
-                metadataJson: parcelData.metadata ? JSON.stringify(parcelData.metadata) : null,
+                metadataJson: JSON.stringify(buildPersistedParcelMetadata(parcelData)),
               });
 
               if (buildingData?.buildings?.length > 0) {
