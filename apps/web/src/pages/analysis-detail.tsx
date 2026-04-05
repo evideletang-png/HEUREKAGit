@@ -110,6 +110,36 @@ function ReliabilityBadge({ level }: { level: ReliabilityLevel }) {
   );
 }
 
+function hasMeaningfulRegulatoryText(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length < 25) return false;
+
+  const placeholders = [
+    "regle standard de la zone.",
+    "règle standard de la zone.",
+    "non identifie",
+    "non identifiée",
+    "digest partiel disponible",
+    "article 1",
+    "article 2",
+    "article 3",
+    "article 4",
+    "article 5",
+    "article 6",
+    "article 7",
+    "article 8",
+    "article 9",
+    "article 10",
+    "article 11",
+    "article 12",
+    "article 13",
+  ];
+
+  const lower = normalized.toLowerCase();
+  return !placeholders.includes(lower);
+}
+
 export default function AnalysisDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -123,6 +153,7 @@ export default function AnalysisDetailPage() {
 
   const [simCost, setSimCost] = useState("");
   const [simTARate, setSimTARate] = useState("");
+  const [activeTab, setActiveTab] = useState("parcel");
 
   // Initialize from existing analysis data if available
   useEffect(() => {
@@ -312,6 +343,46 @@ export default function AnalysisDetailPage() {
   const missingRequirements = gc?.missing_requirements ?? {};
   const missingPluIssue = zoneIssues.find((issue: any) => issue?.type === "NO_PLU_DATA" || issue?.code === "NO_PLU_DATA")
     || (missingRequirements?.plu_source ? { message: missingRequirements.plu_source } : null);
+  const parsedDigest = (() => {
+    try {
+      if (!(zoneAnalysis as any)?.structuredJson) return null;
+      return typeof (zoneAnalysis as any).structuredJson === "string"
+        ? JSON.parse((zoneAnalysis as any).structuredJson)
+        : (zoneAnalysis as any).structuredJson;
+    } catch {
+      return null;
+    }
+  })();
+
+  const regulationControls = Array.isArray((analysis as any).metadata?.pluAnalysis?.controles)
+    ? (analysis as any).metadata.pluAnalysis.controles.filter((control: any) =>
+        hasMeaningfulRegulatoryText(control?.message) || hasMeaningfulRegulatoryText(control?.article) || hasMeaningfulRegulatoryText(control?.categorie)
+      )
+    : [];
+
+  const meaningfulArticles = Array.isArray((zoneAnalysis as any)?.articles)
+    ? (zoneAnalysis as any).articles.filter((article: any) =>
+        hasMeaningfulRegulatoryText(article?.sourceText)
+        || hasMeaningfulRegulatoryText(article?.summary)
+        || hasMeaningfulRegulatoryText(article?.impactText)
+        || hasMeaningfulRegulatoryText(article?.vigilanceText)
+      )
+    : [];
+
+  const digestHighlights = [
+    parsedDigest?.dimensions?.maxFootprint ? `Emprise: ${parsedDigest.dimensions.maxFootprint}` : null,
+    parsedDigest?.dimensions?.maxHeight ? `Hauteur: ${parsedDigest.dimensions.maxHeight}` : null,
+    parsedDigest?.dimensions?.minSetbacks ? `Reculs: ${parsedDigest.dimensions.minSetbacks}` : null,
+    parsedDigest?.dimensions?.greenSpace ? `Espaces libres: ${parsedDigest.dimensions.greenSpace}` : null,
+    ...(Array.isArray(parsedDigest?.restrictions) ? parsedDigest.restrictions.slice(0, 2) : []),
+    ...(Array.isArray(parsedDigest?.conditions) ? parsedDigest.conditions.slice(0, 2) : []),
+  ].filter((value): value is string => hasMeaningfulRegulatoryText(value));
+
+  const hasDigestSubstance = !!(
+    hasMeaningfulRegulatoryText(parsedDigest?.summary)
+    || digestHighlights.length > 0
+  );
+  const hasRegulatoryMatter = meaningfulArticles.length > 0 || regulationControls.length > 0 || hasDigestSubstance || !!missingPluIssue;
 
   const reliabilitySummary: { label: string; level: ReliabilityLevel }[] = [
     { label: "Adresse & parcelle", level: (dataQuality.address_and_parcel || (sourceLock?.lat && displayParcelRef ? "validated" : parcel ? "calculated" : "to_confirm")) as ReliabilityLevel },
@@ -601,16 +672,16 @@ export default function AnalysisDetailPage() {
         );
       })()}
 
-      <Tabs defaultValue="parcel" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full justify-start h-auto p-1 bg-muted/50 rounded-xl mb-6 overflow-x-auto flex flex-nowrap scrollbar-hide">
           <TabsTrigger value="parcel" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm border border-transparent data-[state=active]:border-primary/20"><MapIcon className="w-4 h-4 mr-2"/> Parcelle</TabsTrigger>
           <TabsTrigger value="marche" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm font-bold border-2 border-transparent data-[state=active]:border-primary bg-primary/5 text-primary"><Activity className="w-4 h-4 mr-2"/> Calcul des Taxes 🏛️</TabsTrigger>
           <TabsTrigger value="geocontext" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!gc}><Layers className="w-4 h-4 mr-2"/> Géo-contexte</TabsTrigger>
-          <TabsTrigger value="urbanisme" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!zoneAnalysis}><BookOpen className="w-4 h-4 mr-2"/> Urbanisme</TabsTrigger>
+          <TabsTrigger value="urbanisme" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!zoneAnalysis}><BookOpen className="w-4 h-4 mr-2"/> Règles & preuves</TabsTrigger>
           <TabsTrigger value="calcul" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!buildability && !missingPluIssue}><Calculator className="w-4 h-4 mr-2"/> Constructibilité</TabsTrigger>
           <TabsTrigger value="rapport" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!data.report}><FileText className="w-4 h-4 mr-2"/> Rapport</TabsTrigger>
           <TabsTrigger value="implantation" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!gc}><Pencil className="w-4 h-4 mr-2"/> Implantation</TabsTrigger>
-          <TabsTrigger value="chat" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm"><MessageSquare className="w-4 h-4 mr-2"/> Assistant IA</TabsTrigger>
+          <TabsTrigger value="chat" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm font-bold border border-transparent data-[state=active]:border-primary/20 bg-primary/5 text-primary"><MessageSquare className="w-4 h-4 mr-2"/> Assistant IA</TabsTrigger>
           <TabsTrigger value="logs" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm"><Activity className="w-4 h-4 mr-2"/> Logs</TabsTrigger>
         </TabsList>
 
@@ -859,8 +930,8 @@ export default function AnalysisDetailPage() {
              <CardHeader className="bg-primary/5 pb-4">
                <div className="flex justify-between items-start">
                  <div>
-                   <CardTitle className="text-2xl text-primary mb-1">Règlement de la Zone {zoneAnalysis?.zoneCode}</CardTitle>
-                   <p className="text-muted-foreground">{zoneAnalysis?.zoneLabel}</p>
+                   <CardTitle className="text-2xl text-primary mb-1">Règles & preuves - Zone {zoneAnalysis?.zoneCode}</CardTitle>
+                   <p className="text-muted-foreground">{zoneAnalysis?.zoneLabel || "Lecture réglementaire de la zone identifiée"}</p>
                  </div>
                  <div className="flex items-center gap-2">
                    <ConfidenceBadge confidence="Donnée récupérée" type="data" />
@@ -869,6 +940,63 @@ export default function AnalysisDetailPage() {
                </div>
              </CardHeader>
              <CardContent className="pt-6">
+               <Card className="mb-6 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-sky-50/50">
+                 <CardContent className="p-5">
+                   <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1.2fr_0.9fr] gap-5">
+                     <div className="space-y-3">
+                       <div className="flex items-center gap-2 text-primary">
+                         <ShieldCheck className="w-4 h-4" />
+                         <h3 className="font-semibold">Ce que l'analyse sait vraiment</h3>
+                       </div>
+                       <ul className="space-y-2 text-sm text-foreground">
+                         <li className="rounded-lg border border-border/60 bg-background/80 px-3 py-2">
+                           Zone retenue: <span className="font-semibold">{analysis.zoneCode ? `Zone ${analysis.zoneCode}` : "Non déterminée"}</span>
+                         </li>
+                         <li className="rounded-lg border border-border/60 bg-background/80 px-3 py-2">
+                           Documents exploitables: <span className="font-semibold">{meaningfulArticles.length > 0 || hasDigestSubstance || regulationControls.length > 0 ? "oui, partiellement" : "pas de règles exploitables détectées"}</span>
+                         </li>
+                         <li className="rounded-lg border border-border/60 bg-background/80 px-3 py-2">
+                           Constructibilité: <span className="font-semibold">{buildability ? "calcul disponible" : "reste à confirmer"}</span>
+                         </li>
+                       </ul>
+                     </div>
+                     <div className="space-y-3">
+                       <div className="flex items-center gap-2 text-primary">
+                         <ScrollText className="w-4 h-4" />
+                         <h3 className="font-semibold">Lecture recommandée</h3>
+                       </div>
+                       <div className="rounded-xl border border-border/60 bg-background/80 p-4 text-sm text-muted-foreground leading-relaxed">
+                         {meaningfulArticles.length > 0
+                           ? "Les règles ci-dessous sont les éléments les plus exploitables retrouvés dans la base réglementaire. Elles sont plus fiables que les numéros d'articles seuls."
+                           : hasRegulatoryMatter
+                             ? "Le système a retrouvé des indices réglementaires, mais pas assez de matière pour reconstituer article par article un règlement propre. Lis d'abord les preuves ci-dessous, puis utilise l'assistant pour questionner un point précis."
+                             : "Aucune règle exploitable n'a été reconstituée. L'assistant IA sera plus utile pour croiser les documents disponibles, expliquer les limites et orienter la prochaine action."}
+                       </div>
+                     </div>
+                     <div className="rounded-xl border border-primary/20 bg-primary text-primary-foreground p-4 flex flex-col justify-between gap-4">
+                       <div>
+                         <div className="flex items-center gap-2 mb-2">
+                           <Sparkles className="w-4 h-4 text-accent" />
+                           <p className="font-semibold">Assistant HEUREKA</p>
+                         </div>
+                         <p className="text-sm text-primary-foreground/85 leading-relaxed">
+                           Le meilleur point d'entrée pour creuser un article, confronter une hypothèse ou demander une lecture plus discutionnelle du projet.
+                         </p>
+                       </div>
+                       <div className="space-y-2">
+                         <Button variant="secondary" className="w-full justify-start" onClick={() => setActiveTab("chat")}>
+                           <MessageSquare className="w-4 h-4" />
+                           Ouvrir l'assistant IA
+                         </Button>
+                         <p className="text-[11px] text-primary-foreground/75">
+                           Exemples: "Quels extraits justifient la hauteur max ?" ou "Pourquoi la constructibilité reste partielle ?"
+                         </p>
+                       </div>
+                     </div>
+                   </div>
+                 </CardContent>
+               </Card>
+
                {missingPluIssue && (
                  <div className="flex flex-col items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-amber-800 mb-6">
                    <div className="flex items-center gap-2 font-semibold">
@@ -883,12 +1011,12 @@ export default function AnalysisDetailPage() {
                )}
 
                {/* NOUVEL AFFICHAGE DES ARTICLES (TUNNEL STEP 3) */}
-               {(analysis as any).metadata?.pluAnalysis?.controles && (
+               {regulationControls.length > 0 && (
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                   {(analysis as any).metadata.pluAnalysis.controles.map((c: any, i: number) => (
+                   {regulationControls.map((c: any, i: number) => (
                      <Card key={i} className="border-border/60 hover:border-primary/40 transition-colors">
                        <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-                         <CardTitle className="text-sm font-bold text-primary">{c.article || c.categorie}</CardTitle>
+                         <CardTitle className="text-sm font-bold text-primary">{c.article || c.categorie || "Point réglementaire"}</CardTitle>
                          <Badge className={`${c.statut === 'CONFORME' ? 'bg-emerald-500' : 'bg-amber-500'} text-white border-0 text-[10px]`}>
                            {c.statut}
                          </Badge>
@@ -902,70 +1030,74 @@ export default function AnalysisDetailPage() {
                )}
 
                 {/* NEW: ZONE DIGEST (TRIAGE SUMMARY) */}
-                {(zoneAnalysis as any)?.structuredJson && (
+                {hasDigestSubstance && (
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                    {(() => {
-                      const digest = JSON.parse((zoneAnalysis as any).structuredJson || "{}");
-                      if (!digest.summary) return null;
-                      return (
-                        <>
-                          <Card className="md:col-span-4 border-primary/20 bg-primary/5 shadow-sm overflow-hidden">
-                            <CardHeader className="py-3 px-6 bg-primary/10 border-b border-primary/10">
-                              <CardTitle className="text-sm font-bold flex items-center gap-2 text-primary">
-                                <Sparkles className="w-4 h-4" /> Synthèse Réglementaire - Zone {zoneAnalysis?.zoneCode}
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-6">
-                              <p className="text-sm text-foreground leading-relaxed italic mb-4">"{digest.summary}"</p>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                                <div>
-                                  <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
-                                    <Maximize2 className="w-3 h-3" /> Dimensions Clés
-                                  </h5>
-                                  <ul className="text-xs space-y-1.5 font-medium">
-                                    {digest.dimensions?.maxFootprint && <li>Emprise: {digest.dimensions.maxFootprint}</li>}
-                                    {digest.dimensions?.maxHeight && <li>Hauteur: {digest.dimensions.maxHeight}</li>}
-                                    {digest.dimensions?.minSetbacks && <li>Recul: {digest.dimensions.minSetbacks}</li>}
-                                    {digest.dimensions?.greenSpace && <li>Espaces: {digest.dimensions.greenSpace}</li>}
-                                  </ul>
-                                </div>
-                                <div>
-                                  <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
-                                    <ShieldAlert className="w-3 h-3 text-amber-600" /> Restrictions
-                                  </h5>
-                                  <ul className="text-xs space-y-1 text-muted-foreground list-disc list-inside">
-                                    {(digest.restrictions || []).slice(0, 4).map((r: string, i: number) => <li key={i}>{r}</li>)}
-                                  </ul>
-                                </div>
-                                <div>
-                                  <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
-                                    <FileCheck className="w-3 h-3 text-emerald-600" /> Conditions
-                                  </h5>
-                                  <ul className="text-xs space-y-1 text-muted-foreground list-disc list-inside">
-                                    {(digest.conditions || []).slice(0, 4).map((c: string, i: number) => <li key={i}>{c}</li>)}
-                                  </ul>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </>
-                      );
-                    })()}
+                    <Card className="md:col-span-4 border-primary/20 bg-primary/5 shadow-sm overflow-hidden">
+                      <CardHeader className="py-3 px-6 bg-primary/10 border-b border-primary/10">
+                        <CardTitle className="text-sm font-bold flex items-center gap-2 text-primary">
+                          <Sparkles className="w-4 h-4" /> Synthèse réglementaire exploitable
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-6">
+                        {hasMeaningfulRegulatoryText(parsedDigest?.summary) && (
+                          <p className="text-sm text-foreground leading-relaxed italic mb-4">"{parsedDigest.summary}"</p>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                          <div>
+                            <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
+                              <Maximize2 className="w-3 h-3" /> Dimensions clés
+                            </h5>
+                            <ul className="text-xs space-y-1.5 font-medium">
+                              {parsedDigest?.dimensions?.maxFootprint && <li>Emprise: {parsedDigest.dimensions.maxFootprint}</li>}
+                              {parsedDigest?.dimensions?.maxHeight && <li>Hauteur: {parsedDigest.dimensions.maxHeight}</li>}
+                              {parsedDigest?.dimensions?.minSetbacks && <li>Recul: {parsedDigest.dimensions.minSetbacks}</li>}
+                              {parsedDigest?.dimensions?.greenSpace && <li>Espaces: {parsedDigest.dimensions.greenSpace}</li>}
+                              {!parsedDigest?.dimensions?.maxFootprint && !parsedDigest?.dimensions?.maxHeight && !parsedDigest?.dimensions?.minSetbacks && !parsedDigest?.dimensions?.greenSpace && (
+                                <li className="text-muted-foreground">Aucune valeur dimensionnelle stabilisée.</li>
+                              )}
+                            </ul>
+                          </div>
+                          <div>
+                            <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
+                              <ShieldAlert className="w-3 h-3 text-amber-600" /> Restrictions
+                            </h5>
+                            <ul className="text-xs space-y-1 text-muted-foreground list-disc list-inside">
+                              {(parsedDigest?.restrictions || []).slice(0, 4).map((r: string, i: number) => <li key={i}>{r}</li>)}
+                              {(!parsedDigest?.restrictions || parsedDigest.restrictions.length === 0) && <li>Aucune restriction clairement extraite.</li>}
+                            </ul>
+                          </div>
+                          <div>
+                            <h5 className="text-[10px] font-black uppercase text-muted-foreground mb-2 flex items-center gap-1">
+                              <FileCheck className="w-3 h-3 text-emerald-600" /> Conditions
+                            </h5>
+                            <ul className="text-xs space-y-1 text-muted-foreground list-disc list-inside">
+                              {(parsedDigest?.conditions || []).slice(0, 4).map((c: string, i: number) => <li key={i}>{c}</li>)}
+                              {(!parsedDigest?.conditions || parsedDigest.conditions.length === 0) && <li>Aucune condition claire isolée.</li>}
+                            </ul>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
                 )}
 
-                {(!((zoneAnalysis as any)?.articles?.length > 0)) && (
+                {(!meaningfulArticles.length && !hasDigestSubstance && !regulationControls.length) && (
                   <div className="flex flex-col items-center justify-center py-12 text-center bg-amber-50/60 rounded-xl border border-amber-200/60 mb-4">
                     <AlertTriangle className="w-8 h-8 text-amber-500 mb-3" />
-                    <h4 className="font-semibold text-amber-800 mb-1">Aucun article exploitable pour la zone</h4>
+                    <h4 className="font-semibold text-amber-800 mb-1">Aucune règle exploitable n'a été reconstituée</h4>
                     <p className="text-sm text-amber-700 max-w-sm">
-                      {missingPluIssue?.message || "Les articles du reglement de zone seront disponibles apres import manuel des documents PLU dans la Base IA mairie."}
+                      {missingPluIssue?.message || "La zone est identifiée, mais les documents indexés ne permettent pas encore de produire une lecture article par article suffisamment fiable."}
                     </p>
+                    <Button variant="outline" className="mt-4" onClick={() => setActiveTab("chat")}>
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      Demander une lecture guidée à l'assistant
+                    </Button>
                   </div>
                 )}
 
+                {meaningfulArticles.length > 0 && (
                 <Accordion type="single" collapsible className="w-full">
-                  {(zoneAnalysis as any)?.articles?.map((article: any) => {
+                  {meaningfulArticles.map((article: any) => {
                     const extra = JSON.parse(article.structuredJson || "{}");
                     const isHighlyRelevant = extra.relevanceScore >= 80;
                     
@@ -1088,6 +1220,7 @@ export default function AnalysisDetailPage() {
                     </AccordionItem>
                   )})}
                 </Accordion>
+                )}
               </CardContent>
             </Card>
          </TabsContent>
@@ -1398,7 +1531,28 @@ export default function AnalysisDetailPage() {
 
         {/* TAB ASSISTANT IA */}
         <TabsContent value="chat" className="focus-visible:outline-none">
-          <AnalysisChat analysisId={id} analysisStatus={analysis.status} />
+          <div className="space-y-4">
+            <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-background to-sky-50/60">
+              <CardContent className="p-5">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-primary">
+                      <Sparkles className="w-4 h-4" />
+                      <p className="font-semibold">Analyse conversationnelle recommandée</p>
+                    </div>
+                    <p className="text-sm text-muted-foreground max-w-3xl">
+                      Utilise l'assistant pour demander une lecture plus concrète du projet: il peut expliquer une contrainte, citer les éléments factuels retrouvés et pointer ce qui manque encore dans la base réglementaire.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">"Quels extraits justifient la hauteur max ?"</div>
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">"Pourquoi la constructibilité reste partielle ?"</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <AnalysisChat analysisId={id} analysisStatus={analysis.status} />
+          </div>
         </TabsContent>
 
         {/* TAB 5: LOGS */}
