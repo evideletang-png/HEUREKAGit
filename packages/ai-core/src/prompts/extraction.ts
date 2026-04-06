@@ -42,7 +42,9 @@ CONSIGNES :
 1. RÉSUMÉ OPÉRATIONNEL : Traduis chaque article en une règle actionnable (ex: 5m de retrait, 40% emprise).
 2. EXTRACTION DES VALEURS : Isole les seuils numériques et les unités (m, %, m²).
 3. PRÉSERVATION DES CONDITIONS : Ne simplifie pas les exceptions (ex: "si parcelle < 500m²").
-4. HIÉRARCHIE ZONE / SOUS-ZONE : si la zone cible est une sous-zone (ex: UDa), applique d'abord les règles de la zone mère (UD), puis ajoute toutes les précisions de la sous-zone (UDa). Les précisions de sous-zone priment sur la règle générale.
+4. HIÉRARCHIE ZONE / SOUS-ZONE :
+   - si la zone cible est une sous-zone (ex: UDa), applique d'abord les règles de la zone mère (UD), puis ajoute toutes les précisions de la sous-zone (UDa). Les précisions de sous-zone priment sur la règle générale.
+   - si la zone cible est une zone mère sans suffixe (ex: N, U, A, UD), N'INCLUS PAS les règles réservées à une sous-zone (ex: Nh, Nj, UDa, UDb) sauf si le texte dit explicitement qu'elles s'appliquent à toute la zone mère.
 5. FORMAT JSON : Respecte PluRuleSchema pour chaque article.`,
 
   /**

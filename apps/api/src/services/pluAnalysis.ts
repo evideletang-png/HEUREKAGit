@@ -963,7 +963,7 @@ export async function analyzePLUZone(
 
     const zoneScopingInstruction = hasSubZone
       ? `La parcelle est en sous-zone ${zoneCode}. Lis d'abord les règles générales de la zone mère ${baseZone}, puis ajoute toutes les précisions spécifiques ${zoneCode}. Si une précision ${zoneCode} existe, elle prime sur la règle générale ${baseZone}.`
-      : `La parcelle est en zone ${zoneCode}. Extrais exhaustivement toutes les règles applicables à cette zone.`;
+      : `La parcelle est en zone ${zoneCode}. Extrais exhaustivement uniquement les règles applicables à la zone ${zoneCode}. Ignore les règles propres à d'autres sous-zones comme ${zoneCode}a, ${zoneCode}b, ${zoneCode}h, ${zoneCode}j, etc., sauf si le règlement dit explicitement qu'elles s'appliquent à toute la zone ${zoneCode}.`;
 
     console.log(`[pluAnalysis] Calling OpenAI for zone extraction: ${zoneCode} in ${cityName}...`);
     const truncatedText = (relevantText || "").substring(0, 40000);
@@ -974,7 +974,7 @@ export async function analyzePLUZone(
         { role: "system", content: systemContent },
         {
           role: "user",
-          content: `${zoneScopingInstruction}\n\nTexte du règlement (Extrait):\n\n${truncatedText}\n\nIMPORTANT: Réponds uniquement avec un objet JSON contenant la clé "articles" (tableau).`
+          content: `${zoneScopingInstruction}\n\nIMPORTANT: Si le texte contient des sous-secteurs ou sous-zones distinctes, n'extrais pas leurs règles sauf si la parcelle est explicitement dans cette sous-zone cible.\n\nTexte du règlement (Extrait):\n\n${truncatedText}\n\nIMPORTANT: Réponds uniquement avec un objet JSON contenant la clé "articles" (tableau).`
         }
       ],
       response_format: { type: "json_object" },
