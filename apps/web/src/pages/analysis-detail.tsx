@@ -138,6 +138,92 @@ type RegulatoryInsight = {
   relevanceReason?: string;
 };
 
+type FieldEvidenceState = {
+  displayValue: string;
+  statusLabel: string;
+  statusClassName: string;
+  helperText: string;
+};
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function buildEvidenceState({
+  value,
+  formattedValue,
+  explicitRuleFound,
+  defaultApplied,
+  missingLabel = "Non déterminé",
+  explicitHelper = "Valeur retrouvée dans une règle opposable de la zone.",
+  derivedHelper = "Valeur calculée, mais base réglementaire encore partielle.",
+  defaultHelper = "Valeur issue d'un fallback par défaut, à confirmer.",
+  missingHelper = "Aucune règle exploitable n'a été retrouvée pour ce point.",
+}: {
+  value: unknown;
+  formattedValue: string;
+  explicitRuleFound: boolean;
+  defaultApplied?: boolean;
+  missingLabel?: string;
+  explicitHelper?: string;
+  derivedHelper?: string;
+  defaultHelper?: string;
+  missingHelper?: string;
+}): FieldEvidenceState {
+  if (value == null || value === "") {
+    return {
+      displayValue: missingLabel,
+      statusLabel: "Non trouvé",
+      statusClassName: "border-slate-200 bg-slate-50 text-slate-700",
+      helperText: missingHelper,
+    };
+  }
+
+  if (defaultApplied) {
+    return {
+      displayValue: formattedValue,
+      statusLabel: "Par défaut",
+      statusClassName: "border-amber-200 bg-amber-50 text-amber-800",
+      helperText: defaultHelper,
+    };
+  }
+
+  if (explicitRuleFound) {
+    return {
+      displayValue: formattedValue,
+      statusLabel: "Règle trouvée",
+      statusClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
+      helperText: explicitHelper,
+    };
+  }
+
+  return {
+    displayValue: formattedValue,
+    statusLabel: "Calcul partiel",
+    statusClassName: "border-sky-200 bg-sky-50 text-sky-800",
+    helperText: derivedHelper,
+  };
+}
+
+function formatMeasuredValue(
+  value: unknown,
+  {
+    unit,
+    digits = 1,
+    reliable = false,
+    unknownLabel = "Non mesuré",
+  }: {
+    unit: string;
+    digits?: number;
+    reliable?: boolean;
+    unknownLabel?: string;
+  }
+) {
+  if (!isFiniteNumber(value)) return unknownLabel;
+  if (value === 0 && !reliable) return unknownLabel;
+  return `${value.toFixed(digits)} ${unit}`;
+}
+
 function getRegulatoryTheme(article: any): { key: string; title: string } {
   const haystack = [
     article?.title,
@@ -334,6 +420,16 @@ export default function AnalysisDetailPage() {
     } catch { return []; }
   })();
 
+  const calcVariables = parsedCalcVars?.calculationVariables || {};
+  const assumptionFlags = {
+    footprintDefault: parsedAssumptions.some((item) => /emprise au sol.+valeur par d[ée]faut|article 9 non identifi/i.test(item)),
+    heightDefault: parsedAssumptions.some((item) => /hauteur maximale.+valeur par d[ée]faut|article 10 non identifi/i.test(item)),
+    roadSetbackDefault: parsedAssumptions.some((item) => /recul voie.+valeur par d[ée]faut/i.test(item)),
+    boundarySetbackDefault: parsedAssumptions.some((item) => /recul limites s[ée]paratives.+valeur par d[ée]faut/i.test(item)),
+    greenDefault: parsedAssumptions.some((item) => /espaces verts.+valeur par d[ée]faut/i.test(item)),
+    parkingDefault: parsedAssumptions.some((item) => /place \/ logement|r[èe]gle par d[ée]faut/i.test(item)),
+  };
+
   const parcelMetadata = (() => {
     try {
       if (!parcel?.metadataJson) return null;
@@ -493,6 +589,72 @@ export default function AnalysisDetailPage() {
   const mapCenter: [number, number] = parcel?.centroidLat && parcel?.centroidLng 
     ? [parcel.centroidLat, parcel.centroidLng] 
     : [48.8566, 2.3522]; // Default Paris
+
+  const topographyReliability = (dataQuality.topography || "to_confirm") as ReliabilityLevel;
+  const topographyReliable = topographyReliability === "validated" || topographyReliability === "calculated";
+  const topographyRows = [
+    ["Altitude min (sol NGF)", formatMeasuredValue(tp.elevation_min, { unit: "m", reliable: topographyReliable })],
+    ["Altitude max (toit NGF)", formatMeasuredValue(tp.elevation_max, { unit: "m", reliable: topographyReliable })],
+    ["Pente estimée", formatMeasuredValue(tp.slope_percent, { unit: "%", reliable: topographyReliable })],
+    [
+      "Terrain plat",
+      tp.is_flat != null && (topographyReliable || isFiniteNumber(tp.slope_percent))
+        ? (tp.is_flat ? "Oui" : "Non — pente à étudier")
+        : "À mesurer",
+    ],
+  ] as const;
+
+  const footprintEvidence = buildEvidenceState({
+    value: buildability?.maxFootprintM2 ?? null,
+    formattedValue: buildability?.maxFootprintM2 != null ? `${buildability.maxFootprintM2} m²` : "Non déterminé",
+    explicitRuleFound: isFiniteNumber(calcVariables.maxFootprintRatio),
+    defaultApplied: assumptionFlags.footprintDefault,
+    explicitHelper: "Emprise calculée à partir d'une règle retrouvée dans le règlement de la zone.",
+    derivedHelper: "Emprise calculée, mais la source réglementaire reste incomplète ou indirecte.",
+  });
+
+  const remainingFootprintEvidence = buildEvidenceState({
+    value: buildability?.remainingFootprintM2 ?? null,
+    formattedValue: buildability?.remainingFootprintM2 != null ? `${buildability.remainingFootprintM2} m²` : "Non déterminé",
+    explicitRuleFound: isFiniteNumber(calcVariables.maxFootprintRatio) && !assumptionFlags.footprintDefault,
+    defaultApplied: assumptionFlags.footprintDefault,
+    explicitHelper: "Potentiel résiduel calculé à partir d'une emprise réglementaire effectivement retrouvée.",
+    derivedHelper: "Potentiel calculé, mais au moins une variable réglementaire reste partielle.",
+  });
+
+  const heightEvidence = buildEvidenceState({
+    value: buildability?.maxHeightM ?? null,
+    formattedValue: buildability?.maxHeightM != null ? `${buildability.maxHeightM} m` : "Non déterminé",
+    explicitRuleFound: isFiniteNumber(calcVariables.maxHeightM),
+    defaultApplied: assumptionFlags.heightDefault,
+    explicitHelper: "Hauteur maximale issue d'une règle opposable retrouvée pour la zone.",
+  });
+
+  const greenSpaceEvidence = buildEvidenceState({
+    value: buildability?.greenSpaceRequirement ?? null,
+    formattedValue: buildability?.greenSpaceRequirement || "Non déterminé",
+    explicitRuleFound: isFiniteNumber(calcVariables.greenSpaceRatio),
+    defaultApplied: assumptionFlags.greenDefault,
+    explicitHelper: "Exigence de pleine terre / espaces verts issue d'une règle retrouvée dans le PLU.",
+  });
+
+  const setbackRoadEvidence = buildEvidenceState({
+    value: buildability?.setbackRoadM ?? null,
+    formattedValue: buildability?.setbackRoadM != null ? `${buildability.setbackRoadM} m minimum` : "Non déterminé",
+    explicitRuleFound: isFiniteNumber(calcVariables.minSetbackFromRoadM),
+    defaultApplied: assumptionFlags.roadSetbackDefault,
+    explicitHelper: "Recul voirie trouvé dans les règles opposables de la zone.",
+    missingHelper: "Aucune règle claire de recul sur voie n'a été stabilisée pour la zone.",
+  });
+
+  const setbackBoundaryEvidence = buildEvidenceState({
+    value: buildability?.setbackBoundaryM ?? null,
+    formattedValue: buildability?.setbackBoundaryM != null ? `${buildability.setbackBoundaryM} m minimum` : "Non déterminé",
+    explicitRuleFound: isFiniteNumber(calcVariables.minSetbackFromBoundariesM),
+    defaultApplied: assumptionFlags.boundarySetbackDefault,
+    explicitHelper: "Recul sur limites séparatives trouvé dans les règles opposables de la zone.",
+    missingHelper: "Aucune règle claire de recul sur limites séparatives n'a été stabilisée pour la zone.",
+  });
 
   // Radar chart data prep
   const rawGreenSpaceRatio = parsedCalcVars?.greenSpaceRatio ?? 0;
@@ -949,23 +1111,21 @@ export default function AnalysisDetailPage() {
                   </CardContent>
                 </Card>
 
-                {/* TOPOGRAPHIE */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2"><Mountain className="w-4 h-4" /> Topographie</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {[
-                      ["Altitude min (sol NGF)", tp.elevation_min != null ? `${tp.elevation_min.toFixed(1)} m` : "N/D"],
-                      ["Altitude max (toit NGF)", tp.elevation_max != null ? `${tp.elevation_max.toFixed(1)} m` : "N/D"],
-                      ["Pente estimée", tp.slope_percent != null ? `${tp.slope_percent.toFixed(1)} %` : "N/D"],
-                      ["Terrain plat", tp.is_flat != null ? (tp.is_flat ? "Oui" : "Non — pente à étudier") : "N/D"],
-                    ].map(([k, v]) => (
-                      <div key={String(k)} className="flex justify-between py-1.5 border-b border-border/40 last:border-0">
-                        <span className="text-muted-foreground text-sm">{k}</span>
-                        <span className="font-medium text-sm">{String(v ?? "N/D")}</span>
+	                {/* TOPOGRAPHIE */}
+	                <Card>
+	                  <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-3">
+	                        <CardTitle className="flex items-center gap-2"><Mountain className="w-4 h-4" /> Topographie</CardTitle>
+                        <ReliabilityBadge level={topographyReliability} />
                       </div>
-                    ))}
+	                  </CardHeader>
+	                  <CardContent className="space-y-2">
+	                    {topographyRows.map(([k, v]) => (
+	                      <div key={String(k)} className="flex justify-between py-1.5 border-b border-border/40 last:border-0">
+	                        <span className="text-muted-foreground text-sm">{k}</span>
+	                        <span className="font-medium text-sm">{String(v ?? "N/D")}</span>
+	                      </div>
+	                    ))}
                   </CardContent>
                 </Card>
 
@@ -1341,38 +1501,49 @@ export default function AnalysisDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border">
-                    <div className="p-6 flex flex-col items-center text-center">
-                      <p className="text-sm text-muted-foreground mb-2">Emprise Max.</p>
-                      <p className="text-3xl font-bold text-primary">{buildability?.maxFootprintM2 ? `${buildability.maxFootprintM2} m²` : '-'}</p>
-                    </div>
-                    <div className="p-6 flex flex-col items-center text-center">
-                      <p className="text-sm text-muted-foreground mb-2">Droit à bâtir restant</p>
-                      <p className="text-3xl font-bold text-emerald-600">{buildability?.remainingFootprintM2 ? `${buildability.remainingFootprintM2} m²` : '-'}</p>
-                    </div>
-                    <div className="p-6 flex flex-col items-center text-center">
-                      <p className="text-sm text-muted-foreground mb-2">Hauteur Max.</p>
-                      <p className="text-3xl font-bold text-primary">{buildability?.maxHeightM ? `${buildability.maxHeightM} m` : '-'}</p>
-                    </div>
-                    <div className="p-6 flex flex-col items-center text-center">
-                      <p className="text-sm text-muted-foreground mb-2">Pleine Terre</p>
-                      <p className="text-3xl font-bold text-primary">{buildability?.greenSpaceRequirement || '-'}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="p-6 bg-muted/30 border-t border-border">
-                    <h4 className="font-bold text-sm mb-4 uppercase tracking-wider text-muted-foreground">Règles d'implantation</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="bg-background p-4 rounded-lg border border-border shadow-sm">
-                        <span className="block text-sm text-muted-foreground mb-1">Recul voie publique (Art. 6)</span>
-                        <span className="font-semibold text-lg">{buildability?.setbackRoadM ? `${buildability.setbackRoadM} m minimum` : 'Non contraint'}</span>
-                      </div>
-                      <div className="bg-background p-4 rounded-lg border border-border shadow-sm">
-                        <span className="block text-sm text-muted-foreground mb-1">Recul limites séparatives (Art. 7)</span>
-                        <span className="font-semibold text-lg">{buildability?.setbackBoundaryM ? `${buildability.setbackBoundaryM} m minimum` : 'Non contraint'}</span>
-                      </div>
-                    </div>
-                  </div>
+	                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border">
+	                    <div className="p-6 flex flex-col items-center text-center">
+	                      <p className="text-sm text-muted-foreground mb-2">Emprise Max.</p>
+	                      <p className="text-3xl font-bold text-primary">{footprintEvidence.displayValue}</p>
+                        <Badge variant="outline" className={`mt-3 ${footprintEvidence.statusClassName}`}>{footprintEvidence.statusLabel}</Badge>
+                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{footprintEvidence.helperText}</p>
+	                    </div>
+	                    <div className="p-6 flex flex-col items-center text-center">
+	                      <p className="text-sm text-muted-foreground mb-2">Droit à bâtir restant</p>
+	                      <p className="text-3xl font-bold text-emerald-600">{remainingFootprintEvidence.displayValue}</p>
+                        <Badge variant="outline" className={`mt-3 ${remainingFootprintEvidence.statusClassName}`}>{remainingFootprintEvidence.statusLabel}</Badge>
+                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{remainingFootprintEvidence.helperText}</p>
+	                    </div>
+	                    <div className="p-6 flex flex-col items-center text-center">
+	                      <p className="text-sm text-muted-foreground mb-2">Hauteur Max.</p>
+	                      <p className="text-3xl font-bold text-primary">{heightEvidence.displayValue}</p>
+                        <Badge variant="outline" className={`mt-3 ${heightEvidence.statusClassName}`}>{heightEvidence.statusLabel}</Badge>
+                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{heightEvidence.helperText}</p>
+	                    </div>
+	                    <div className="p-6 flex flex-col items-center text-center">
+	                      <p className="text-sm text-muted-foreground mb-2">Pleine Terre</p>
+	                      <p className="text-3xl font-bold text-primary">{greenSpaceEvidence.displayValue}</p>
+                        <Badge variant="outline" className={`mt-3 ${greenSpaceEvidence.statusClassName}`}>{greenSpaceEvidence.statusLabel}</Badge>
+                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{greenSpaceEvidence.helperText}</p>
+	                    </div>
+	                  </div>
+	                  <div className="p-6 bg-muted/30 border-t border-border">
+	                    <h4 className="font-bold text-sm mb-4 uppercase tracking-wider text-muted-foreground">Règles d'implantation</h4>
+	                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+	                      <div className="bg-background p-4 rounded-lg border border-border shadow-sm">
+	                        <span className="block text-sm text-muted-foreground mb-1">Recul voie publique (Art. 6)</span>
+	                        <span className="font-semibold text-lg">{setbackRoadEvidence.displayValue}</span>
+                          <Badge variant="outline" className={`mt-3 ${setbackRoadEvidence.statusClassName}`}>{setbackRoadEvidence.statusLabel}</Badge>
+                          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setbackRoadEvidence.helperText}</p>
+	                      </div>
+	                      <div className="bg-background p-4 rounded-lg border border-border shadow-sm">
+	                        <span className="block text-sm text-muted-foreground mb-1">Recul limites séparatives (Art. 7)</span>
+	                        <span className="font-semibold text-lg">{setbackBoundaryEvidence.displayValue}</span>
+                          <Badge variant="outline" className={`mt-3 ${setbackBoundaryEvidence.statusClassName}`}>{setbackBoundaryEvidence.statusLabel}</Badge>
+                          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setbackBoundaryEvidence.helperText}</p>
+	                      </div>
+	                    </div>
+	                  </div>
                 </CardContent>
               </Card>
 
