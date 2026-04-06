@@ -19,6 +19,7 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
 import { GPUProviderService } from "./gpuProviderService.js";
 import { processDocumentForRAG } from "./baseIAIngestion.js";
+import { persistRegulatoryUnitsForDocument } from "./regulatoryUnitService.js";
 import { VisionService } from "./visionService.js";
 
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
@@ -245,6 +246,15 @@ export async function autoFetchPLU(
           commune: inseeCode,    // always store INSEE code for consistent lookup
           source_authority: authorityFor(doc.docType),
         } as any);
+
+        await persistRegulatoryUnitsForDocument({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceAuthority: authorityFor(doc.docType),
+          isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+          rawText: doc.rawText,
+        });
 
         await db.update(baseIADocumentsTable)
           .set({ status: "indexed" })

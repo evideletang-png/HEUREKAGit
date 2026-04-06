@@ -22,6 +22,7 @@ import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
 import { generateGlobalSynthesis, type ExtractedDocumentData } from "../services/pluAnalysis.js";
+import { persistRegulatoryUnitsForDocument } from "../services/regulatoryUnitService.js";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import multer from "multer";
 import fs from "fs";
@@ -1050,6 +1051,17 @@ async function queueTownHallDocumentIndexing(args: {
         provenance: "base_ia_plu",
       } as any);
 
+      await persistRegulatoryUnitsForDocument({
+        baseIADocumentId: baseIADoc.id,
+        townHallDocumentId: args.docId,
+        municipalityId: municipalityKey,
+        zoneCode: args.zone || null,
+        documentType: canonicalType,
+        sourceAuthority: authorityForCanonicalType(canonicalType),
+        isOpposable: canonicalType === "plu_reglement" || canonicalType === "plu_annexe",
+        rawText,
+      });
+
       await db.update(baseIADocumentsTable)
         .set({ status: "indexed" })
         .where(eq(baseIADocumentsTable.id, baseIADoc.id));
@@ -1474,6 +1486,15 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  commune: targetCommune,
                  zone: req.body.zone || undefined,
                  source_authority: authorityForCanonicalType(canonicalType),
+               });
+               await persistRegulatoryUnitsForDocument({
+                 baseIADocumentId: doc.id,
+                 municipalityId: targetCommune,
+                 zoneCode: req.body.zone || null,
+                 documentType: canonicalType,
+                 sourceAuthority: authorityForCanonicalType(canonicalType),
+                 isOpposable: canonicalType === "plu_reglement" || canonicalType === "plu_annexe",
+                 rawText,
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
              } catch (ragErr) {

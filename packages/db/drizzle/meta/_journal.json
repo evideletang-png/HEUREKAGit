@@ -36,6 +36,13 @@
       "when": 1775409000000,
       "tag": "0004_town_hall_upload_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1775416200000,
+      "tag": "0005_regulatory_units",
+      "breakpoints": true
     }
   ]
 }

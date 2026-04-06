@@ -18,6 +18,7 @@ import {
 import { eq, and, sql } from "drizzle-orm";
 import { createHash } from "crypto";
 import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
+import { loadRegulatoryUnits, buildParsedRulesFromRegulatoryUnits, buildArticlesFromRegulatoryUnits, buildDigestFromRegulatoryUnits } from "./regulatoryUnitService.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -591,35 +592,50 @@ export async function orchestrateDossierAnalysis(
   } catch (e) {}
 
   const regulatoryContext = context.relevantDocs.map(d => d.rawText || "").join("\n\n");
-  const rawRules = await extractRelevantRules(regulatoryContext, { 
-    zoneCode: finalZone, 
-    cityName: communeName,
-    jurisdictionContext 
+  const canonicalUnits = await loadRegulatoryUnits({
+    municipalityId: regulatoryCommune,
+    communeName,
+    zoneCode: finalZone,
+    minAuthority: 7,
   });
-  
+
   let parsedRules: any[] = [];
-  try {
-    const parsed = JSON.parse(rawRules);
-    parsedRules = extractStructuredRuleCandidates(parsed);
+  const canonicalArticles = canonicalUnits.length > 0 ? buildArticlesFromRegulatoryUnits(canonicalUnits) : [];
+  const canonicalDigest = canonicalUnits.length > 0 ? buildDigestFromRegulatoryUnits(canonicalUnits, finalZone) : null;
 
-    if (parsedRules.length === 0 && parsed && typeof parsed === "object") {
-      const nestedCandidates = [
-        parsed?.data,
-        parsed?.content,
-        parsed?.result,
-        parsed?.payload,
-      ];
+  if (canonicalUnits.length > 0) {
+    parsedRules = buildParsedRulesFromRegulatoryUnits(canonicalUnits);
+    logger.info(`[Orchestrator] Using ${canonicalUnits.length} canonical regulatory units for zone ${finalZone}.`);
+  } else {
+    const rawRules = await extractRelevantRules(regulatoryContext, {
+      zoneCode: finalZone,
+      cityName: communeName,
+      jurisdictionContext
+    });
 
-      for (const candidate of nestedCandidates) {
-        const extracted = extractStructuredRuleCandidates(candidate);
-        if (extracted.length > 0) {
-          parsedRules = extracted;
-          break;
+    try {
+      const parsed = JSON.parse(rawRules);
+      parsedRules = extractStructuredRuleCandidates(parsed);
+
+      if (parsedRules.length === 0 && parsed && typeof parsed === "object") {
+        const nestedCandidates = [
+          parsed?.data,
+          parsed?.content,
+          parsed?.result,
+          parsed?.payload,
+        ];
+
+        for (const candidate of nestedCandidates) {
+          const extracted = extractStructuredRuleCandidates(candidate);
+          if (extracted.length > 0) {
+            parsedRules = extracted;
+            break;
+          }
         }
       }
+    } catch (e) {
+      logger.error("[Orchestrator] Failed to parse rules JSON.");
     }
-  } catch (e) {
-    logger.error("[Orchestrator] Failed to parse rules JSON.");
   }
 
   const parsedRulesHaveSubstance = parsedRules.some((rule: any) => {
@@ -919,20 +935,32 @@ export async function orchestrateDossierAnalysis(
 
     // Call the new analyzePLUZone with Triage & Scoring
     let fullZoneAnalysis: any = { zoneLabel: `Zone ${finalZone}`, digest: {}, issues: [], articles: [] };
-    try {
-      const { analyzePLUZone } = await import("./pluAnalysis.js");
-      fullZoneAnalysis = await analyzePLUZone(
-        regulatoryContext,
-        finalZone,
-        `${finalZone} : Zone identifiée`,
-        communeName,
-        communeCustomPrompt,
-        projectDescription,
-        parcelData,
-        jurisdictionContext
-      );
-    } catch (pluErr) {
-      logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data", { error: pluErr instanceof Error ? pluErr.message : String(pluErr) });
+    if (canonicalArticles.length > 0) {
+      fullZoneAnalysis = {
+        zoneCode: finalZone,
+        zoneLabel: `${finalZone} : Zone identifiée`,
+        digest: canonicalDigest || {},
+        issues: [],
+        articles: canonicalArticles,
+        calculationVariables: {},
+        globalConstraints: [],
+      };
+    } else {
+      try {
+        const { analyzePLUZone } = await import("./pluAnalysis.js");
+        fullZoneAnalysis = await analyzePLUZone(
+          regulatoryContext,
+          finalZone,
+          `${finalZone} : Zone identifiée`,
+          communeName,
+          communeCustomPrompt,
+          projectDescription,
+          parcelData,
+          jurisdictionContext
+        );
+      } catch (pluErr) {
+        logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data", { error: pluErr instanceof Error ? pluErr.message : String(pluErr) });
+      }
     }
 
     if (!Array.isArray(fullZoneAnalysis.articles) || fullZoneAnalysis.articles.length === 0) {

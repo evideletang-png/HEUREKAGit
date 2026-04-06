@@ -26,6 +26,7 @@ import {
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { getZoningByCoords } from "../services/planning.js";
 import { extractDeterministicRegulatoryRules } from "../services/pluAnalysis.js";
+import { loadRegulatoryUnits, buildArticlesFromRegulatoryUnits } from "../services/regulatoryUnitService.js";
 
 const router: IRouter = Router();
 
@@ -381,7 +382,36 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
     const zoneData = (await db.select().from(zoneAnalysesTable).where(eq(zoneAnalysesTable.analysisId, idStr)).limit(1))[0];
     let articles = zoneData ? await db.select().from(ruleArticlesTable).where(eq(ruleArticlesTable.zoneAnalysisId, zoneData.id)) : [];
     if (zoneData && articles.length === 0) {
-      articles = synthesizeEvidenceFromSourceExcerpt(zoneData.id, zoneData.sourceExcerpt);
+      const geoContext = analysis.geoContextJson
+        ? (typeof analysis.geoContextJson === "string" ? JSON.parse(analysis.geoContextJson) : analysis.geoContextJson)
+        : null;
+      const municipalityId = geoContext?.source_lock?.inseeCode || analysis.city || null;
+      const communeName = geoContext?.source_lock?.city || analysis.city || null;
+      const canonicalUnits = municipalityId
+        ? await loadRegulatoryUnits({
+            municipalityId,
+            communeName,
+            zoneCode: zoneData.zoneCode || analysis.zoneCode || undefined,
+            minAuthority: 7,
+          })
+        : [];
+
+      if (canonicalUnits.length > 0) {
+        articles = buildArticlesFromRegulatoryUnits(canonicalUnits).map((article, index) => ({
+          id: `canonical-${index}`,
+          zoneAnalysisId: zoneData.id,
+          articleNumber: article.articleNumber,
+          title: article.title,
+          sourceText: article.sourceText,
+          summary: article.summary,
+          impactText: article.impactText,
+          vigilanceText: article.vigilanceText,
+          confidence: article.confidence,
+          structuredJson: JSON.stringify(article.structuredData || {}),
+        }));
+      } else {
+        articles = synthesizeEvidenceFromSourceExcerpt(zoneData.id, zoneData.sourceExcerpt);
+      }
     }
     const buildability = (await db.select().from(buildabilityResultsTable).where(eq(buildabilityResultsTable.analysisId, idStr)).limit(1))[0] || null;
     const constraints = await db.select().from(constraintsTable).where(eq(constraintsTable.analysisId, idStr));
