@@ -13,6 +13,8 @@ jobs:
     env:
       RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
       RAILWAY_PROJECT_ID: 4d33425c-bd64-4410-ac0b-7e5645c952ca
+      RAILWAY_ENVIRONMENT_ID: 93fd264c-ba4b-462b-a121-d535440cba67
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -21,4 +23,5 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
-        run: railway up --service "@workspace/api-server" --ci
+        run: |
+          railway up --service "@workspace/api-server" --ci
