@@ -591,12 +591,50 @@ export async function orchestrateDossierAnalysis(
     logger.info(`[Orchestrator] Resolved ${regulatoryCommune} to ${communeName} for extraction`);
   } catch (e) {}
 
-  const regulatoryContext = context.relevantDocs.map(d => d.rawText || "").join("\n\n");
+  const isStrictRegulatoryDoc = (doc: any) => {
+    const hint = [
+      doc?.documentType,
+      doc?.type,
+      doc?.category,
+      doc?.subCategory,
+      doc?.title,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+
+    if (doc?.isOpposable === true) return true;
+    if (hint.includes("padd")) return false;
+    if (hint.includes("oap") || hint.includes("orientation")) return false;
+    if (hint.includes("reglement") || hint.includes("règlement") || hint.includes("plu_reglement")) return true;
+    if (hint.includes("plu_annexe") || hint.includes("zonage") || hint.includes("graphique") || hint.includes("carte")) return true;
+    return false;
+  };
+
+  const strictRegulatoryDocs = context.relevantDocs.filter((doc) => {
+    const rawText = String(doc?.rawText || "").trim();
+    return rawText.length >= 100 && isStrictRegulatoryDoc(doc);
+  });
+
+  const supplementaryPlanningDocs = context.relevantDocs.filter((doc) => {
+    if (strictRegulatoryDocs.includes(doc)) return false;
+    const rawText = String(doc?.rawText || "").trim();
+    if (rawText.length < 100) return false;
+    const hint = [
+      doc?.documentType,
+      doc?.type,
+      doc?.category,
+      doc?.subCategory,
+      doc?.title,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    return hint.includes("oap") || hint.includes("orientation") || hint.includes("padd");
+  });
+
+  const regulatoryContext = strictRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
+  const supplementaryPlanningContext = supplementaryPlanningDocs.map((d) => d.rawText || "").join("\n\n");
   const canonicalUnits = await loadRegulatoryUnits({
     municipalityId: regulatoryCommune,
     communeName,
     zoneCode: finalZone,
     minAuthority: 7,
+    documentTypes: ["plu_reglement", "plu_annexe"],
   });
 
   let parsedRules: any[] = [];
@@ -607,7 +645,9 @@ export async function orchestrateDossierAnalysis(
     parsedRules = buildParsedRulesFromRegulatoryUnits(canonicalUnits);
     logger.info(`[Orchestrator] Using ${canonicalUnits.length} canonical regulatory units for zone ${finalZone}.`);
   } else {
-    const rawRules = await extractRelevantRules(regulatoryContext, {
+    const rawRules = await extractRelevantRules(
+      [regulatoryContext, supplementaryPlanningContext].filter(Boolean).join("\n\n--- DOCUMENTS COMPLEMENTAIRES ---\n\n"),
+      {
       zoneCode: finalZone,
       cityName: communeName,
       jurisdictionContext

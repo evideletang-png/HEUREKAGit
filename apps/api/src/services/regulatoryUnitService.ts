@@ -21,6 +21,7 @@ type LoadRegulatoryUnitsArgs = {
   zoneCode?: string | null;
   minAuthority?: number;
   includeNonOpposable?: boolean;
+  documentTypes?: string[];
 };
 
 export type CanonicalRegulatoryUnit = typeof regulatoryUnitsTable.$inferSelect;
@@ -65,6 +66,15 @@ function buildArticleCandidates(rawText: string, zoneCode?: string | null): Arti
 }
 
 export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryUnitsArgs) {
+  if (!args.documentType || !["plu_reglement", "plu_annexe", "oap"].includes(args.documentType)) {
+    if (args.baseIADocumentId) {
+      await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.baseIADocumentId, args.baseIADocumentId));
+    } else if (args.townHallDocumentId) {
+      await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentId));
+    }
+    return { created: 0 };
+  }
+
   const articles = buildArticleCandidates(args.rawText, args.zoneCode);
 
   if (args.baseIADocumentId) {
@@ -118,6 +128,9 @@ export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promis
         : sql`TRUE`,
       typeof args.minAuthority === "number"
         ? sql`${regulatoryUnitsTable.sourceAuthority} >= ${args.minAuthority}`
+        : sql`TRUE`,
+      args.documentTypes && args.documentTypes.length > 0
+        ? inArray(regulatoryUnitsTable.documentType, args.documentTypes)
         : sql`TRUE`,
       args.includeNonOpposable ? sql`TRUE` : eq(regulatoryUnitsTable.isOpposable, true)
     ))

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { repairExtractedText } from "./textQualityService.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { loadPrompt } from "./promptLoader.js";
@@ -346,7 +347,7 @@ function extractDimensionFromSnippet(snippet: string, unitPattern: RegExp): stri
 }
 
 export function extractDeterministicRegulatoryRules(text: string, zoneCode?: string): ArticleAnalysis[] {
-  const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
+  const normalizedText = repairExtractedText(text).replace(/\s+/g, " ").trim();
   if (normalizedText.length < 200) return [];
 
   const articles = DETERMINISTIC_RULE_SEEDS.map((seed): ArticleAnalysis | null => {
@@ -1106,7 +1107,7 @@ export async function extractRelevantRules(
 
   // Supplement / fallback: regex windowing on full raw document text
   if (rawText.length > 0) {
-    const relevantWindows = findRelevantWindows(rawText, zoneCode, topics);
+    const relevantWindows = findRelevantWindows(repairExtractedText(rawText), zoneCode, topics);
     const windowText = relevantWindows.join("\n\n--- NOUVEAU SEGMENT ---\n\n");
     if (!combinedText) {
       // No embedding results — use raw text only
@@ -1134,7 +1135,7 @@ CONSIGNES DE FILTRAGE :
   const input = {
     task: "extract",
     context: { zone: zoneCode, commune: cityName },
-    text: combinedText.substring(0, 400000), // Stay under TPM
+    text: repairExtractedText(combinedText).substring(0, 400000), // Stay under TPM
   };
 
   try {

@@ -35,7 +35,7 @@ import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { AUTHORITY_POLICY } from "@workspace/ai-core";
-import { hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, scoreTextQuality } from "../services/textQualityService.js";
+import { hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, repairExtractedText, scoreTextQuality } from "../services/textQualityService.js";
 import { execFileSync } from "child_process";
 
 // dossierEventsTable is now imported above
@@ -107,7 +107,43 @@ function authorityForCanonicalType(canonicalType: string): number {
   if (canonicalType === "plu_reglement") return AUTHORITY_POLICY.REGULATION_LOCAL;
   if (canonicalType === "oap") return AUTHORITY_POLICY.PLANNING_OAP;
   if (canonicalType === "plu_annexe") return AUTHORITY_POLICY.ANNEX_TECHNICAL;
+  if (canonicalType === "padd") return AUTHORITY_POLICY.ADMIN_GUIDE;
   return AUTHORITY_POLICY.UNKNOWN;
+}
+
+function inferCanonicalDocumentType(documentType: string | null | undefined, category?: string | null, subCategory?: string | null) {
+  const hint = [documentType || "", category || "", subCategory || ""].join(" ").toLowerCase();
+  if (hint.includes("padd")) return "other";
+  if (hint.includes("oap") || hint.includes("orientation")) return "oap";
+  if (hint.includes("plan") || hint.includes("graphique") || hint.includes("carte") || hint.includes("zonage") || hint.includes("annexe")) {
+    return "plu_annexe";
+  }
+  if (hint.includes("reglement") || hint.includes("règlement") || hint.includes("plu")) {
+    return "plu_reglement";
+  }
+  return "other";
+}
+
+function mapCanonicalTypeToBaseIAType(canonicalType: string) {
+  if (canonicalType === "plu_reglement" || canonicalType === "plu_annexe") return "plu";
+  if (canonicalType === "oap") return "oap";
+  return "other";
+}
+
+function isCanonicalTypeOpposable(canonicalType: string) {
+  return canonicalType === "plu_reglement" || canonicalType === "plu_annexe";
+}
+
+function isRegulatoryLikeDocument(documentType: string | null | undefined, category?: string | null, subCategory?: string | null) {
+  const hint = [documentType || "", category || "", subCategory || ""].join(" ").toLowerCase();
+  return hint.includes("plu")
+    || hint.includes("reglement")
+    || hint.includes("règlement")
+    || hint.includes("zonage")
+    || hint.includes("annexe")
+    || hint.includes("oap")
+    || hint.includes("orientation")
+    || hint.includes("padd");
 }
 
 async function resolveInseeCode(commune: string): Promise<string | null> {
@@ -855,22 +891,29 @@ async function extractTextFromFile(filePath: string, mimetype: string, context: 
   if (mimetype === "application/pdf") {
     const pickBestText = (...candidates: string[]) => {
       const normalizedCandidates = candidates
-        .map((candidate) => normalizeExtractedText(candidate))
+        .map((candidate) => repairExtractedText(candidate))
         .filter((candidate) => candidate.length > 0);
 
       return normalizedCandidates
-        .sort((left, right) => scoreTextQuality(right) - scoreTextQuality(left))[0] || "";
+        .sort((left, right) => {
+          const qualityDelta = scoreTextQuality(right) - scoreTextQuality(left);
+          if (Math.abs(qualityDelta) > 0.03) return qualityDelta;
+          return right.length - left.length;
+        })[0] || "";
     };
 
-    const extractWithPdfToText = () => {
+    const extractWithPdfToText = (mode: "layout" | "raw") => {
       try {
-        return execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", "-nopgbrk", filePath, "-"], {
+        const args = mode === "layout"
+          ? ["-layout", "-enc", "UTF-8", "-nopgbrk", filePath, "-"]
+          : ["-raw", "-enc", "UTF-8", "-nopgbrk", filePath, "-"];
+        return execFileSync("pdftotext", args, {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 60000,
         });
       } catch (err) {
-        console.warn("[pdftotext]", err instanceof Error ? err.message : String(err));
+        console.warn("[pdftotext]", mode, err instanceof Error ? err.message : String(err));
         return "";
       }
     };
@@ -880,11 +923,26 @@ async function extractTextFromFile(filePath: string, mimetype: string, context: 
       const buffer = fs.readFileSync(filePath);
       const result = await pdfParse(buffer);
       const pdfParseText = result.text || "";
-      const pdfToText = extractWithPdfToText();
-      let extractedText = pickBestText(pdfParseText, pdfToText);
+      const pdfToTextLayout = extractWithPdfToText("layout");
+      const pdfToTextRaw = extractWithPdfToText("raw");
+      let extractedText = pickBestText(pdfParseText, pdfToTextLayout, pdfToTextRaw);
 
-      if (extractedText.trim().length < 200 || isTextLikelyGarbled(extractedText)) {
-        const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 8);
+      const hint = [context.originalName || "", context.documentType || "", context.category || "", context.subCategory || ""].join(" ").toLowerCase();
+      const isPriorityRegulatoryDocument =
+        hint.includes("plu")
+        || hint.includes("reglement")
+        || hint.includes("règlement")
+        || hint.includes("oap")
+        || hint.includes("padd")
+        || hint.includes("zonage");
+      const shouldForceOcr =
+        extractedText.trim().length < 400
+        || isTextLikelyGarbled(extractedText)
+        || (isPriorityRegulatoryDocument && scoreTextQuality(extractedText) < 0.9);
+
+      if (shouldForceOcr) {
+        const ocrPages = isPriorityRegulatoryDocument ? 12 : 8;
+        const ocrText = await VisionService.extractTextFromScannedPDF(filePath, ocrPages);
         const bestCandidate = pickBestText(extractedText, ocrText);
         if (scoreTextQuality(bestCandidate) >= scoreTextQuality(extractedText)) {
           extractedText = bestCandidate;
@@ -901,13 +959,14 @@ async function extractTextFromFile(filePath: string, mimetype: string, context: 
         }
       }
 
-      return normalizeExtractedText(extractedText);
+      return repairExtractedText(extractedText);
     } catch (e) {
       console.error("[pdf-parse]", e);
-      const pdfToText = extractWithPdfToText();
-      const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 8);
-      const extractedText = normalizeExtractedText(
-        [pdfToText, ocrText]
+      const pdfToTextLayout = extractWithPdfToText("layout");
+      const pdfToTextRaw = extractWithPdfToText("raw");
+      const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 12);
+      const extractedText = repairExtractedText(
+        [pdfToTextLayout, pdfToTextRaw, ocrText]
           .sort((left, right) => scoreTextQuality(right) - scoreTextQuality(left))[0] || ""
       );
       if (extractedText.trim().length > 0) {
@@ -1034,6 +1093,9 @@ async function queueTownHallDocumentIndexing(args: {
       const subCategory = classification.subCategory;
       const documentType = classification.documentType;
       const tags = args.requestedTags.length > 0 ? args.requestedTags : suggestion.tags;
+      const canonicalType = inferCanonicalDocumentType(documentType, category, subCategory);
+      const isOpposable = isCanonicalTypeOpposable(canonicalType);
+      const isRegulatory = isRegulatoryLikeDocument(documentType, category, subCategory);
 
       await db.update(townHallDocumentsTable)
         .set({
@@ -1042,15 +1104,11 @@ async function queueTownHallDocumentIndexing(args: {
           subCategory,
           documentType,
           tags,
+          isRegulatory,
+          isOpposable,
           updatedAt: new Date()
         })
         .where(eq(townHallDocumentsTable.id, args.docId));
-
-      let canonicalType: any = "other";
-      const dt = (documentType || "").toLowerCase();
-      if (dt.includes("plu") || dt.includes("regulation") || dt.includes("reglement")) canonicalType = "plu_reglement";
-      else if (dt.includes("padd") || dt.includes("oap") || dt.includes("orientation")) canonicalType = "oap";
-      else if (dt.includes("annexe")) canonicalType = "plu_annexe";
 
       const inseeCode = await resolveInseeCode(args.targetCommune);
       const municipalityKey = inseeCode || args.targetCommune;
@@ -1062,8 +1120,7 @@ async function queueTownHallDocumentIndexing(args: {
         zoneCode: args.zone || null,
         category: category || "REGULATORY",
         subCategory: subCategory || "PLU",
-        type: canonicalType === "plu_reglement" || canonicalType === "plu_annexe" ? "plu" :
-          canonicalType === "oap" ? "oap" : "other",
+        type: mapCanonicalTypeToBaseIAType(canonicalType),
         fileName: path.basename(args.persistentPath),
         fileHash,
         status: "parsing",
@@ -1088,7 +1145,7 @@ async function queueTownHallDocumentIndexing(args: {
         zoneCode: args.zone || null,
         documentType: canonicalType,
         sourceAuthority: authorityForCanonicalType(canonicalType),
-        isOpposable: canonicalType === "plu_reglement" || canonicalType === "plu_annexe",
+        isOpposable,
         rawText,
       });
 
@@ -1317,6 +1374,7 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
       category: session.category || null,
       subCategory: session.subCategory || null,
       documentType: session.documentType || null,
+      isRegulatory: true,
       tags: parseDocumentTags(session.tags),
       zone: session.zone || null
     }).returning();
@@ -1475,6 +1533,9 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
           const category = classification.category;
           const subCategory = classification.subCategory;
           const tags = req.body.tags ? JSON.parse(req.body.tags) : suggestion.tags;
+          const canonicalType = inferCanonicalDocumentType(classification.documentType, category, subCategory);
+          const isOpposable = isCanonicalTypeOpposable(canonicalType);
+          const isRegulatory = isRegulatoryLikeDocument(classification.documentType, category, subCategory);
 
           const [doc] = await db.insert(baseIADocumentsTable).values({
             batchId: batch.id,
@@ -1482,10 +1543,11 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             fileName: storedFileName,
             fileHash: hash,
             status: "indexed",
-            type: req.body.type || "plu",
+            type: mapCanonicalTypeToBaseIAType(canonicalType),
             category,
             subCategory,
-            tags
+            tags,
+            rawText,
           }).returning();
 
           // Also support legacy table for back-compat
@@ -1498,6 +1560,8 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             category,
             subCategory,
             documentType: classification.documentType,
+            isRegulatory,
+            isOpposable,
             tags,
             zone: req.body.zone || null
           });
@@ -1505,9 +1569,6 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
           // Process the document for RAG (Chunking + Embeddings)
           if (targetCommune) {
              try {
-               const canonicalType = (req.body.type === "plu"
-                 ? "plu_reglement"
-                 : (req.body.type === "annexe" ? "plu_annexe" : "other"));
                await processDocumentForRAG(doc.id, targetCommune, rawText, {
                  document_id: doc.id,
                  document_type: canonicalType,
@@ -1523,7 +1584,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  zoneCode: req.body.zone || null,
                  documentType: canonicalType,
                  sourceAuthority: authorityForCanonicalType(canonicalType),
-                 isOpposable: canonicalType === "plu_reglement" || canonicalType === "plu_annexe",
+                 isOpposable,
                  rawText,
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);

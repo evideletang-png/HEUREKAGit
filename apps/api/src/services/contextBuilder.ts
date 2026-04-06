@@ -3,6 +3,7 @@ import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
 import { autoFetchPLU } from "./pluAutoFetch.js";
+import { hasUsableExtractedText } from "./textQualityService.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -59,10 +60,10 @@ export async function buildAnalysisContext(
           // Zone-specific matches if pre-filtered in DB
           eq(townHallDocumentsTable.zone, zoneCode)
         ),
-        eq(townHallDocumentsTable.isOpposable, true)
+        eq(townHallDocumentsTable.isRegulatory, true)
       )
     );
-  const usableTownHallDocs = townHallDocs.filter((doc) => (doc.rawText || "").trim().length >= 100);
+  const usableTownHallDocs = townHallDocs.filter((doc) => hasUsableExtractedText(doc.rawText));
 
   // Combine static document sources
   const relevantDocs: any[] = [...baseIADocs, ...usableTownHallDocs];
