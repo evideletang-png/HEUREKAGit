@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: railway-production-deploy
   cancel-in-progress: true
@@ -18,11 +21,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          clean: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+
+      - name: Verify checkout
+        run: |
+          git rev-parse HEAD
+          git status --short
+          ls -la
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
