@@ -26,6 +26,7 @@ export default function DashboardPage() {
   const deleteMutation = useDeleteAnalysis();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const handleDelete = (id: string) => {
     deleteMutation.mutate(
@@ -58,7 +59,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Admin Quick Access Portals */}
-      {(useAuth().user?.role === "admin") && (
+      {(user?.role === "admin") && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <Link href="/portail-mairie" className="group p-6 bg-green-50/50 hover:bg-green-100/60 border border-green-200 rounded-2xl shadow-sm transition-all hover:shadow-md flex items-center gap-4 group">
              <div className="w-12 h-12 rounded-xl bg-green-600 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
