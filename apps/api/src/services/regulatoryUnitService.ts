@@ -5,10 +5,12 @@ import {
   extractDeterministicRegulatoryRules,
   buildDeterministicZoneDigest,
   buildZoneCodeAliases,
+  deriveZoneHierarchy,
   type ArticleAnalysis,
   type ZoneDigest,
 } from "./pluAnalysis.js";
 import { smartArticleChunking } from "./baseIAIngestion.js";
+import { extractRegulatoryZoneSections } from "./regulatoryZoneSectionService.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 
 type PersistRegulatoryUnitsArgs = {
@@ -32,6 +34,83 @@ type LoadRegulatoryUnitsArgs = {
 };
 
 export type CanonicalRegulatoryUnit = typeof regulatoryUnitsTable.$inferSelect;
+
+const ARTICLE_THEME_LABELS: Record<number, string> = {
+  1: "Usages & destinations",
+  2: "Usages & destinations",
+  3: "Voirie & accès",
+  4: "Réseaux & desserte",
+  5: "Caractéristiques du terrain",
+  6: "Implantation par rapport à la voie",
+  7: "Implantation sur limites séparatives",
+  8: "Implantation entre constructions",
+  9: "Emprise & densité",
+  10: "Hauteur & gabarit",
+  11: "Aspect architectural",
+  12: "Stationnement",
+  13: "Espaces verts & pleine terre",
+  14: "Performance environnementale",
+};
+
+const THEMATIC_FALLBACKS: Array<{
+  key: string;
+  title: string;
+  articleNumber?: number;
+  patterns: RegExp[];
+}> = [
+  {
+    key: "usages_destination",
+    title: "Usages & destinations",
+    articleNumber: 1,
+    patterns: [/destination/gi, /usage/gi, /occupation du sol/gi, /interdit/gi, /autorisé/gi],
+  },
+  {
+    key: "voirie_acces",
+    title: "Voirie & accès",
+    articleNumber: 3,
+    patterns: [/acc[eè]s/gi, /voirie/gi, /desserte/gi, /voie publique/gi],
+  },
+  {
+    key: "implantation_voie",
+    title: "Implantation par rapport à la voie",
+    articleNumber: 6,
+    patterns: [/voie/gi, /alignement/gi, /recul/gi, /emprise publique/gi],
+  },
+  {
+    key: "implantation_limites",
+    title: "Implantation sur limites séparatives",
+    articleNumber: 7,
+    patterns: [/limite s[eé]parative/gi, /limites s[eé]paratives/gi, /prospect/gi, /fonds voisin/gi],
+  },
+  {
+    key: "emprise_densite",
+    title: "Emprise & densité",
+    articleNumber: 9,
+    patterns: [/emprise/gi, /\bces\b/gi, /coefficient d[' ]emprise/gi],
+  },
+  {
+    key: "hauteur_gabarit",
+    title: "Hauteur & gabarit",
+    articleNumber: 10,
+    patterns: [/hauteur/gi, /gabarit/gi, /fa[iî]tage/gi, /\begout\b/gi],
+  },
+  {
+    key: "stationnement",
+    title: "Stationnement",
+    articleNumber: 12,
+    patterns: [/stationnement/gi, /parking/gi, /garage/gi],
+  },
+  {
+    key: "espaces_verts",
+    title: "Espaces verts & pleine terre",
+    articleNumber: 13,
+    patterns: [/pleine terre/gi, /espace vert/gi, /espaces verts/gi, /plantation/gi],
+  },
+];
+
+function testAnyPattern(patterns: RegExp[], haystack: string): boolean {
+  return patterns.some((pattern) => new RegExp(pattern.source, pattern.flags.replace(/g/g, "")).test(haystack));
+}
 
 function dedupeArticles(articles: ArticleAnalysis[]): ArticleAnalysis[] {
   const seen = new Set<string>();
@@ -63,14 +142,127 @@ function parseValuesFromArticle(article: ArticleAnalysis) {
   };
 }
 
+function cleanBlockText(text: string): string {
+  return text
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function inferThemeFromBlock(articleNumber: number | null, title: string, sourceText: string) {
+  if (articleNumber != null && ARTICLE_THEME_LABELS[articleNumber]) {
+    return {
+      title: ARTICLE_THEME_LABELS[articleNumber],
+      articleNumber,
+    };
+  }
+
+  const haystack = `${title} ${sourceText}`.toLowerCase();
+  for (const fallback of THEMATIC_FALLBACKS) {
+    if (testAnyPattern(fallback.patterns, haystack)) {
+      return {
+        title: fallback.title,
+        articleNumber: fallback.articleNumber ?? null,
+      };
+    }
+  }
+
+  return {
+    title: title.trim().length > 0 ? title.trim() : "Règle de zone",
+    articleNumber,
+  };
+}
+
+function extractArticleBlocksFromZoneText(rawText: string): ArticleAnalysis[] {
+  const articlePattern = /(?:^|\n)\s*(?:article|art\.?)\s*([0-9]{1,2})\s*(?:[:.\-–]\s*([^\n]{0,140}))?/gim;
+  const matches: Array<{ articleNumber: number; heading: string; start: number }> = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = articlePattern.exec(rawText)) !== null) {
+    const articleNumber = Number.parseInt(match[1] || "", 10);
+    if (!Number.isFinite(articleNumber)) continue;
+    const start = match.index + (match[0].startsWith("\n") ? 1 : 0);
+    matches.push({
+      articleNumber,
+      heading: String(match[2] || "").trim(),
+      start,
+    });
+  }
+
+  if (matches.length === 0) return [];
+
+  const articles: ArticleAnalysis[] = [];
+  for (let index = 0; index < matches.length; index++) {
+    const current = matches[index];
+    const next = matches[index + 1];
+    const sourceText = cleanBlockText(rawText.slice(current.start, next ? next.start : rawText.length));
+    if (sourceText.length < 80) continue;
+    const theme = inferThemeFromBlock(current.articleNumber, current.heading, sourceText);
+    const summary = sourceText.slice(0, 500);
+    articles.push({
+      articleNumber: theme.articleNumber ?? current.articleNumber,
+      title: theme.title,
+      sourceText,
+      interpretation: summary,
+      summary,
+      impactText: "Règle extraite depuis le chapitre de zone du règlement écrit.",
+      vigilanceText: "Source opposable issue du règlement segmenté par zone.",
+      confidence: "high",
+      structuredData: {
+        heading: current.heading || null,
+        extraction_kind: "zone_article_block",
+      },
+    });
+  }
+
+  return articles;
+}
+
+function extractThematicParagraphCandidates(rawText: string): ArticleAnalysis[] {
+  const paragraphs = rawText
+    .split(/\n{2,}/)
+    .map((paragraph) => cleanBlockText(paragraph))
+    .filter((paragraph) => paragraph.length >= 120);
+
+  const candidates: ArticleAnalysis[] = [];
+  for (const fallback of THEMATIC_FALLBACKS) {
+    const matched = paragraphs.find((paragraph) => testAnyPattern(fallback.patterns, paragraph));
+    if (!matched) continue;
+    candidates.push({
+      articleNumber: fallback.articleNumber ?? 0,
+      title: fallback.title,
+      sourceText: matched,
+      interpretation: matched.slice(0, 500),
+      summary: matched.slice(0, 500),
+      impactText: "Règle reconstituée depuis un paragraphe thématique de la zone.",
+      vigilanceText: "Bloc thématique sans repérage d'article explicite.",
+      confidence: "medium",
+      structuredData: {
+        extraction_kind: "zone_thematic_paragraph",
+        theme_key: fallback.key,
+      },
+    });
+  }
+
+  return candidates;
+}
+
 function buildArticleCandidates(rawText: string, zoneCode?: string | null): ArticleAnalysis[] {
+  const zoneArticleBlocks = extractArticleBlocksFromZoneText(rawText);
+  const thematicParagraphs = extractThematicParagraphCandidates(rawText);
   const comprehensiveArticles = extractComprehensiveRegulatoryRules(rawText, zoneCode || undefined);
   const wholeTextArticles = extractDeterministicRegulatoryRules(rawText, zoneCode || undefined);
 
   const chunkArticles = smartArticleChunking(rawText)
     .flatMap((chunk) => extractDeterministicRegulatoryRules(chunk.content, zoneCode || undefined));
 
-  return dedupeArticles([...comprehensiveArticles, ...wholeTextArticles, ...chunkArticles]);
+  return dedupeArticles([
+    ...zoneArticleBlocks,
+    ...thematicParagraphs,
+    ...comprehensiveArticles,
+    ...wholeTextArticles,
+    ...chunkArticles,
+  ]);
 }
 
 export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryUnitsArgs) {
@@ -83,37 +275,40 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
     return { created: 0 };
   }
 
-  // A full written regulation without an explicit zone code contains multiple zone chapters.
-  // Persisting canonical units with `zoneCode = null` pollutes parcel analysis with rules from
-  // unrelated zones, so we keep those documents available in raw text / embeddings but do not
-  // materialize generic regulatory units until they are segmented by zone.
-  if (!args.zoneCode && ["plu_reglement", "plu_annexe"].includes(args.documentType)) {
-    if (args.baseIADocumentId) {
-      await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.baseIADocumentId, args.baseIADocumentId));
-    } else if (args.townHallDocumentId) {
-      await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentId));
-    }
-    return { created: 0 };
-  }
-
-  const articles = buildArticleCandidates(args.rawText, args.zoneCode);
-
   if (args.baseIADocumentId) {
     await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.baseIADocumentId, args.baseIADocumentId));
   } else if (args.townHallDocumentId) {
     await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentId));
   }
 
-  if (articles.length === 0) {
-    return { created: 0 };
-  }
+  const zoneScopedSources = (() => {
+    if (args.zoneCode) {
+      const hierarchy = deriveZoneHierarchy(args.zoneCode);
+      return [{
+        zoneCode: hierarchy.zoneCodeUpper,
+        parentZoneCode: hierarchy.baseZone !== hierarchy.zoneCodeUpper ? hierarchy.baseZone : null,
+        heading: `Zone ${hierarchy.zoneCodeUpper}`,
+        sourceText: args.rawText,
+        startPage: null,
+        endPage: null,
+        isSubZone: hierarchy.hasSubZone,
+      }];
+    }
 
-  await db.insert(regulatoryUnitsTable).values(
-    articles.map((article) => ({
+    if (["plu_reglement", "plu_annexe"].includes(args.documentType || "")) {
+      return extractRegulatoryZoneSections(args.rawText);
+    }
+
+    return [];
+  })();
+
+  const unitsToPersist = zoneScopedSources.flatMap((section) => {
+    const articles = buildArticleCandidates(section.sourceText, section.zoneCode);
+    return articles.map((article) => ({
       baseIADocumentId: args.baseIADocumentId || null,
       townHallDocumentId: args.townHallDocumentId || null,
       municipalityId: args.municipalityId,
-      zoneCode: args.zoneCode || null,
+      zoneCode: section.zoneCode || null,
       documentType: args.documentType || null,
       theme: article.title,
       articleNumber: article.articleNumber,
@@ -122,16 +317,28 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
       parsedValues: {
         ...parseValuesFromArticle(article),
         structuredData: article.structuredData || {},
+        zone_code: section.zoneCode,
+        parent_zone_code: section.parentZoneCode,
+        section_heading: section.heading,
+        start_page: section.startPage ?? null,
+        end_page: section.endPage ?? null,
+        extraction_scope: "zone_section",
       },
       confidence: article.confidence,
       sourceAuthority: args.sourceAuthority ?? 0,
       isOpposable: args.isOpposable ?? true,
-      parserVersion: "v2",
+      parserVersion: "v3",
       updatedAt: new Date(),
-    }))
-  );
+    }));
+  });
 
-  return { created: articles.length };
+  if (unitsToPersist.length === 0) {
+    return { created: 0 };
+  }
+
+  await db.insert(regulatoryUnitsTable).values(unitsToPersist);
+
+  return { created: unitsToPersist.length };
 }
 
 export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promise<CanonicalRegulatoryUnit[]> {

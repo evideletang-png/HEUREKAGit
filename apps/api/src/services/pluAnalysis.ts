@@ -629,11 +629,17 @@ export function buildDeterministicZoneDigest(articles: ArticleAnalysis[], zoneCo
     }
   }
 
-  const article6 = byArticle.get(6);
-  const article7 = byArticle.get(7);
-  const article9 = byArticle.get(9);
-  const article10 = byArticle.get(10);
-  const article13 = byArticle.get(13);
+  const findByTheme = (keywords: string[]): ArticleAnalysis | undefined =>
+    articles.find((article) => {
+      const haystack = `${article.title} ${article.summary} ${article.sourceText}`.toLowerCase();
+      return keywords.some((keyword) => haystack.includes(keyword));
+    });
+
+  const article6 = byArticle.get(6) || findByTheme(["voie", "alignement", "recul"]);
+  const article7 = byArticle.get(7) || findByTheme(["limite séparative", "limites séparatives", "prospect"]);
+  const article9 = byArticle.get(9) || findByTheme(["emprise", "ces", "coefficient d'emprise"]);
+  const article10 = byArticle.get(10) || findByTheme(["hauteur", "gabarit", "faîtage", "faitage"]);
+  const article13 = byArticle.get(13) || findByTheme(["pleine terre", "espace vert", "espaces verts", "plantation"]);
 
   const maxFootprint = article9
     ? extractDimensionFromSnippet(article9.sourceText, /\d+(?:[.,]\d+)?\s*(?:%|m²|m2)/i)
@@ -657,7 +663,7 @@ export function buildDeterministicZoneDigest(articles: ArticleAnalysis[], zoneCo
     .filter(Boolean)
     .slice(0, 4);
 
-  const conditions = [byArticle.get(1), byArticle.get(12), article13]
+  const conditions = [byArticle.get(1) || findByTheme(["destination", "usage", "occupation du sol"]), byArticle.get(12) || findByTheme(["stationnement", "parking"]), article13]
     .filter((article): article is ArticleAnalysis => !!article)
     .map((article) => article.summary)
     .filter(Boolean)

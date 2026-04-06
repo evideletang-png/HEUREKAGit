@@ -103,7 +103,7 @@ export class NormalizationService {
 
   private static resolveArticleNumber(rawArticle: unknown, article: PluRule | Record<string, unknown>, operationalRule: string): string {
     const explicit = rawArticle == null ? "" : String(rawArticle).replace(/[^0-9]/g, "");
-    if (explicit) return explicit;
+    if (explicit && explicit !== "0") return explicit;
 
     const title = String((article as any)?.title ?? (article as any)?.section ?? "").toLowerCase();
     const fullText = `${title} ${operationalRule}`.toLowerCase();
