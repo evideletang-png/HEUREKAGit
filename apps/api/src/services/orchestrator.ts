@@ -47,6 +47,19 @@ function normalizeAddressKey(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function extractCommuneNameFromAddress(address: string | null | undefined): string {
+  if (!address) return "";
+  const normalized = address.replace(/\s+/g, " ").trim();
+  const postalMatch = normalized.match(/\b\d{5}\s+([^,]+)$/);
+  if (postalMatch?.[1]) return postalMatch[1].trim();
+  const commaParts = normalized.split(",").map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length > 1) {
+    const last = commaParts[commaParts.length - 1];
+    return last.replace(/^\d{5}\s+/, "").trim();
+  }
+  return "";
+}
+
 async function getCachedGeocode(address: string) {
   try {
     const key = normalizeAddressKey(address);
@@ -399,13 +412,15 @@ export async function orchestrateDossierAnalysis(
   const contextIdentification = await identifyAnalysisContext(initialCommune, initialAddress || undefined, sourceLock);
   const currentCommune = contextIdentification.commune;
   finalZone = contextIdentification.zone;
+  const addressCityName = extractCommuneNameFromAddress(initialAddress);
+  const communeNameHint = initialCityName || addressCityName;
   
   // 1.1 Resolve Jurisdiction
-  const jurisdictionContext = await resolveJurisdictionContext(currentCommune, initialCityName);
+  const jurisdictionContext = await resolveJurisdictionContext(currentCommune, communeNameHint);
   const regulatoryCommune = jurisdictionContext.commune_insee || currentCommune;
   const regulatoryCommuneName = (jurisdictionContext.name && jurisdictionContext.name !== "Unknown")
     ? jurisdictionContext.name
-    : (initialCityName || currentCommune);
+    : (communeNameHint || currentCommune);
 
   // 2. REBUILD DOCUMENT TARGETING LOGIC (Step 2)
   const targetedDocs = await rebuildDocumentTargeting(docs, finalZone);

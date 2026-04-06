@@ -1556,10 +1556,12 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
           const canonicalType = inferCanonicalDocumentType(classification.documentType, category, subCategory);
           const isOpposable = isCanonicalTypeOpposable(canonicalType);
           const isRegulatory = isRegulatoryLikeDocument(classification.documentType, category, subCategory);
+          const inseeCode = targetCommune ? await resolveInseeCode(targetCommune) : null;
+          const municipalityKey = inseeCode || targetCommune || null;
 
           const [doc] = await db.insert(baseIADocumentsTable).values({
             batchId: batch.id,
-            municipalityId: targetCommune || null,
+            municipalityId: municipalityKey,
             fileName: storedFileName,
             fileHash: hash,
             status: "indexed",
@@ -1587,20 +1589,20 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
           });
 
           // Process the document for RAG (Chunking + Embeddings)
-          if (targetCommune) {
+          if (municipalityKey) {
              try {
-               await processDocumentForRAG(doc.id, targetCommune, rawText, {
+               await processDocumentForRAG(doc.id, municipalityKey, rawText, {
                  document_id: doc.id,
                  document_type: canonicalType,
-                 pool_id: `${targetCommune}-PLU-ACTIVE`,
+                 pool_id: `${municipalityKey}-PLU-ACTIVE`,
                  status: "active",
-                 commune: targetCommune,
+                 commune: municipalityKey,
                  zone: req.body.zone || undefined,
                  source_authority: authorityForCanonicalType(canonicalType),
                });
                await persistRegulatoryUnitsForDocument({
                  baseIADocumentId: doc.id,
-                 municipalityId: targetCommune,
+                 municipalityId: municipalityKey,
                  zoneCode: req.body.zone || null,
                  documentType: canonicalType,
                  sourceAuthority: authorityForCanonicalType(canonicalType),
