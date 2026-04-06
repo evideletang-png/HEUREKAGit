@@ -32,11 +32,6 @@ export interface BuildabilityOutput {
   resultSummary: string;
 }
 
-const DEFAULT_FOOTPRINT_RATIO = 0.4;
-const DEFAULT_HEIGHT_M = 15;
-const DEFAULT_SETBACK_ROAD_M = 5;
-const DEFAULT_SETBACK_BOUNDARY_M = 3;
-const DEFAULT_GREEN_RATIO = 0.2;
 const FLOOR_HEIGHT_M = 3.0;
 
 export function calculateBuildability(input: BuildabilityInput): BuildabilityOutput {
@@ -51,8 +46,7 @@ export function calculateBuildability(input: BuildabilityInput): BuildabilityOut
     while (footprintRatio > 1) footprintRatio /= 100; // Sanitize % to decimal
     confidencePoints += 25;
   } else {
-    footprintRatio = DEFAULT_FOOTPRINT_RATIO;
-    assumptions.push(`Emprise au sol : valeur par défaut de ${Math.round(DEFAULT_FOOTPRINT_RATIO * 100)}% retenue (article 9 non identifié clairement).`);
+    assumptions.push("Emprise au sol : aucune règle opposable stabilisée n'a été retrouvée (article 9).");
   }
 
   // Resolve max height
@@ -61,8 +55,7 @@ export function calculateBuildability(input: BuildabilityInput): BuildabilityOut
   if (maxHeightM !== null) {
     confidencePoints += 25;
   } else {
-    maxHeightM = DEFAULT_HEIGHT_M;
-    assumptions.push(`Hauteur maximale : valeur par défaut de ${DEFAULT_HEIGHT_M} m retenue (article 10 non identifié clairement).`);
+    assumptions.push("Hauteur maximale : aucune règle opposable stabilisée n'a été retrouvée (article 10).");
   }
 
   // Resolve setback from road
@@ -71,8 +64,7 @@ export function calculateBuildability(input: BuildabilityInput): BuildabilityOut
   if (setbackRoadM !== null) {
     confidencePoints += 15;
   } else {
-    setbackRoadM = DEFAULT_SETBACK_ROAD_M;
-    assumptions.push(`Recul voie : valeur par défaut de ${DEFAULT_SETBACK_ROAD_M} m retenue.`);
+    assumptions.push("Recul voie : aucune règle opposable stabilisée n'a été retrouvée (article 6).");
   }
 
   // Resolve setback from boundaries
@@ -81,8 +73,7 @@ export function calculateBuildability(input: BuildabilityInput): BuildabilityOut
   if (setbackBoundaryM !== null) {
     confidencePoints += 15;
   } else {
-    setbackBoundaryM = DEFAULT_SETBACK_BOUNDARY_M;
-    assumptions.push(`Recul limites séparatives : valeur par défaut de ${DEFAULT_SETBACK_BOUNDARY_M} m retenue.`);
+    assumptions.push("Recul limites séparatives : aucune règle opposable stabilisée n'a été retrouvée (article 7).");
   }
 
   // Resolve green space ratio
@@ -92,29 +83,37 @@ export function calculateBuildability(input: BuildabilityInput): BuildabilityOut
     while (greenSpaceRatio > 1) greenSpaceRatio /= 100; // Sanitize % to decimal
     confidencePoints += 10;
   } else {
-    greenSpaceRatio = DEFAULT_GREEN_RATIO;
-    assumptions.push(`Espaces verts : valeur par défaut de ${Math.round(DEFAULT_GREEN_RATIO * 100)}% retenue.`);
+    assumptions.push("Espaces verts : aucune règle opposable stabilisée n'a été retrouvée (article 13).");
   }
 
-  // Calculate max theoretical footprint from PLU
-  const maxFootprintFromPLU = input.parcelSurfaceM2 * footprintRatio;
+  // Calculate max theoretical footprint from PLU only when a real rule is available.
+  const maxFootprintFromPLU = footprintRatio != null ? input.parcelSurfaceM2 * footprintRatio : null;
 
-  // Calculate buildable area after green space requirement
-  const greenSpaceRequired = input.parcelSurfaceM2 * greenSpaceRatio;
-  const maxBuildableArea = input.parcelSurfaceM2 - greenSpaceRequired;
+  // Calculate buildable area after green space requirement only when a real rule is available.
+  const greenSpaceRequired = greenSpaceRatio != null ? input.parcelSurfaceM2 * greenSpaceRatio : null;
+  const maxBuildableArea = greenSpaceRequired != null ? input.parcelSurfaceM2 - greenSpaceRequired : null;
 
-  // Net footprint = min of PLU limit and buildable area
-  const maxFootprintM2 = Math.min(maxFootprintFromPLU, maxBuildableArea);
+  // Net footprint only when at least one explicit regulatory limiter exists.
+  const maxFootprintM2 = (() => {
+    if (maxFootprintFromPLU == null && maxBuildableArea == null) return null;
+    if (maxFootprintFromPLU == null) return maxBuildableArea;
+    if (maxBuildableArea == null) return maxFootprintFromPLU;
+    return Math.min(maxFootprintFromPLU, maxBuildableArea);
+  })();
 
   // Remaining footprint after existing buildings
-  const remainingFootprintM2 = Math.max(0, maxFootprintM2 - input.existingFootprintM2);
+  const remainingFootprintM2 = maxFootprintM2 != null
+    ? Math.max(0, maxFootprintM2 - input.existingFootprintM2)
+    : null;
 
   // Estimated number of floors
-  const estimatedFloors = Math.floor(maxHeightM / FLOOR_HEIGHT_M);
+  const estimatedFloors = maxHeightM != null ? Math.floor(maxHeightM / FLOOR_HEIGHT_M) : null;
 
   // Generate summary
-  const parkingRequirement = input.calculationVariables.parkingRules || "1 place / logement (règle par défaut)";
-  const greenSpaceRequirement = `${Math.round(greenSpaceRatio * 100)}% de la superficie (${Math.round(greenSpaceRequired)} m²)`;
+  const parkingRequirement = input.calculationVariables.parkingRules || null;
+  const greenSpaceRequirement = greenSpaceRatio != null && greenSpaceRequired != null
+    ? `${Math.round(greenSpaceRatio * 100)}% de la superficie (${Math.round(greenSpaceRequired)} m²)`
+    : null;
 
   const confidenceScore = maxConfidencePoints > 0 ? confidencePoints / maxConfidencePoints : 0;
 
@@ -122,15 +121,26 @@ export function calculateBuildability(input: BuildabilityInput): BuildabilityOut
   if (input.parcelSurfaceM2 > 0) {
     assumptions.push(`Surface de parcelle : ${input.parcelSurfaceM2} m² (source : données cadastrales).`);
     assumptions.push(`Emprise bâtie existante : ${input.existingFootprintM2} m² prise en compte.`);
-    assumptions.push(`Nombre d'étages estimé : R+${estimatedFloors - 1} sur la base d'une hauteur sous plafond de ${FLOOR_HEIGHT_M} m.`);
+    if (estimatedFloors != null) {
+      assumptions.push(`Nombre d'étages estimé : R+${estimatedFloors - 1} sur la base d'une hauteur sous plafond de ${FLOOR_HEIGHT_M} m.`);
+    }
     assumptions.push(`Ce calcul est une estimation théorique. Il ne tient pas compte des contraintes de forme du terrain, des servitudes, ni des règles de prospect.`);
   }
 
-  const resultSummary = `Sur une parcelle de ${input.parcelSurfaceM2} m², le potentiel constructible théorique est de ${Math.round(maxFootprintM2)} m² d'emprise au sol, dont ${Math.round(remainingFootprintM2)} m² restent disponibles après les constructions existantes (${input.existingFootprintM2} m²). La hauteur maximale de ${maxHeightM} m correspond à environ R+${estimatedFloors - 1}. Niveau de confiance : ${Math.round(confidenceScore * 100)}%.`;
+  const resultSummary = [
+    `Parcelle analysée : ${input.parcelSurfaceM2} m².`,
+    maxFootprintM2 != null
+      ? `Emprise théorique calculable : ${Math.round(maxFootprintM2)} m², dont ${Math.round(remainingFootprintM2 ?? 0)} m² restent disponibles après les constructions existantes (${input.existingFootprintM2} m²).`
+      : "Emprise théorique non calculable faute de règle opposable stabilisée.",
+    maxHeightM != null && estimatedFloors != null
+      ? `Hauteur maximale retenue : ${maxHeightM} m, soit environ R+${estimatedFloors - 1}.`
+      : "Hauteur maximale non déterminée de manière opposable.",
+    `Niveau de confiance : ${Math.round(confidenceScore * 100)}%.`,
+  ].join(" ");
 
   return {
-    maxFootprintM2: Math.round(maxFootprintM2 * 100) / 100,
-    remainingFootprintM2: Math.round(remainingFootprintM2 * 100) / 100,
+    maxFootprintM2: maxFootprintM2 != null ? Math.round(maxFootprintM2 * 100) / 100 : null,
+    remainingFootprintM2: remainingFootprintM2 != null ? Math.round(remainingFootprintM2 * 100) / 100 : null,
     maxHeightM,
     setbackRoadM,
     setbackBoundaryM,

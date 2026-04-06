@@ -62,15 +62,15 @@ export class CalculationTunnel {
     // 2. Setbacks & Heights (Summaries)
     const roadRule = normalizedRules.road_setback.length > 0
       ? `Retrait minimum de ${normalizedRules.road_setback.join("/")}m par rapport à l'alignement.`
-      : "Règle non spécifiée (Article 6).";
+      : "Règle non retrouvée de manière opposable (Article 6).";
 
     const boundaryRule = normalizedRules.boundary_setback.length > 0
       ? `Recul de ${normalizedRules.boundary_setback.join("/")}m par rapport aux limites séparatives.`
-      : "Règle non spécifiée (Article 7).";
+      : "Règle non retrouvée de manière opposable (Article 7).";
 
     const maxHeightRule = normalizedRules.max_height.length > 0
       ? `Hauteur limitée à ${normalizedRules.max_height.join("/")}m.`
-      : "Pas de limite de hauteur détectée (Article 10).";
+      : "Règle de hauteur non retrouvée de manière opposable (Article 10).";
 
     // C. Buildable Potential Synthesis
     let synthesis = "";
@@ -96,8 +96,8 @@ export class CalculationTunnel {
       boundary_setback_rule: boundaryRule,
       internal_spacing_rule: normalizedRules.internal_spacing.length > 0 ? `${normalizedRules.internal_spacing.join("/")}m` : "N/A",
       max_height_rule: maxHeightRule,
-      parking_rule: normalizedRules.parking_requirements.join("; ") || "Pas de règle spécifique",
-      landscaping_rule: normalizedRules.landscaping_requirements.join("; ") || "Pas de règle spécifique",
+      parking_rule: normalizedRules.parking_requirements.join("; ") || "Règle non retrouvée de manière opposable",
+      landscaping_rule: normalizedRules.landscaping_requirements.join("; ") || "Règle non retrouvée de manière opposable",
       blocking_constraints: blocking,
       uncertainties: uncertainties,
       theoretical_potential_synthesis: synthesis
