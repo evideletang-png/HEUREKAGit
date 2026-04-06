@@ -409,7 +409,7 @@ export default function AnalysisDetailPage() {
       )
     : [];
 
-  const thematicInsights: RegulatoryInsight[] = (() => {
+  const thematicInsights: RegulatoryInsight[] = useMemo(() => {
     const groups = new Map<string, RegulatoryInsight & { sourceTexts: string[]; summaries: string[]; impacts: string[]; vigilances: string[]; confidences: Array<AIConfidence | string> }>();
 
     for (const article of meaningfulArticles) {
@@ -474,7 +474,7 @@ export default function AnalysisDetailPage() {
         relevanceReason: group.relevanceReason,
       }))
       .sort((left, right) => right.relevanceScore - left.relevanceScore);
-  })();
+  }, [meaningfulArticles]);
 
   const digestHighlights = [
     parsedDigest?.dimensions?.maxFootprint ? `Emprise: ${parsedDigest.dimensions.maxFootprint}` : null,
