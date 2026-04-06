@@ -276,11 +276,17 @@ function extractArticleCandidates(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.articles)) return payload.articles;
   if (Array.isArray(payload?.data?.articles)) return payload.data.articles;
+  if (Array.isArray(payload?.data?.rules)) return payload.data.rules;
   if (Array.isArray(payload?.rules)) return payload.rules;
+  if (Array.isArray(payload?.content?.rules)) return payload.content.rules;
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.content?.articles)) return payload.content.articles;
   if (Array.isArray(payload?.content)) return payload.content;
   return [];
+}
+
+export function extractStructuredRuleCandidates(payload: any): any[] {
+  return extractArticleCandidates(payload);
 }
 
 function coerceZoneArticles(payload: any): ArticleAnalysis[] {
@@ -964,9 +970,11 @@ CONSIGNES DE FILTRAGE :
 
     const finalData =
       result?.data?.articles
+      || result?.data?.rules
       || result?.articles
       || result?.rules
       || result?.content?.articles
+      || result?.content?.rules
       || result?.content
       || result?.data
       || resultText

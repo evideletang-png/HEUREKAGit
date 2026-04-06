@@ -17,7 +17,7 @@ import {
 } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import { createHash } from "crypto";
-import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis } from "./pluAnalysis.js";
+import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates } from "./pluAnalysis.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -600,11 +600,23 @@ export async function orchestrateDossierAnalysis(
   let parsedRules: any[] = [];
   try {
     const parsed = JSON.parse(rawRules);
-    if (Array.isArray(parsed)) {
-      parsedRules = parsed;
-    } else if (parsed && typeof parsed === 'object') {
-      parsedRules = parsed.articles || parsed.data || parsed.rules || [];
-      if (!Array.isArray(parsedRules)) parsedRules = [parsedRules]; // Wrap single object
+    parsedRules = extractStructuredRuleCandidates(parsed);
+
+    if (parsedRules.length === 0 && parsed && typeof parsed === "object") {
+      const nestedCandidates = [
+        parsed?.data,
+        parsed?.content,
+        parsed?.result,
+        parsed?.payload,
+      ];
+
+      for (const candidate of nestedCandidates) {
+        const extracted = extractStructuredRuleCandidates(candidate);
+        if (extracted.length > 0) {
+          parsedRules = extracted;
+          break;
+        }
+      }
     }
   } catch (e) {
     logger.error("[Orchestrator] Failed to parse rules JSON.");
