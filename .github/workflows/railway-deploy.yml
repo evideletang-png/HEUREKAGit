@@ -41,8 +41,8 @@ jobs:
           git log -1 --oneline
 
       - name: Deploy latest code to Railway
-        env:
-          RAILWAY_API_TOKEN: ${{ env.RAILWAY_API_TOKEN }}
-run: |
-  railway link 4d33425c-bd64-4410-ac0b-7e5645c952ca
-  railway up --service "@workspace/api-server" --ci
+  env:
+    RAILWAY_API_TOKEN: ${{ env.RAILWAY_API_TOKEN }}
+  run: |
+    railway link 4d33425c-bd64-4410-ac0b-7e5645c952ca
+    railway up --service "@workspace/api-server" --ci
