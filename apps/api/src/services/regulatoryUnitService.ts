@@ -83,6 +83,19 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
     return { created: 0 };
   }
 
+  // A full written regulation without an explicit zone code contains multiple zone chapters.
+  // Persisting canonical units with `zoneCode = null` pollutes parcel analysis with rules from
+  // unrelated zones, so we keep those documents available in raw text / embeddings but do not
+  // materialize generic regulatory units until they are segmented by zone.
+  if (!args.zoneCode && ["plu_reglement", "plu_annexe"].includes(args.documentType)) {
+    if (args.baseIADocumentId) {
+      await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.baseIADocumentId, args.baseIADocumentId));
+    } else if (args.townHallDocumentId) {
+      await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentId));
+    }
+    return { created: 0 };
+  }
+
   const articles = buildArticleCandidates(args.rawText, args.zoneCode);
 
   if (args.baseIADocumentId) {
@@ -126,23 +139,18 @@ export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promis
   const zoneAliases = buildZoneCodeAliases(args.zoneCode);
   if (aliases.length === 0) return [];
   const zoneFilter = args.zoneCode
-    ? or(
-        inArray(regulatoryUnitsTable.zoneCode, zoneAliases),
-        sql`${regulatoryUnitsTable.zoneCode} IS NULL`
-      )
+    ? inArray(regulatoryUnitsTable.zoneCode, zoneAliases)
     : sql`TRUE`;
   const zonePriorityOrder = args.zoneCode
     ? zoneAliases.length > 1
       ? sql`CASE
           WHEN ${regulatoryUnitsTable.zoneCode} = ${zoneAliases[0]} THEN 0
           WHEN ${regulatoryUnitsTable.zoneCode} = ${zoneAliases[1]} THEN 1
-          WHEN ${regulatoryUnitsTable.zoneCode} IS NULL THEN 2
-          ELSE 3
+          ELSE 2
         END`
       : sql`CASE
           WHEN ${regulatoryUnitsTable.zoneCode} = ${zoneAliases[0]} THEN 0
-          WHEN ${regulatoryUnitsTable.zoneCode} IS NULL THEN 1
-          ELSE 2
+          ELSE 1
         END`
     : sql`0`;
 
