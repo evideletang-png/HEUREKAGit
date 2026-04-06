@@ -111,16 +111,27 @@ function safeTruncate(text: string, maxTokens: number = 150000): string {
   return text.substring(0, maxChars) + "\n\n[TRONQUÉ - LIMITE EXTREME ATTEINTE (TOKEN QUOTA SAFE)]";
 }
 
+function deriveZoneHierarchy(zoneCode: string) {
+  const zoneCodeUpper = zoneCode.toUpperCase();
+  const baseZoneMatch = zoneCode.match(/^([A-Z]+)/);
+  const baseZone = baseZoneMatch && baseZoneMatch[1] ? baseZoneMatch[1].toUpperCase() : zoneCodeUpper;
+  const suffix = zoneCodeUpper.startsWith(baseZone) ? zoneCodeUpper.slice(baseZone.length) : "";
+  return {
+    zoneCodeUpper,
+    baseZone,
+    suffix,
+    hasSubZone: suffix.length > 0 && zoneCodeUpper !== baseZone,
+  };
+}
+
 /**
  * Filtre le texte pour ne garder que les sections pertinentes autour des mots-clés.
  */
 export function extractRelevantPLUSections(text: string, zoneCode: string): string {
   const upperText = text.toUpperCase();
-  const zoneCodeUpper = zoneCode.toUpperCase();
-  const baseZoneMatch = zoneCode.match(/^([A-Z]+)/); // No case-insensitive flag here
-  const baseZone = baseZoneMatch && baseZoneMatch[1] ? baseZoneMatch[1].toUpperCase() : zoneCodeUpper;
+  const { zoneCodeUpper, baseZone, suffix, hasSubZone } = deriveZoneHierarchy(zoneCode);
   
-  console.log(`[pluAnalysis] extractRelevantPLUSections: zoneCode=${zoneCode}, zoneCodeUpper=${zoneCodeUpper}, baseZone=${baseZone}`);
+  console.log(`[pluAnalysis] extractRelevantPLUSections: zoneCode=${zoneCode}, zoneCodeUpper=${zoneCodeUpper}, baseZone=${baseZone}, suffix=${suffix}`);
 
   const segments: { start: number; end: number; priority: number }[] = [];
   const inclusionRanges: { start: number; end: number }[] = [];
@@ -139,8 +150,11 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
   const zoneHeaderPatterns = [
     new RegExp(`DISPOSITIONS\\s+APPLICABLES\\s+([ÀA]\\s+)?LA\\s+ZONE\\s+${zoneCodeUpper}`, "i"),
     new RegExp(`DISPOSITIONS\\s+APPLICABLES\\s+([ÀA]\\s+)?LA\\s+ZONE\\s+${baseZone}`, "i"),
+    new RegExp(`DISPOSITIONS\\s+APPLICABLES\\s+([ÀA]\\s+)?LA\\s+ZONE\\s+${baseZone}[^\\n]{0,80}${zoneCodeUpper}`, "i"),
     new RegExp(`ZONE\\s+${zoneCodeUpper}\\b`, "i"),
-    new RegExp(`ZONE\\s+${baseZone}\\b`, "i")
+    new RegExp(`ZONE\\s+${baseZone}\\b`, "i"),
+    new RegExp(`SECTEUR\\s+${zoneCodeUpper}\\b`, "i"),
+    new RegExp(`SOUS[- ]ZONE\\s+${zoneCodeUpper}\\b`, "i"),
   ];
   
   let zoneStartIndex = -1;
@@ -152,12 +166,32 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
     const m = rx.exec(searchableText);
     if (m) {
       zoneStartIndex = m.index + offset;
-      const start = Math.max(0, zoneStartIndex - 500);
-      const end = Math.min(text.length, zoneStartIndex + 120000);
+      const start = Math.max(0, zoneStartIndex - 800);
+      const end = Math.min(text.length, zoneStartIndex + 160000);
       segments.push({ start, end, priority: 2 });
       inclusionRanges.push({ start, end });
-      inclusionRanges.push({ start, end });
       break; 
+    }
+  }
+
+  // 2b. If the target is a sub-zone (e.g. UDa), capture the base zone block AND local sub-zone mentions.
+  if (hasSubZone) {
+    const subZoneMentionPatterns = [
+      new RegExp(`\\b${zoneCodeUpper}\\b`, "gi"),
+      new RegExp(`SECTEUR\\s+${zoneCodeUpper}\\b`, "gi"),
+      new RegExp(`${baseZone}[^\\n]{0,40}${suffix}`, "gi"),
+    ];
+
+    for (const rx of subZoneMentionPatterns) {
+      let match: RegExpExecArray | null;
+      let localCount = 0;
+      while ((match = rx.exec(text)) !== null && localCount < 8) {
+        const start = Math.max(0, match.index - 2500);
+        const end = Math.min(text.length, match.index + 12000);
+        segments.push({ start, end, priority: 0 });
+        inclusionRanges.push({ start, end });
+        localCount++;
+      }
     }
   }
 
@@ -169,7 +203,9 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
     "Art\\s+8", "Article\\s+8", "Art\\s+9", "Article\\s+9",
     "Art\\s+10", "Article\\s+10", "Art\\s+11", "Article\\s+11",
     "Art\\s+12", "Article\\s+12", "Stationnement",
-    "Art\\s+13", "Article\\s+13", "CES", "Emprise\\s+au\\s+sol", "Hauteur"
+    "Art\\s+13", "Article\\s+13", "CES", "Emprise\\s+au\\s+sol", "Hauteur",
+    "Aspect\\s+extérieur", "Destination", "Usages?", "Réseaux", "Servitudes?",
+    zoneCodeUpper, baseZone
   ];
   
   keywords.forEach(kw => {
@@ -211,10 +247,9 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
   }
 
   const resultText = merged.map(m => text.substring(m.start, m.end)).join("\n\n--- DISCONTINUITÉ ---\n\n");
-  
-  // If the document is small enough for the model, just return it all
-  if (text.length < 900000) return text; 
 
+  // Never return the full document here: doing so causes the later OpenAI call to truncate the
+  // beginning of the file instead of the relevant zone pages. We want targeted zone excerpts only.
   return safeTruncate(resultText, 300000); 
 }
 
@@ -800,12 +835,15 @@ export async function analyzePLUZone(
   });
 
   try {
+    const { baseZone, hasSubZone } = deriveZoneHierarchy(zoneCode);
     let relevantText = extractRelevantPLUSections(rawText, zoneCode);
 
     // Fallback: if rawText is absent or too short (<300 chars), query Base IA embeddings directly
     if (relevantText.length < 300 && cityName) {
       try {
-        const fallbackQuery = `Zone ${zoneCode} règlement emprise hauteur recul stationnement implantation`;
+        const fallbackQuery = hasSubZone
+          ? `Zone ${baseZone} avec précisions ${zoneCode} règlement emprise hauteur recul stationnement implantation`
+          : `Zone ${zoneCode} règlement emprise hauteur recul stationnement implantation`;
         let fallbackChunks = await queryChunksWithMunicipalityAliases(fallbackQuery, {
           cityName,
           zoneCode,
@@ -892,6 +930,10 @@ export async function analyzePLUZone(
     }
     systemContent += `\n\nIMPORTANT: Ta réponse doit être uniquement au format JSON valide.`;
 
+    const zoneScopingInstruction = hasSubZone
+      ? `La parcelle est en sous-zone ${zoneCode}. Lis d'abord les règles générales de la zone mère ${baseZone}, puis ajoute toutes les précisions spécifiques ${zoneCode}. Si une précision ${zoneCode} existe, elle prime sur la règle générale ${baseZone}.`
+      : `La parcelle est en zone ${zoneCode}. Extrais exhaustivement toutes les règles applicables à cette zone.`;
+
     console.log(`[pluAnalysis] Calling OpenAI for zone extraction: ${zoneCode} in ${cityName}...`);
     const truncatedText = (relevantText || "").substring(0, 40000);
     const completion = await openai.chat.completions.create({
@@ -901,7 +943,7 @@ export async function analyzePLUZone(
         { role: "system", content: systemContent },
         {
           role: "user",
-          content: `Texte du règlement (Extrait):\n\n${truncatedText}\n\nIMPORTANT: Réponds uniquement avec un objet JSON contenant la clé "articles" (tableau).`
+          content: `${zoneScopingInstruction}\n\nTexte du règlement (Extrait):\n\n${truncatedText}\n\nIMPORTANT: Réponds uniquement avec un objet JSON contenant la clé "articles" (tableau).`
         }
       ],
       response_format: { type: "json_object" },
