@@ -950,8 +950,8 @@ async function extractTextFromFile(filePath: string, mimetype: string, context: 
     const extractWithPdfToText = (mode: "layout" | "raw") => {
       try {
         const args = mode === "layout"
-          ? ["-layout", "-enc", "UTF-8", "-nopgbrk", filePath, "-"]
-          : ["-raw", "-enc", "UTF-8", "-nopgbrk", filePath, "-"];
+          ? ["-layout", "-enc", "UTF-8", filePath, "-"]
+          : ["-raw", "-enc", "UTF-8", filePath, "-"];
         return execFileSync("pdftotext", args, {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
@@ -1563,7 +1563,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
 
     const docById = new Map(docs.map((doc) => [doc.id, doc]));
 
-    const sections = await db.select().from(regulatoryZoneSectionsTable)
+    let sections = await db.select().from(regulatoryZoneSectionsTable)
       .where(
         and(
           inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
@@ -1574,6 +1574,35 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
         desc(regulatoryZoneSectionsTable.reviewedAt),
         desc(regulatoryZoneSectionsTable.updatedAt)
       );
+
+    if (sections.length === 0) {
+      const municipalityKey = inseeCode || targetCommune;
+      for (const doc of docs) {
+        const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
+        if (!["plu_reglement", "plu_annexe"].includes(canonicalType)) continue;
+        if (!hasUsableTownHallText(doc.rawText)) continue;
+        await persistRegulatoryZoneSectionsForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          isOpposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+        });
+      }
+
+      sections = await db.select().from(regulatoryZoneSectionsTable)
+        .where(
+          and(
+            inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
+            eq(regulatoryZoneSectionsTable.isOpposable, true)
+          )
+        )
+        .orderBy(
+          desc(regulatoryZoneSectionsTable.reviewedAt),
+          desc(regulatoryZoneSectionsTable.updatedAt)
+        );
+    }
 
     const sectionsWithDocs = sections.map((section) => {
       const linkedDoc = section.townHallDocumentId ? docById.get(section.townHallDocumentId) : null;
@@ -1711,7 +1740,7 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
 
     const docById = new Map(docs.map((doc) => [doc.id, doc]));
 
-    const units = await db.select().from(regulatoryUnitsTable)
+    let units = await db.select().from(regulatoryUnitsTable)
       .where(
         and(
           inArray(regulatoryUnitsTable.municipalityId, municipalityAliases),
@@ -1724,6 +1753,37 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
         desc(regulatoryUnitsTable.sourceAuthority),
         desc(regulatoryUnitsTable.updatedAt)
       );
+
+    if (units.length === 0) {
+      const municipalityKey = inseeCode || targetCommune;
+      for (const doc of docs) {
+        const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
+        if (!["plu_reglement", "plu_annexe", "oap"].includes(canonicalType)) continue;
+        if (!hasUsableTownHallText(doc.rawText)) continue;
+        await persistRegulatoryUnitsForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          isOpposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+        });
+      }
+
+      units = await db.select().from(regulatoryUnitsTable)
+        .where(
+          and(
+            inArray(regulatoryUnitsTable.municipalityId, municipalityAliases),
+            eq(regulatoryUnitsTable.isOpposable, true),
+            inArray(regulatoryUnitsTable.documentType, ["plu_reglement", "plu_annexe", "oap"])
+          )
+        )
+        .orderBy(
+          desc(regulatoryUnitsTable.reviewedAt),
+          desc(regulatoryUnitsTable.sourceAuthority),
+          desc(regulatoryUnitsTable.updatedAt)
+        );
+    }
 
     const grouped = new Map<string, typeof units[number]>();
     for (const unit of units) {

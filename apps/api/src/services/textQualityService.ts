@@ -1,7 +1,9 @@
 export function normalizeExtractedText(text: string | null | undefined): string {
   return String(text || "")
     .normalize("NFKC")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u000C/g, "\n\f\n")
+    .replace(/[\u0000-\u0008\u000B\u000E-\u001F]/g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
