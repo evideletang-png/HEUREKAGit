@@ -11,38 +11,14 @@ jobs:
     name: Deploy api-server to Railway
     runs-on: ubuntu-latest
     env:
-      RAW_RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-      RAW_RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      RAILWAY_PROJECT_ID: 4d33425c-bd64-4410-ac0b-7e5645c952ca
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Resolve Railway token
-        run: |
-          TOKEN="${RAW_RAILWAY_API_TOKEN:-$RAW_RAILWAY_TOKEN}"
-          if [ -z "$TOKEN" ]; then
-            echo "Missing Railway token. Add RAILWAY_API_TOKEN or RAILWAY_TOKEN to GitHub Secrets." >&2
-            exit 1
-          fi
-          echo "::add-mask::$TOKEN"
-          echo "RAILWAY_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Show commit being deployed
-        run: |
-          git rev-parse HEAD
-          git log -1 --oneline
-          
-      - name: Deploy latest code to Railway
-        env:
-          RAILWAY_API_TOKEN: ${{ env.RAILWAY_API_TOKEN }}
-        run: |
-          railway link 4d33425c-bd64-4410-ac0b-7e5645c952ca
-          railway up --service "@workspace/api-server" --ci
+      - name: Deploy to Railway
+        run: railway up --service "@workspace/api-server" --ci
