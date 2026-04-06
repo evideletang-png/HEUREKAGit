@@ -20,6 +20,7 @@ import { logger } from "../utils/logger.js";
 import { GPUProviderService } from "./gpuProviderService.js";
 import { processDocumentForRAG } from "./baseIAIngestion.js";
 import { persistRegulatoryUnitsForDocument } from "./regulatoryUnitService.js";
+import { persistRegulatoryZoneSectionsForDocument } from "./regulatoryZoneSectionService.js";
 import { VisionService } from "./visionService.js";
 
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
@@ -248,6 +249,15 @@ export async function autoFetchPLU(
         } as any);
 
         await persistRegulatoryUnitsForDocument({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceAuthority: authorityFor(doc.docType),
+          isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+          rawText: doc.rawText,
+        });
+
+        await persistRegulatoryZoneSectionsForDocument({
           baseIADocumentId: baseIADoc.id,
           municipalityId: inseeCode,
           documentType: doc.docType,

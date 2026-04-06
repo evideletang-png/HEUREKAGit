@@ -1,4 +1,4 @@
-import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable, municipalitySettingsTable } from "@workspace/db";
+import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable, municipalitySettingsTable, regulatoryZoneSectionsTable } from "@workspace/db";
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
@@ -106,6 +106,20 @@ export async function buildAnalysisContext(
       )
     );
 
+  const zoneSections = zoneAliases.length > 0
+    ? await db.select().from(regulatoryZoneSectionsTable)
+      .where(
+        and(
+          or(
+            inArray(regulatoryZoneSectionsTable.municipalityId, [commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)),
+            communeName ? sql`lower(${regulatoryZoneSectionsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`
+          ),
+          inArray(regulatoryZoneSectionsTable.zoneCode, zoneAliases),
+          eq(regulatoryZoneSectionsTable.isOpposable, true)
+        )
+      )
+    : [];
+
   // 3. Zone-level Collection from Town Hall (PLU PDFs, etc.)
   // We fetch ALL documents for the commune, then filter or triage them based on zone keywords in Step 4
   const townHallDocs = await db.select().from(townHallDocumentsTable)
@@ -125,7 +139,27 @@ export async function buildAnalysisContext(
   const usableTownHallDocs = townHallDocs.filter((doc) => hasUsableExtractedText(doc.rawText));
 
   // Combine static document sources
-  const relevantDocs: any[] = [...baseIADocs, ...usableTownHallDocs];
+  const sectionDocs = zoneSections
+    .sort((left, right) => {
+      const leftPriority = left.zoneCode === zoneCode ? 0 : 1;
+      const rightPriority = right.zoneCode === zoneCode ? 0 : 1;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      return (right.sourceAuthority || 0) - (left.sourceAuthority || 0);
+    })
+    .map((section) => ({
+      id: `ZONE_SECTION_${section.id}`,
+      rawText: section.sourceText,
+      municipalityId: section.municipalityId,
+      status: "indexed",
+      documentType: section.documentType || "plu_reglement",
+      title: `${section.heading}${section.startPage ? ` (p. ${section.startPage}${section.endPage && section.endPage !== section.startPage ? `-${section.endPage}` : ""})` : ""}`,
+      isOpposable: section.isOpposable,
+      zoneCode: section.zoneCode,
+      parentZoneCode: section.parentZoneCode,
+      sourceAuthority: section.sourceAuthority,
+    }));
+
+  const relevantDocs: any[] = [...sectionDocs, ...baseIADocs, ...usableTownHallDocs];
 
   // 3b. ALWAYS run semantic search against base_ia_embeddings for zone-specific PLU chunks.
   // This is the primary knowledge source — it returns the most relevant indexed PLU text

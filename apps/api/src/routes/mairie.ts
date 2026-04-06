@@ -23,6 +23,7 @@ import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
 import { generateGlobalSynthesis, type ExtractedDocumentData } from "../services/pluAnalysis.js";
 import { persistRegulatoryUnitsForDocument } from "../services/regulatoryUnitService.js";
+import { persistRegulatoryZoneSectionsForDocument } from "../services/regulatoryZoneSectionService.js";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import multer from "multer";
 import fs from "fs";
@@ -1164,6 +1165,16 @@ async function queueTownHallDocumentIndexing(args: {
         rawText,
       });
 
+      await persistRegulatoryZoneSectionsForDocument({
+        baseIADocumentId: baseIADoc.id,
+        townHallDocumentId: args.docId,
+        municipalityId: municipalityKey,
+        documentType: canonicalType,
+        sourceAuthority: authorityForCanonicalType(canonicalType),
+        isOpposable,
+        rawText,
+      });
+
       await db.update(baseIADocumentsTable)
         .set({ status: "indexed" })
         .where(eq(baseIADocumentsTable.id, baseIADoc.id));
@@ -1604,6 +1615,14 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  baseIADocumentId: doc.id,
                  municipalityId: municipalityKey,
                  zoneCode: req.body.zone || null,
+                 documentType: canonicalType,
+                 sourceAuthority: authorityForCanonicalType(canonicalType),
+                 isOpposable,
+                 rawText,
+               });
+               await persistRegulatoryZoneSectionsForDocument({
+                 baseIADocumentId: doc.id,
+                 municipalityId: municipalityKey,
                  documentType: canonicalType,
                  sourceAuthority: authorityForCanonicalType(canonicalType),
                  isOpposable,
