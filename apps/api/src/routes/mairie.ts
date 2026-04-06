@@ -35,6 +35,8 @@ import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { AUTHORITY_POLICY } from "@workspace/ai-core";
+import { hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, scoreTextQuality } from "../services/textQualityService.js";
+import { execFileSync } from "child_process";
 
 // dossierEventsTable is now imported above
 
@@ -851,16 +853,41 @@ function shouldRunRegulatoryVision(context: TownHallExtractionContext, currentTe
 
 async function extractTextFromFile(filePath: string, mimetype: string, context: TownHallExtractionContext = {}): Promise<string> {
   if (mimetype === "application/pdf") {
+    const pickBestText = (...candidates: string[]) => {
+      const normalizedCandidates = candidates
+        .map((candidate) => normalizeExtractedText(candidate))
+        .filter((candidate) => candidate.length > 0);
+
+      return normalizedCandidates
+        .sort((left, right) => scoreTextQuality(right) - scoreTextQuality(left))[0] || "";
+    };
+
+    const extractWithPdfToText = () => {
+      try {
+        return execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", "-nopgbrk", filePath, "-"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 60000,
+        });
+      } catch (err) {
+        console.warn("[pdftotext]", err instanceof Error ? err.message : String(err));
+        return "";
+      }
+    };
+
     try {
       const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
       const buffer = fs.readFileSync(filePath);
       const result = await pdfParse(buffer);
-      let extractedText = result.text || "";
+      const pdfParseText = result.text || "";
+      const pdfToText = extractWithPdfToText();
+      let extractedText = pickBestText(pdfParseText, pdfToText);
 
-      if (extractedText.trim().length < 200) {
-        const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 5);
-        if (ocrText.trim().length > extractedText.trim().length) {
-          extractedText = ocrText;
+      if (extractedText.trim().length < 200 || isTextLikelyGarbled(extractedText)) {
+        const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 8);
+        const bestCandidate = pickBestText(extractedText, ocrText);
+        if (scoreTextQuality(bestCandidate) >= scoreTextQuality(extractedText)) {
+          extractedText = bestCandidate;
         }
       }
 
@@ -874,12 +901,17 @@ async function extractTextFromFile(filePath: string, mimetype: string, context: 
         }
       }
 
-      return extractedText;
+      return normalizeExtractedText(extractedText);
     } catch (e) {
       console.error("[pdf-parse]", e);
-      const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 5);
-      if (ocrText.trim().length > 0) {
-        return ocrText;
+      const pdfToText = extractWithPdfToText();
+      const ocrText = await VisionService.extractTextFromScannedPDF(filePath, 8);
+      const extractedText = normalizeExtractedText(
+        [pdfToText, ocrText]
+          .sort((left, right) => scoreTextQuality(right) - scoreTextQuality(left))[0] || ""
+      );
+      if (extractedText.trim().length > 0) {
+        return extractedText;
       }
       return "[Impossible d'extraire le texte du PDF automatiquement]";
     }
@@ -930,9 +962,7 @@ function resolveTownHallDocumentPath(id: string, fileName: string | null | undef
 }
 
 function hasUsableTownHallText(rawText: string | null | undefined): boolean {
-  const text = (rawText || "").trim();
-  if (text.length < 100) return false;
-  return !text.startsWith("[Impossible d'extraire le texte du PDF automatiquement]");
+  return hasUsableExtractedText(rawText);
 }
 
 function getTownHallDocumentAvailability(doc: {

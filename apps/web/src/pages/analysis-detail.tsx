@@ -50,7 +50,6 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
@@ -64,21 +63,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { AIConfidence, TraceabilityReference } from "@workspace/ai-core";
-import { TraceabilityViewer } from "@/components/analysis/traceability-viewer";
 import { MissingInfoAlert } from "@/components/analysis/missing-info-alert";
-
-interface RuleArticle {
-  id: string;
-  articleNumber: string;
-  title: string;
-  summary: string;
-  impactText?: string;
-  vigilanceText?: string;
-  sourceText: string;
-  confidence: AIConfidence | string;
-  sources?: TraceabilityReference[];
-  impact_level?: "blocking" | "major" | "minor";
-}
 
 type ReliabilityLevel = "validated" | "calculated" | "estimated" | "to_confirm";
 
@@ -138,6 +123,61 @@ function hasMeaningfulRegulatoryText(value: unknown): boolean {
 
   const lower = normalized.toLowerCase();
   return !placeholders.includes(lower);
+}
+
+type RegulatoryInsight = {
+  key: string;
+  title: string;
+  summary: string;
+  sourceText: string;
+  impactText?: string;
+  vigilanceText?: string;
+  confidence: AIConfidence | string;
+  relevanceScore: number;
+  relevanceReason?: string;
+};
+
+function getRegulatoryTheme(article: any): { key: string; title: string } {
+  const haystack = [
+    article?.title,
+    article?.summary,
+    article?.sourceText,
+    article?.impactText,
+    article?.vigilanceText,
+    article?.articleNumber,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+
+  if (haystack.includes("emprise") || haystack.includes("ces")) {
+    return { key: "footprint", title: "Emprise & densité" };
+  }
+  if (haystack.includes("hauteur") || haystack.includes("gabarit")) {
+    return { key: "height", title: "Hauteur & gabarit" };
+  }
+  if (haystack.includes("limite séparative") || haystack.includes("limites séparatives") || haystack.includes("voie") || haystack.includes("alignement") || haystack.includes("recul") || haystack.includes("prospect")) {
+    return { key: "implantation", title: "Implantation & reculs" };
+  }
+  if (haystack.includes("stationnement") || haystack.includes("parking") || haystack.includes("accès")) {
+    return { key: "parking", title: "Accès & stationnement" };
+  }
+  if (haystack.includes("pleine terre") || haystack.includes("espace vert") || haystack.includes("plantation") || haystack.includes("perméabil")) {
+    return { key: "landscape", title: "Paysage & pleine terre" };
+  }
+  if (haystack.includes("destination") || haystack.includes("usage") || haystack.includes("occupation du sol")) {
+    return { key: "uses", title: "Usages & destination" };
+  }
+
+  return { key: "other", title: "Points réglementaires utiles" };
+}
+
+function pickConfidence(confidences: Array<AIConfidence | string>): AIConfidence | string {
+  const priority = ["high", "medium", "low", "unknown"];
+  const normalized = confidences.map((confidence) => String(confidence || "unknown").toLowerCase());
+  for (const level of priority) {
+    if (normalized.includes(level)) return level;
+  }
+  return confidences[0] || "unknown";
 }
 
 export default function AnalysisDetailPage() {
@@ -369,6 +409,73 @@ export default function AnalysisDetailPage() {
       )
     : [];
 
+  const thematicInsights: RegulatoryInsight[] = useMemo(() => {
+    const groups = new Map<string, RegulatoryInsight & { sourceTexts: string[]; summaries: string[]; impacts: string[]; vigilances: string[]; confidences: Array<AIConfidence | string> }>();
+
+    for (const article of meaningfulArticles) {
+      const extra = (() => {
+        try {
+          return JSON.parse(article.structuredJson || "{}");
+        } catch {
+          return {};
+        }
+      })();
+      const theme = getRegulatoryTheme(article);
+      const existing = groups.get(theme.key);
+      const relevanceScore = Number(extra?.relevanceScore || 0);
+      const relevanceReason = typeof extra?.relevanceReason === "string" ? extra.relevanceReason : undefined;
+
+      if (!existing) {
+        groups.set(theme.key, {
+          key: theme.key,
+          title: theme.title,
+          summary: article.summary || article.sourceText || "",
+          sourceText: article.sourceText || "",
+          impactText: article.impactText || "",
+          vigilanceText: article.vigilanceText || "",
+          confidence: article.confidence || "unknown",
+          relevanceScore,
+          relevanceReason,
+          sourceTexts: article.sourceText ? [article.sourceText] : [],
+          summaries: article.summary ? [article.summary] : [],
+          impacts: article.impactText ? [article.impactText] : [],
+          vigilances: article.vigilanceText ? [article.vigilanceText] : [],
+          confidences: [article.confidence || "unknown"],
+        });
+        continue;
+      }
+
+      if (!existing.summary && article.summary) existing.summary = article.summary;
+      if (!existing.sourceText && article.sourceText) existing.sourceText = article.sourceText;
+      if (!existing.impactText && article.impactText) existing.impactText = article.impactText;
+      if (!existing.vigilanceText && article.vigilanceText) existing.vigilanceText = article.vigilanceText;
+      if (relevanceScore > existing.relevanceScore) {
+        existing.relevanceScore = relevanceScore;
+        existing.relevanceReason = relevanceReason;
+      }
+
+      if (article.sourceText && !existing.sourceTexts.includes(article.sourceText)) existing.sourceTexts.push(article.sourceText);
+      if (article.summary && !existing.summaries.includes(article.summary)) existing.summaries.push(article.summary);
+      if (article.impactText && !existing.impacts.includes(article.impactText)) existing.impacts.push(article.impactText);
+      if (article.vigilanceText && !existing.vigilances.includes(article.vigilanceText)) existing.vigilances.push(article.vigilanceText);
+      existing.confidences.push(article.confidence || "unknown");
+    }
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        key: group.key,
+        title: group.title,
+        summary: group.summary || group.summaries[0] || "",
+        sourceText: group.sourceText || group.sourceTexts.join("\n\n---\n\n"),
+        impactText: group.impactText || group.impacts[0] || "",
+        vigilanceText: group.vigilanceText || group.vigilances[0] || "",
+        confidence: pickConfidence(group.confidences),
+        relevanceScore: group.relevanceScore,
+        relevanceReason: group.relevanceReason,
+      }))
+      .sort((left, right) => right.relevanceScore - left.relevanceScore);
+  }, [meaningfulArticles]);
+
   const digestHighlights = [
     parsedDigest?.dimensions?.maxFootprint ? `Emprise: ${parsedDigest.dimensions.maxFootprint}` : null,
     parsedDigest?.dimensions?.maxHeight ? `Hauteur: ${parsedDigest.dimensions.maxHeight}` : null,
@@ -382,7 +489,7 @@ export default function AnalysisDetailPage() {
     hasMeaningfulRegulatoryText(parsedDigest?.summary)
     || digestHighlights.length > 0
   );
-  const hasRegulatoryMatter = meaningfulArticles.length > 0 || regulationControls.length > 0 || hasDigestSubstance || !!missingPluIssue;
+  const hasRegulatoryMatter = thematicInsights.length > 0 || regulationControls.length > 0 || hasDigestSubstance || !!missingPluIssue;
 
   const reliabilitySummary: { label: string; level: ReliabilityLevel }[] = [
     { label: "Adresse & parcelle", level: (dataQuality.address_and_parcel || (sourceLock?.lat && displayParcelRef ? "validated" : parcel ? "calculated" : "to_confirm")) as ReliabilityLevel },
@@ -953,7 +1060,7 @@ export default function AnalysisDetailPage() {
                            Zone retenue: <span className="font-semibold">{analysis.zoneCode ? `Zone ${analysis.zoneCode}` : "Non déterminée"}</span>
                          </li>
                          <li className="rounded-lg border border-border/60 bg-background/80 px-3 py-2">
-                           Documents exploitables: <span className="font-semibold">{meaningfulArticles.length > 0 || hasDigestSubstance || regulationControls.length > 0 ? "oui, partiellement" : "pas de règles exploitables détectées"}</span>
+                           Documents exploitables: <span className="font-semibold">{thematicInsights.length > 0 || hasDigestSubstance || regulationControls.length > 0 ? "oui, partiellement" : "pas de règles exploitables détectées"}</span>
                          </li>
                          <li className="rounded-lg border border-border/60 bg-background/80 px-3 py-2">
                            Constructibilité: <span className="font-semibold">{buildability ? "calcul disponible" : "reste à confirmer"}</span>
@@ -966,7 +1073,7 @@ export default function AnalysisDetailPage() {
                          <h3 className="font-semibold">Lecture recommandée</h3>
                        </div>
                        <div className="rounded-xl border border-border/60 bg-background/80 p-4 text-sm text-muted-foreground leading-relaxed">
-                         {meaningfulArticles.length > 0
+                         {thematicInsights.length > 0
                            ? "Les règles ci-dessous sont les éléments les plus exploitables retrouvés dans la base réglementaire. Elles sont plus fiables que les numéros d'articles seuls."
                            : hasRegulatoryMatter
                              ? "Le système a retrouvé des indices réglementaires, mais pas assez de matière pour reconstituer article par article un règlement propre. Lis d'abord les preuves ci-dessous, puis utilise l'assistant pour questionner un point précis."
@@ -1081,7 +1188,7 @@ export default function AnalysisDetailPage() {
                   </div>
                 )}
 
-                {(!meaningfulArticles.length && !hasDigestSubstance && !regulationControls.length) && (
+                {(!thematicInsights.length && !hasDigestSubstance && !regulationControls.length) && (
                   <div className="flex flex-col items-center justify-center py-12 text-center bg-amber-50/60 rounded-xl border border-amber-200/60 mb-4">
                     <AlertTriangle className="w-8 h-8 text-amber-500 mb-3" />
                     <h4 className="font-semibold text-amber-800 mb-1">Aucune règle exploitable n'a été reconstituée</h4>
@@ -1095,43 +1202,39 @@ export default function AnalysisDetailPage() {
                   </div>
                 )}
 
-                {meaningfulArticles.length > 0 && (
-                <Accordion type="single" collapsible className="w-full">
-                  {meaningfulArticles.map((article: any) => {
-                    const extra = JSON.parse(article.structuredJson || "{}");
-                    const isHighlyRelevant = extra.relevanceScore >= 80;
-                    
+                {thematicInsights.length > 0 && (
+                <div className="space-y-4">
+                  {thematicInsights.map((insight) => {
+                    const isHighlyRelevant = insight.relevanceScore >= 80;
+
                     return (
-                    <AccordionItem key={article.id} value={article.id} className={`border-border rounded-lg mb-2 overflow-hidden ${isHighlyRelevant ? 'border-primary/30 bg-primary/5' : ''}`}>
-                      <AccordionTrigger className="hover:no-underline hover:bg-muted/50 px-4 rounded-lg transition-colors py-4">
-                        <div className="flex items-center gap-4 text-left w-full mr-4">
-                          <span className={`w-8 h-8 rounded-full font-bold flex items-center justify-center shrink-0 ${isHighlyRelevant ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}>
-                            {article.articleNumber}
-                          </span>
-                          <div className="flex-grow">
+                    <Card key={insight.key} className={`border-border rounded-xl overflow-hidden ${isHighlyRelevant ? 'border-primary/30 bg-primary/5' : ''}`}>
+                      <CardHeader className="pb-3 border-b border-border/50">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold text-base">{article.title}</span>
+                              <CardTitle className="text-base">{insight.title}</CardTitle>
                               {isHighlyRelevant && <Badge className="bg-primary text-[9px] h-4 py-0 uppercase">Prioritaire</Badge>}
                             </div>
-                            {extra.relevanceReason && (
-                              <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{extra.relevanceReason}</p>
+                            {insight.relevanceReason && (
+                              <p className="text-[10px] text-muted-foreground font-medium">{insight.relevanceReason}</p>
                             )}
                           </div>
-                          
+
                           <div className="flex flex-col items-end gap-1 shrink-0">
-                            <ConfidenceBadge confidence={article.confidence} type="ai" />
-                            {extra.relevanceScore && (
+                            <ConfidenceBadge confidence={insight.confidence} type="ai" />
+                            {insight.relevanceScore > 0 && (
                               <div className="flex items-center gap-1.5">
                                 <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                                  <div className="h-full bg-primary" style={{ width: `${extra.relevanceScore}%` }} />
+                                  <div className="h-full bg-primary" style={{ width: `${insight.relevanceScore}%` }} />
                                 </div>
-                                <span className="text-[9px] font-bold text-muted-foreground">{extra.relevanceScore}% match</span>
+                                <span className="text-[9px] font-bold text-muted-foreground">{insight.relevanceScore}% match</span>
                               </div>
                             )}
                           </div>
                         </div>
-                      </AccordionTrigger>
-                     <AccordionContent className="px-4 pt-4 pb-6">
+                      </CardHeader>
+                     <CardContent className="px-4 pt-4 pb-6">
                        {/* NOUVEL AFFICHAGE CALCUL TUNNEL (STEP 6) */}
                        {(analysis as any).metadata?.pluAnalysis?.calculationTunnel && (
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -1170,56 +1273,49 @@ export default function AnalysisDetailPage() {
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                          <div className="space-y-4">
                            <div>
-                             <h4 className="font-bold text-sm text-primary mb-2 uppercase tracking-wider">Résumé IA</h4>
+                             <h4 className="font-bold text-sm text-primary mb-2 uppercase tracking-wider">Lecture utile</h4>
                              <div className="text-foreground leading-relaxed p-4 bg-muted/30 rounded-lg border border-border/50 text-sm">
-                               <p>{article.summary}</p>
+                               <p>{insight.summary}</p>
                                
                                {/* Uncertainty UX Path */}
-                               {typeof article.confidence === 'object' && article.confidence.review_status === 'manual_required' && (
+                               {typeof insight.confidence === 'object' && insight.confidence.review_status === 'manual_required' && (
                                  <MissingInfoAlert 
                                    type="expert" 
-                                   missingFields={article.confidence.missing_critical_data}
-                                   reason={article.confidence.reason}
+                                   missingFields={insight.confidence.missing_critical_data}
+                                   reason={insight.confidence.reason}
                                    className="mt-3"
                                  />
                                )}
                              </div>
                            </div>
-                           {article.impactText && (
+                           {insight.impactText && (
                              <div>
                                <h4 className="font-bold text-sm text-emerald-700 mb-2 uppercase tracking-wider">Impact Projet</h4>
                                <p className="text-foreground leading-relaxed p-4 bg-emerald-50 rounded-lg border border-emerald-100 text-sm">
-                                 {article.impactText}
+                                 {insight.impactText}
                                </p>
                              </div>
                            )}
-                           {article.vigilanceText && (
+                           {insight.vigilanceText && (
                              <div>
                                <h4 className="font-bold text-sm text-amber-700 mb-2 uppercase tracking-wider">Point de vigilance</h4>
                                <p className="text-foreground leading-relaxed p-4 bg-amber-50 rounded-lg border border-amber-100 text-sm">
-                                 {article.vigilanceText}
+                                 {insight.vigilanceText}
                                </p>
-                             </div>
-                           )}
-                           
-                           {/* Traceability Section */}
-                           {article.sources && article.sources.length > 0 && (
-                             <div className="pt-2">
-                               <TraceabilityViewer sources={article.sources} />
                              </div>
                            )}
                          </div>
                          <div>
-                           <h4 className="font-bold text-sm text-muted-foreground mb-2 uppercase tracking-wider">Texte Source (Extrait)</h4>
+                           <h4 className="font-bold text-sm text-muted-foreground mb-2 uppercase tracking-wider">Preuve source (Extrait)</h4>
                            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg h-full max-h-96 overflow-y-auto font-mono text-xs text-gray-600">
-                             {article.sourceText}
+                             {insight.sourceText}
                            </div>
                          </div>
                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
+                      </CardContent>
+                    </Card>
                   )})}
-                </Accordion>
+                </div>
                 )}
               </CardContent>
             </Card>
