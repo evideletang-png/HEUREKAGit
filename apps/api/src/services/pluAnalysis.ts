@@ -455,6 +455,9 @@ function coerceArticleConfidence(raw: unknown): "high" | "medium" | "low" | "unk
 
 function extractArticleCandidates(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.regulations)) return payload.regulations;
+  if (Array.isArray(payload?.data?.regulations)) return payload.data.regulations;
+  if (Array.isArray(payload?.content?.regulations)) return payload.content.regulations;
   if (Array.isArray(payload?.articles)) return payload.articles;
   if (Array.isArray(payload?.data?.articles)) return payload.data.articles;
   if (Array.isArray(payload?.data?.rules)) return payload.data.rules;
@@ -472,7 +475,7 @@ export function extractStructuredRuleCandidates(payload: any): any[] {
 
 function coerceZoneArticles(payload: any): ArticleAnalysis[] {
   return extractArticleCandidates(payload).map((raw: any, index: number) => {
-    const rawArticle = raw?.articleNumber ?? raw?.article ?? raw?.article_id ?? raw?.title ?? `${index + 1}`;
+    const rawArticle = raw?.articleNumber ?? raw?.article ?? raw?.article_id ?? raw?.reference ?? raw?.title ?? raw?.theme ?? `${index + 1}`;
     const numericArticle = parseInt(String(rawArticle).replace(/[^0-9]/g, ""), 10);
     const articleNumber = Number.isFinite(numericArticle) && numericArticle > 0 ? numericArticle : index + 1;
     const sourceText = String(
@@ -481,12 +484,15 @@ function coerceZoneArticles(payload: any): ArticleAnalysis[] {
       ?? raw?.texte_source
       ?? raw?.source
       ?? raw?.content
+      ?? raw?.regulation
       ?? raw?.rule
       ?? raw?.operational_rule
       ?? ""
     );
     const summary = String(
       raw?.summary
+      ?? raw?.description
+      ?? raw?.regulation
       ?? raw?.rule
       ?? raw?.operational_rule
       ?? raw?.interpretation
@@ -502,7 +508,7 @@ function coerceZoneArticles(payload: any): ArticleAnalysis[] {
 
     return {
       articleNumber,
-      title: String(raw?.title ?? raw?.section ?? `Article ${rawArticle}`),
+      title: String(raw?.title ?? raw?.theme ?? raw?.section ?? `Article ${rawArticle}`),
       sourceText,
       interpretation,
       summary,
@@ -1068,6 +1074,22 @@ export async function extractRelevantRules(
           limit: 25,
           jurisdictionContext,
         });
+      }
+
+      if (chunks.length > 0 && chunks.length < 5) {
+        const broaderChunks = await queryChunksWithMunicipalityAliases(queryStr, {
+          cityName,
+          zoneCode,
+          limit: 25,
+          jurisdictionContext,
+        });
+        const seen = new Set(chunks.map((chunk) => chunk.id));
+        for (const chunk of broaderChunks) {
+          if (seen.has(chunk.id)) continue;
+          seen.add(chunk.id);
+          chunks.push(chunk);
+          if (chunks.length >= 12) break;
+        }
       }
 
       // Fallback: GLOBAL_POOL_ID if the commune isn't yet indexed in Base IA

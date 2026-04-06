@@ -1,4 +1,4 @@
-import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable } from "@workspace/db";
+import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable, municipalitySettingsTable } from "@workspace/db";
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
@@ -29,6 +29,13 @@ export async function buildAnalysisContext(
   try {
     const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, commune)).limit(1);
     if (c) communeName = c.name;
+    if (!communeName) {
+      const [settings] = await db.select({ commune: municipalitySettingsTable.commune })
+        .from(municipalitySettingsTable)
+        .where(eq(municipalitySettingsTable.inseeCode, commune))
+        .limit(1);
+      if (settings?.commune) communeName = settings.commune;
+    }
     console.log(`[ContextBuilder] Resolved INSEE ${commune} to name: ${communeName}`);
   } catch (e) {
     console.warn(`[ContextBuilder] Failed to resolve commune name for ${commune}`);

@@ -228,10 +228,42 @@ import { MessagingService } from "./messagingService.js";
 export async function resolveJurisdictionContext(communeInsee: string, communeNameHint?: string): Promise<JurisdictionContext> {
   let communeRecord = (await db.select().from(communesTable).where(eq(communesTable.inseeCode, communeInsee)).limit(1))[0];
 
+  if (!communeRecord && communeInsee) {
+    const [settingsByInsee] = await db
+      .select({ inseeCode: municipalitySettingsTable.inseeCode, commune: municipalitySettingsTable.commune })
+      .from(municipalitySettingsTable)
+      .where(eq(municipalitySettingsTable.inseeCode, communeInsee))
+      .limit(1);
+
+    if (settingsByInsee?.commune) {
+      communeRecord = {
+        inseeCode: settingsByInsee.inseeCode || communeInsee,
+        name: settingsByInsee.commune,
+        jurisdictionId: settingsByInsee.inseeCode || communeInsee,
+      } as any;
+    }
+  }
+
   if (!communeRecord && communeNameHint) {
     communeRecord = (await db.select().from(communesTable)
       .where(sql`lower(${communesTable.name}) = lower(${communeNameHint})`)
       .limit(1))[0];
+  }
+
+  if (!communeRecord && communeNameHint) {
+    const [settingsByName] = await db
+      .select({ inseeCode: municipalitySettingsTable.inseeCode, commune: municipalitySettingsTable.commune })
+      .from(municipalitySettingsTable)
+      .where(sql`lower(${municipalitySettingsTable.commune}) = lower(${communeNameHint})`)
+      .limit(1);
+
+    if (settingsByName?.commune) {
+      communeRecord = {
+        inseeCode: settingsByName.inseeCode || communeInsee,
+        name: settingsByName.commune,
+        jurisdictionId: settingsByName.inseeCode || communeInsee,
+      } as any;
+    }
   }
 
   if (!communeRecord && communeInsee && !/^\d{5}$/.test(communeInsee)) {
@@ -603,8 +635,9 @@ export async function orchestrateDossierAnalysis(
     if (doc?.isOpposable === true) return true;
     if (hint.includes("padd")) return false;
     if (hint.includes("oap") || hint.includes("orientation")) return false;
-    if (hint.includes("reglement") || hint.includes("règlement") || hint.includes("plu_reglement")) return true;
-    if (hint.includes("plu_annexe") || hint.includes("zonage") || hint.includes("graphique") || hint.includes("carte")) return true;
+    if (hint.includes("reglement") || hint.includes("règlement") || hint.includes("regulation") || hint.includes("written regulation") || hint.includes("plu_reglement")) return true;
+    if (hint.includes("plu_annexe") || hint.includes("zonage") || hint.includes("zoning map") || hint.includes("graphique") || hint.includes("carte") || hint.includes("map")) return true;
+    if (String(doc?.type || "").toLowerCase() === "plu") return true;
     return false;
   };
 
