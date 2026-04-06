@@ -55,8 +55,8 @@ import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer } from "recharts";
-import { MapContainer, TileLayer, Polygon, Tooltip as LeafletTooltip, Rectangle } from "react-leaflet";
 import { AnalysisChat } from "@/components/analysis/AnalysisChat";
+import { AnalysisParcelMap } from "@/components/analysis/AnalysisParcelMap";
 import { SketchPlanner } from "@/components/analysis/SketchPlanner";
 import { useAuth } from "@/hooks/use-auth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -819,19 +819,16 @@ export default function AnalysisDetailPage() {
             
             <div className="lg:col-span-2 h-[500px] rounded-xl overflow-hidden shadow-md border border-border relative z-0">
                {parcel?.centroidLat ? (
-                  <MapContainer center={mapCenter} zoom={19} style={{ height: '100%', width: '100%' }}>
-                    <TileLayer
-                      url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                      attribution='&copy; <a href="https://carto.com/">Carto</a>'
-                    />
-                    {parcelPositions.length > 0 && (
-                      <Polygon positions={parcelPositions} pathOptions={{ color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.18, weight: 3 }}>
-                        <LeafletTooltip permanent direction="center" className="bg-transparent border-0 shadow-none font-bold text-base text-red-600">
-                          {parcel?.parcelSurfaceM2} m²
-                        </LeafletTooltip>
-                    </Polygon>
-                    )}
-                  </MapContainer>
+                 <AnalysisParcelMap
+                   mapCenter={mapCenter}
+                   parcelPositions={parcelPositions}
+                   parcelSurfaceM2={parcel?.parcelSurfaceM2 ?? null}
+                   buildings={data.buildings || []}
+                   frontRoadName={pb.front_road_name ?? rd.nearest_road_name ?? null}
+                   roadLengthM={pb.road_length_m ?? parcel?.roadFrontageLengthM ?? null}
+                   sideLengthM={pb.side_length_m ?? null}
+                   isCornerPlot={!!pm.is_corner_plot}
+                 />
                ) : (
                  <div className="w-full h-full bg-muted flex items-center justify-center">
                    <p className="text-muted-foreground">Carte indisponible - Géométrie en attente</p>
