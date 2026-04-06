@@ -69,6 +69,7 @@ async function collectPrioritizedRegulatoryChunks(
   }
 ) {
   const limit = options.limit || 25;
+  const zoneAliases = buildZoneCodeAliases(options.zoneCode);
   const plans = [
     { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 15) },
     { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 22) },
@@ -80,21 +81,23 @@ async function collectPrioritizedRegulatoryChunks(
   const chunks: any[] = [];
 
   for (const plan of plans) {
-    const hits = await queryChunksWithMunicipalityAliases(queryStr, {
-      cityName: options.cityName,
-      zoneCode: options.zoneCode,
-      docTypes: plan.docTypes,
-      minAuthority: 7,
-      strictZone: plan.strictZone,
-      limit: plan.target,
-      jurisdictionContext: options.jurisdictionContext,
-    });
+    for (const zoneAlias of zoneAliases) {
+      const hits = await queryChunksWithMunicipalityAliases(queryStr, {
+        cityName: options.cityName,
+        zoneCode: zoneAlias,
+        docTypes: plan.docTypes,
+        minAuthority: 7,
+        strictZone: plan.strictZone,
+        limit: plan.target,
+        jurisdictionContext: options.jurisdictionContext,
+      });
 
-    for (const hit of hits) {
-      if (seen.has(hit.id)) continue;
-      seen.add(hit.id);
-      chunks.push(hit);
-      if (chunks.length >= limit) return chunks;
+      for (const hit of hits) {
+        if (seen.has(hit.id)) continue;
+        seen.add(hit.id);
+        chunks.push(hit);
+        if (chunks.length >= limit) return chunks;
+      }
     }
   }
 
@@ -111,7 +114,7 @@ function safeTruncate(text: string, maxTokens: number = 150000): string {
   return text.substring(0, maxChars) + "\n\n[TRONQUÉ - LIMITE EXTREME ATTEINTE (TOKEN QUOTA SAFE)]";
 }
 
-function deriveZoneHierarchy(zoneCode: string) {
+export function deriveZoneHierarchy(zoneCode: string) {
   const zoneCodeUpper = zoneCode.toUpperCase();
   const baseZoneMatch = zoneCode.match(/^([A-Z]+)/);
   const baseZone = baseZoneMatch && baseZoneMatch[1] ? baseZoneMatch[1].toUpperCase() : zoneCodeUpper;
@@ -122,6 +125,12 @@ function deriveZoneHierarchy(zoneCode: string) {
     suffix,
     hasSubZone: suffix.length > 0 && zoneCodeUpper !== baseZone,
   };
+}
+
+export function buildZoneCodeAliases(zoneCode?: string | null): string[] {
+  if (!zoneCode || zoneCode.trim().length === 0) return [];
+  const { zoneCodeUpper, baseZone, hasSubZone } = deriveZoneHierarchy(zoneCode.trim());
+  return hasSubZone ? [zoneCodeUpper, baseZone] : [zoneCodeUpper];
 }
 
 /**
@@ -1251,6 +1260,7 @@ export async function extractRelevantRules(
 ): Promise<string> {
   const { zoneCode, cityName, topics = [], docTypes = [] } = context;
   const regulatoryDocTypes = docTypes.length > 0 ? docTypes : ["plu_reglement", "plu_annexe"];
+  const zoneAliases = buildZoneCodeAliases(zoneCode);
   
   let combinedText = "";
   const { jurisdictionContext } = context;
@@ -1270,13 +1280,22 @@ export async function extractRelevantRules(
       });
 
       if (chunks.length > 0 && chunks.length < 5) {
-        const broaderChunks = await queryChunksWithMunicipalityAliases(queryStr, {
-          cityName,
-          zoneCode,
-          docTypes: regulatoryDocTypes,
-          limit: 25,
-          jurisdictionContext,
-        });
+        const broaderChunks: any[] = [];
+        const seenBroader = new Set<string>();
+        for (const zoneAlias of zoneAliases.length > 0 ? zoneAliases : [zoneCode]) {
+          const aliasChunks = await queryChunksWithMunicipalityAliases(queryStr, {
+            cityName,
+            zoneCode: zoneAlias,
+            docTypes: regulatoryDocTypes,
+            limit: 25,
+            jurisdictionContext,
+          });
+          for (const chunk of aliasChunks) {
+            if (seenBroader.has(chunk.id)) continue;
+            seenBroader.add(chunk.id);
+            broaderChunks.push(chunk);
+          }
+        }
         const seen = new Set(chunks.map((chunk) => chunk.id));
         for (const chunk of broaderChunks) {
           if (seen.has(chunk.id)) continue;
@@ -1300,12 +1319,22 @@ export async function extractRelevantRules(
 
       if (chunks.length === 0) {
         console.warn(`[pluAnalysis] Strict regulatory retrieval returned no chunks for ${cityName} zone ${zoneCode} — falling back to legacy metadata.`);
-        chunks = await queryChunksWithMunicipalityAliases(queryStr, {
-          cityName,
-          zoneCode,
-          limit: 15,
-          jurisdictionContext,
-        });
+        const legacyChunks: any[] = [];
+        const seenLegacy = new Set<string>();
+        for (const zoneAlias of zoneAliases.length > 0 ? zoneAliases : [zoneCode]) {
+          const aliasChunks = await queryChunksWithMunicipalityAliases(queryStr, {
+            cityName,
+            zoneCode: zoneAlias,
+            limit: 15,
+            jurisdictionContext,
+          });
+          for (const chunk of aliasChunks) {
+            if (seenLegacy.has(chunk.id)) continue;
+            seenLegacy.add(chunk.id);
+            legacyChunks.push(chunk);
+          }
+        }
+        chunks = legacyChunks;
       }
 
       if (chunks.length > 0) {

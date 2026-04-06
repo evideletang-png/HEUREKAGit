@@ -4,6 +4,7 @@ import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
 import { autoFetchPLU } from "./pluAutoFetch.js";
 import { hasUsableExtractedText } from "./textQualityService.js";
+import { buildZoneCodeAliases } from "./pluAnalysis.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -22,6 +23,7 @@ async function collectPrioritizedRegulatoryChunks(
 ) {
   const query = `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`;
   const aliases = Array.from(new Set([commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const zoneAliases = buildZoneCodeAliases(zoneCode);
   const plans = [
     { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 18) },
     { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 8) },
@@ -34,21 +36,23 @@ async function collectPrioritizedRegulatoryChunks(
 
   for (const plan of plans) {
     for (const municipalityId of aliases) {
-      const chunks = await queryRelevantChunks(query, {
-        municipalityId,
-        zoneCode,
-        docTypes: plan.docTypes,
-        minAuthority: 7,
-        strictZone: plan.strictZone,
-        jurisdictionContext,
-        limit: plan.target,
-      });
+      for (const zoneAlias of zoneAliases) {
+        const chunks = await queryRelevantChunks(query, {
+          municipalityId,
+          zoneCode: zoneAlias,
+          docTypes: plan.docTypes,
+          minAuthority: 7,
+          strictZone: plan.strictZone,
+          jurisdictionContext,
+          limit: plan.target,
+        });
 
-      for (const chunk of chunks) {
-        if (seen.has(chunk.id)) continue;
-        seen.add(chunk.id);
-        results.push(chunk);
-        if (results.length >= limit) return results;
+        for (const chunk of chunks) {
+          if (seen.has(chunk.id)) continue;
+          seen.add(chunk.id);
+          results.push(chunk);
+          if (results.length >= limit) return results;
+        }
       }
 
       if (results.length >= plan.target) break;
@@ -68,6 +72,7 @@ export async function buildAnalysisContext(
   jurisdictionContext: JurisdictionContext
 ): Promise<AnalysisContext> {
   console.log(`[ContextBuilder] Building context for ${jurisdictionContext.name} (${zoneCode})...`);
+  const zoneAliases = buildZoneCodeAliases(zoneCode);
 
   // 1. Resolve Commune Name (Mismatch fix for town_hall_documents)
   let communeName = "";
@@ -110,7 +115,9 @@ export async function buildAnalysisContext(
           eq(townHallDocumentsTable.commune, commune),
           communeName ? sql`lower(${townHallDocumentsTable.commune}) = lower(${communeName})` : sql`FALSE`,
           // Zone-specific matches if pre-filtered in DB
-          eq(townHallDocumentsTable.zone, zoneCode)
+          zoneAliases.length > 0
+            ? inArray(townHallDocumentsTable.zone, zoneAliases)
+            : sql`FALSE`
         ),
         eq(townHallDocumentsTable.isRegulatory, true)
       )
@@ -198,7 +205,9 @@ export async function buildAnalysisContext(
           eq(rulesTable.commune, commune),
           communeName ? eq(rulesTable.commune, communeName) : sql`FALSE`
         ),
-        eq(rulesTable.zoneCode, zoneCode)
+        zoneAliases.length > 0
+          ? inArray(rulesTable.zoneCode, zoneAliases)
+          : eq(rulesTable.zoneCode, zoneCode)
       )
     );
 

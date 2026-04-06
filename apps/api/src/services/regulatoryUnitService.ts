@@ -1,6 +1,13 @@
 import { db } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
-import { extractComprehensiveRegulatoryRules, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest, type ArticleAnalysis, type ZoneDigest } from "./pluAnalysis.js";
+import {
+  extractComprehensiveRegulatoryRules,
+  extractDeterministicRegulatoryRules,
+  buildDeterministicZoneDigest,
+  buildZoneCodeAliases,
+  type ArticleAnalysis,
+  type ZoneDigest,
+} from "./pluAnalysis.js";
 import { smartArticleChunking } from "./baseIAIngestion.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 
@@ -116,7 +123,28 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
 
 export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promise<CanonicalRegulatoryUnit[]> {
   const aliases = Array.from(new Set([args.municipalityId, args.communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const zoneAliases = buildZoneCodeAliases(args.zoneCode);
   if (aliases.length === 0) return [];
+  const zoneFilter = args.zoneCode
+    ? or(
+        inArray(regulatoryUnitsTable.zoneCode, zoneAliases),
+        sql`${regulatoryUnitsTable.zoneCode} IS NULL`
+      )
+    : sql`TRUE`;
+  const zonePriorityOrder = args.zoneCode
+    ? zoneAliases.length > 1
+      ? sql`CASE
+          WHEN ${regulatoryUnitsTable.zoneCode} = ${zoneAliases[0]} THEN 0
+          WHEN ${regulatoryUnitsTable.zoneCode} = ${zoneAliases[1]} THEN 1
+          WHEN ${regulatoryUnitsTable.zoneCode} IS NULL THEN 2
+          ELSE 3
+        END`
+      : sql`CASE
+          WHEN ${regulatoryUnitsTable.zoneCode} = ${zoneAliases[0]} THEN 0
+          WHEN ${regulatoryUnitsTable.zoneCode} IS NULL THEN 1
+          ELSE 2
+        END`
+    : sql`0`;
 
   const rows = await db.select().from(regulatoryUnitsTable)
     .where(and(
@@ -124,9 +152,7 @@ export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promis
         inArray(regulatoryUnitsTable.municipalityId, aliases),
         ...aliases.map((alias) => sql`lower(${regulatoryUnitsTable.municipalityId}) = lower(${alias})`)
       ),
-      args.zoneCode
-        ? sql`(${regulatoryUnitsTable.zoneCode} = ${args.zoneCode} OR ${regulatoryUnitsTable.zoneCode} IS NULL)`
-        : sql`TRUE`,
+      zoneFilter,
       typeof args.minAuthority === "number"
         ? sql`${regulatoryUnitsTable.sourceAuthority} >= ${args.minAuthority}`
         : sql`TRUE`,
@@ -135,7 +161,11 @@ export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promis
         : sql`TRUE`,
       args.includeNonOpposable ? sql`TRUE` : eq(regulatoryUnitsTable.isOpposable, true)
     ))
-    .orderBy(desc(regulatoryUnitsTable.sourceAuthority), desc(regulatoryUnitsTable.updatedAt));
+    .orderBy(
+      zonePriorityOrder,
+      desc(regulatoryUnitsTable.sourceAuthority),
+      desc(regulatoryUnitsTable.updatedAt)
+    );
 
   const seen = new Set<string>();
   return rows.filter((row) => {
