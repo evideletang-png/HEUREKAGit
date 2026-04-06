@@ -68,3 +68,52 @@ export function hasUsableExtractedText(text: string | null | undefined): boolean
   if (normalized.startsWith("[Impossible d'extraire le texte du PDF automatiquement]")) return false;
   return !isTextLikelyGarbled(normalized);
 }
+
+export type TextQualityAssessment = {
+  score: number;
+  label: "excellent" | "usable" | "partial" | "poor" | "missing";
+  message: string;
+};
+
+export function assessExtractedTextQuality(text: string | null | undefined): TextQualityAssessment {
+  const normalized = repairExtractedText(text);
+  if (!normalized || normalized.startsWith("[Impossible d'extraire le texte du PDF automatiquement]")) {
+    return {
+      score: 0,
+      label: "missing",
+      message: "Aucun texte exploitable n'a encore été extrait de ce document.",
+    };
+  }
+
+  const score = scoreTextQuality(normalized);
+
+  if (score >= 0.9) {
+    return {
+      score,
+      label: "excellent",
+      message: "Texte très propre et directement exploitable par l'analyse.",
+    };
+  }
+
+  if (score >= 0.75) {
+    return {
+      score,
+      label: "usable",
+      message: "Texte exploitable par l'analyse, avec peu d'altérations visibles.",
+    };
+  }
+
+  if (score >= 0.55) {
+    return {
+      score,
+      label: "partial",
+      message: "Texte partiel ou bruité : l'analyse peut fonctionner, mais certaines règles risquent de manquer.",
+    };
+  }
+
+  return {
+    score,
+    label: "poor",
+    message: "Texte trop dégradé pour une lecture réglementaire fiable. Réindexation OCR ou réupload conseillé.",
+  };
+}

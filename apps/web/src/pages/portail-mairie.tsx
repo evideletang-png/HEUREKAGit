@@ -64,6 +64,21 @@ type Dossier = {
   } | null;
 };
 
+function getTextQualityBadgeMeta(label?: string) {
+  switch (label) {
+    case "excellent":
+      return { text: "Texte excellent", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "usable":
+      return { text: "Texte exploitable", className: "bg-sky-50 text-sky-700 border-sky-200" };
+    case "partial":
+      return { text: "Texte partiel", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    case "poor":
+      return { text: "Texte faible", className: "bg-orange-50 text-orange-700 border-orange-200" };
+    default:
+      return { text: "Texte absent", className: "bg-muted text-muted-foreground border-border" };
+  }
+}
+
 type DossierDetail = Dossier & {
   dossierId: string | null;
   rawText: string | null;
@@ -1456,6 +1471,11 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {doc.textQualityLabel && (
+                    <Badge variant="outline" className={`text-[10px] ${getTextQualityBadgeMeta(doc.textQualityLabel).className}`}>
+                      {getTextQualityBadgeMeta(doc.textQualityLabel).text}
+                    </Badge>
+                  )}
                   {doc.availabilityStatus !== "indexed" && (
                     <Badge variant="outline" className="text-[10px]">
                       {doc.availabilityStatus}
@@ -1683,6 +1703,34 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                       <div className="p-2 bg-muted/30 rounded border text-[10px] font-bold">
                         ORIGINE : {selectedDoc?.category} / {selectedDoc?.documentType}
                       </div>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedDoc?.textQualityLabel && (
+                          <Badge variant="outline" className={getTextQualityBadgeMeta(selectedDoc.textQualityLabel).className}>
+                            {getTextQualityBadgeMeta(selectedDoc.textQualityLabel).text}
+                            {typeof selectedDoc?.textQualityScore === "number" ? ` · ${selectedDoc.textQualityScore}%` : ""}
+                          </Badge>
+                        )}
+                        {selectedDoc?.hasVisualRegulatoryAnalysis && (
+                          <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">
+                            OCR / vision renforcée
+                          </Badge>
+                        )}
+                        {selectedDoc?.extractionHint === "written_regulation" && (
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                            Règlement écrit prioritaire
+                          </Badge>
+                        )}
+                      </div>
+                      {selectedDoc?.textQualityMessage && (
+                        <div className="p-2 bg-muted/20 rounded border text-[11px] text-muted-foreground leading-relaxed">
+                          {selectedDoc.textQualityMessage}
+                        </div>
+                      )}
+                      {selectedDoc?.textQualityLabel === "poor" && (
+                        <div className="p-2 rounded border border-amber-200 bg-amber-50 text-[11px] text-amber-800 leading-relaxed">
+                          Ce document est probablement scanné ou mal extrait. Réuploade-le ou relance une analyse vision pour améliorer les règles récupérées.
+                        </div>
+                      )}
                     </div>
                   </div>
                   

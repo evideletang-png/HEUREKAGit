@@ -35,7 +35,7 @@ import { MessagingService } from "../services/messagingService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { AUTHORITY_POLICY } from "@workspace/ai-core";
-import { hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, repairExtractedText, scoreTextQuality } from "../services/textQualityService.js";
+import { assessExtractedTextQuality, hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, repairExtractedText, scoreTextQuality } from "../services/textQualityService.js";
 import { execFileSync } from "child_process";
 
 // dossierEventsTable is now imported above
@@ -1029,10 +1029,20 @@ function getTownHallDocumentAvailability(doc: {
   title?: string | null;
   fileName: string | null;
   rawText: string | null;
+  documentType?: string | null;
+  hasVisionAnalysis?: boolean | null;
 }) {
   const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
   const hasStoredFile = !!filePath;
   const hasExtractedText = hasUsableTownHallText(doc.rawText);
+  const textQuality = assessExtractedTextQuality(doc.rawText);
+  const lowerType = String(doc.documentType || "").toLowerCase();
+  const hasVisualRegulatoryAnalysis = !!doc.hasVisionAnalysis || String(doc.rawText || "").includes("--- ANALYSE VISUELLE REGLEMENTAIRE ---");
+  const extractionHint = hasVisualRegulatoryAnalysis
+    ? "ocr_or_vision"
+    : lowerType.includes("written regulation") || lowerType.includes("reglement") || lowerType.includes("règlement")
+      ? "written_regulation"
+      : "standard";
 
   let availabilityStatus: "indexed" | "processing" | "indexed_without_source_file" | "missing_file" | "broken" = "processing";
   let availabilityMessage = "Document recu, indexation en cours.";
@@ -1060,6 +1070,11 @@ function getTownHallDocumentAvailability(doc: {
     hasExtractedText,
     availabilityStatus,
     availabilityMessage,
+    textQualityScore: Math.round(textQuality.score * 100),
+    textQualityLabel: textQuality.label,
+    textQualityMessage: textQuality.message,
+    extractionHint,
+    hasVisualRegulatoryAnalysis,
   };
 }
 
@@ -1454,6 +1469,11 @@ router.get("/documents", async (req: AuthRequest, res) => {
         hasExtractedText: availability.hasExtractedText,
         availabilityStatus: availability.availabilityStatus,
         availabilityMessage: availability.availabilityMessage,
+        textQualityScore: availability.textQualityScore,
+        textQualityLabel: availability.textQualityLabel,
+        textQualityMessage: availability.textQualityMessage,
+        extractionHint: availability.extractionHint,
+        hasVisualRegulatoryAnalysis: availability.hasVisualRegulatoryAnalysis,
       };
     });
     return res.json({ documents: filteredDocs });
