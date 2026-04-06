@@ -106,19 +106,29 @@ export async function buildAnalysisContext(
       )
     );
 
-  const zoneSections = zoneAliases.length > 0
-    ? await db.select().from(regulatoryZoneSectionsTable)
-      .where(
-        and(
-          or(
-            inArray(regulatoryZoneSectionsTable.municipalityId, [commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)),
-            communeName ? sql`lower(${regulatoryZoneSectionsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`
-          ),
-          inArray(regulatoryZoneSectionsTable.zoneCode, zoneAliases),
-          eq(regulatoryZoneSectionsTable.isOpposable, true)
-        )
-      )
-    : [];
+  const municipalityAliases = [commune, communeName].filter((value): value is string => !!value && value.trim().length > 0);
+  let zoneSections: typeof regulatoryZoneSectionsTable.$inferSelect[] = [];
+  if (zoneAliases.length > 0 && municipalityAliases.length > 0) {
+    try {
+      zoneSections = await db.select().from(regulatoryZoneSectionsTable)
+        .where(
+          and(
+            or(
+              inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
+              communeName ? sql`lower(${regulatoryZoneSectionsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`
+            ),
+            inArray(regulatoryZoneSectionsTable.zoneCode, zoneAliases),
+            eq(regulatoryZoneSectionsTable.isOpposable, true)
+          )
+        );
+    } catch (error) {
+      console.warn(
+        `[ContextBuilder] Failed to load regulatory zone sections for ${commune}/${communeName || "unknown"} zone ${zoneCode}. Falling back to legacy document context.`,
+        error
+      );
+      zoneSections = [];
+    }
+  }
 
   // 3. Zone-level Collection from Town Hall (PLU PDFs, etc.)
   // We fetch ALL documents for the commune, then filter or triage them based on zone keywords in Step 4
