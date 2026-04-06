@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Building2, Layers3, MapPinned, Satellite, Trees } from "lucide-react";
+import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Satellite, SlidersHorizontal, Trees } from "lucide-react";
 import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 
@@ -99,6 +99,8 @@ export function AnalysisParcelMap({
   const [baseLayer, setBaseLayer] = useState<BaseLayerKey>("plan");
   const [showBuildings, setShowBuildings] = useState(true);
   const [showCentroid, setShowCentroid] = useState(true);
+  const [showOptionsPanel, setShowOptionsPanel] = useState(true);
+  const [showInfoPanel, setShowInfoPanel] = useState(true);
 
   const buildingShapes = useMemo(
     () =>
@@ -126,87 +128,124 @@ export function AnalysisParcelMap({
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl bg-slate-100">
-      <div className="absolute left-4 top-4 z-[1000] flex max-w-[340px] flex-col gap-3">
-        <div className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-lg backdrop-blur">
-          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-            <Layers3 className="h-3.5 w-3.5 text-slate-700" />
-            Lecture parcellaire
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(Object.entries(BASE_LAYERS) as Array<[BaseLayerKey, (typeof BASE_LAYERS)[BaseLayerKey]]>).map(([key, layer]) => {
-              const Icon = layer.icon;
-              const isActive = baseLayer === key;
-              return (
-                <Button
-                  key={key}
-                  type="button"
-                  size="sm"
-                  variant={isActive ? "default" : "outline"}
-                  className="h-8 gap-1.5 rounded-full px-3 text-xs"
-                  onClick={() => setBaseLayer(key)}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {layer.label}
-                </Button>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={showBuildings ? "secondary" : "outline"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setShowBuildings((value) => !value)}
-            >
-              <Building2 className="mr-1.5 h-3.5 w-3.5" />
-              Bâti
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={showCentroid ? "secondary" : "outline"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setShowCentroid((value) => !value)}
-            >
-              <MapPinned className="mr-1.5 h-3.5 w-3.5" />
-              Centre
-            </Button>
-          </div>
+      <div className="absolute left-4 right-4 top-4 z-[1000] flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-9 rounded-full border border-slate-200 bg-white/92 px-3 shadow-lg backdrop-blur"
+            onClick={() => setShowOptionsPanel((value) => !value)}
+          >
+            <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
+            Options
+            {showOptionsPanel ? <ChevronUp className="ml-1.5 h-3.5 w-3.5" /> : <ChevronDown className="ml-1.5 h-3.5 w-3.5" />}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-9 rounded-full border border-slate-200 bg-white/92 px-3 shadow-lg backdrop-blur"
+            onClick={() => setShowInfoPanel((value) => !value)}
+          >
+            <Info className="mr-1.5 h-3.5 w-3.5" />
+            Infos parcelle
+            {showInfoPanel ? <ChevronUp className="ml-1.5 h-3.5 w-3.5" /> : <ChevronDown className="ml-1.5 h-3.5 w-3.5" />}
+          </Button>
         </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge className="border-red-200 bg-red-50 text-red-700">Parcelle</Badge>
+          {showBuildings && <Badge className="border-slate-300 bg-slate-100 text-slate-700">Bâti existant</Badge>}
+          {isCornerPlot && (
+            <Badge className="border-amber-200 bg-amber-50 text-amber-800">
+              <Trees className="mr-1 h-3 w-3" />
+              Parcelle d’angle
+            </Badge>
+          )}
+        </div>
+      </div>
 
-        <div className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-lg backdrop-blur">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Surface</p>
-              <p className="mt-1 font-semibold text-slate-900">{parcelSurfaceM2 ? `${parcelSurfaceM2} m²` : "N/D"}</p>
+      <div className="absolute left-4 top-16 z-[1000] flex max-w-[360px] flex-col gap-3">
+        {showOptionsPanel && (
+          <div className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-lg backdrop-blur">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+              <Layers3 className="h-3.5 w-3.5 text-slate-700" />
+              Affichage carte
             </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Bâti détecté</p>
-              <p className="mt-1 font-semibold text-slate-900">{buildingShapes.length}</p>
+            <div className="flex flex-wrap gap-2">
+              {(Object.entries(BASE_LAYERS) as Array<[BaseLayerKey, (typeof BASE_LAYERS)[BaseLayerKey]]>).map(([key, layer]) => {
+                const Icon = layer.icon;
+                const isActive = baseLayer === key;
+                return (
+                  <Button
+                    key={key}
+                    type="button"
+                    size="sm"
+                    variant={isActive ? "default" : "outline"}
+                    className="h-8 gap-1.5 rounded-full px-3 text-xs"
+                    onClick={() => setBaseLayer(key)}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {layer.label}
+                  </Button>
+                );
+              })}
             </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Voie</p>
-              <p className="mt-1 line-clamp-2 font-semibold text-slate-900">{frontRoadName || "N/D"}</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Façade / latéral</p>
-              <p className="mt-1 font-semibold text-slate-900">
-                {roadLengthM ? `${Math.round(roadLengthM)} m` : "N/D"} / {sideLengthM ? `${Math.round(sideLengthM)} m` : "N/D"}
-              </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={showBuildings ? "secondary" : "outline"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setShowBuildings((value) => !value)}
+              >
+                <Building2 className="mr-1.5 h-3.5 w-3.5" />
+                Bâti existant
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={showCentroid ? "secondary" : "outline"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setShowCentroid((value) => !value)}
+              >
+                <MapPinned className="mr-1.5 h-3.5 w-3.5" />
+                Centre parcelle
+              </Button>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge className="border-red-200 bg-red-50 text-red-700">Parcelle</Badge>
-            {showBuildings && <Badge className="border-slate-300 bg-slate-100 text-slate-700">Bâti existant</Badge>}
-            {isCornerPlot && (
-              <Badge className="border-amber-200 bg-amber-50 text-amber-800">
-                <Trees className="mr-1 h-3 w-3" />
-                Parcelle d’angle
-              </Badge>
-            )}
+        )}
+
+        {showInfoPanel && (
+          <div className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-lg backdrop-blur">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+              <Info className="h-3.5 w-3.5 text-slate-700" />
+              Repères rapides
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Surface</p>
+                <p className="mt-1 font-semibold text-slate-900">{parcelSurfaceM2 ? `${parcelSurfaceM2} m²` : "N/D"}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Bâti détecté</p>
+                <p className="mt-1 font-semibold text-slate-900">{buildingShapes.length}</p>
+              </div>
+              <div className="col-span-2 rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Voie principale</p>
+                <p className="mt-1 line-clamp-2 font-semibold text-slate-900">{frontRoadName || "N/D"}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Linéaire voie</p>
+                <p className="mt-1 font-semibold text-slate-900">{roadLengthM ? `${Math.round(roadLengthM)} m` : "N/D"}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Linéaire latéral</p>
+                <p className="mt-1 font-semibold text-slate-900">{sideLengthM ? `${Math.round(sideLengthM)} m` : "N/D"}</p>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <MapContainer center={mapCenter} zoom={19} style={{ height: "100%", width: "100%" }} scrollWheelZoom>

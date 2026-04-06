@@ -926,8 +926,27 @@ export default function AnalysisDetailPage() {
 
         {/* TAB 1: PARCELLE */}
         <TabsContent value="parcel" className="space-y-6 focus-visible:outline-none">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1 space-y-6">
+          <div className="h-[620px] lg:h-[720px] rounded-xl overflow-hidden shadow-md border border-border relative z-0">
+             {parcel?.centroidLat ? (
+               <AnalysisParcelMap
+                 mapCenter={mapCenter}
+                 parcelPositions={parcelPositions}
+                 parcelSurfaceM2={parcel?.parcelSurfaceM2 ?? null}
+                 buildings={data.buildings || []}
+                 frontRoadName={pb.front_road_name ?? rd.nearest_road_name ?? null}
+                 roadLengthM={pb.road_length_m ?? parcel?.roadFrontageLengthM ?? null}
+                 sideLengthM={pb.side_length_m ?? null}
+                 isCornerPlot={!!pm.is_corner_plot}
+               />
+             ) : (
+               <div className="w-full h-full bg-muted flex items-center justify-center">
+                 <p className="text-muted-foreground">Carte indisponible - Géométrie en attente</p>
+               </div>
+             )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="space-y-6">
               <Card>
                 <CardHeader className="pb-4">
                   <CardTitle className="text-lg">Données Cadastrales</CardTitle>
@@ -978,24 +997,31 @@ export default function AnalysisDetailPage() {
                 </CardContent>
               </Card>
             </div>
-            
-            <div className="lg:col-span-2 h-[500px] rounded-xl overflow-hidden shadow-md border border-border relative z-0">
-               {parcel?.centroidLat ? (
-                 <AnalysisParcelMap
-                   mapCenter={mapCenter}
-                   parcelPositions={parcelPositions}
-                   parcelSurfaceM2={parcel?.parcelSurfaceM2 ?? null}
-                   buildings={data.buildings || []}
-                   frontRoadName={pb.front_road_name ?? rd.nearest_road_name ?? null}
-                   roadLengthM={pb.road_length_m ?? parcel?.roadFrontageLengthM ?? null}
-                   sideLengthM={pb.side_length_m ?? null}
-                   isCornerPlot={!!pm.is_corner_plot}
-                 />
-               ) : (
-                 <div className="w-full h-full bg-muted flex items-center justify-center">
-                   <p className="text-muted-foreground">Carte indisponible - Géométrie en attente</p>
-                 </div>
-               )}
+
+            <div className="space-y-6">
+              <Card>
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-lg">Lecture parcellaire</CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Voie principale</p>
+                    <p className="mt-2 font-semibold">{pb.front_road_name ?? rd.nearest_road_name ?? "N/D"}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Linéaire voie</p>
+                    <p className="mt-2 font-semibold">{pb.road_length_m ? `${Math.round(pb.road_length_m)} m` : parcel?.roadFrontageLengthM ? `${Math.round(parcel.roadFrontageLengthM)} m` : "N/D"}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Linéaire latéral</p>
+                    <p className="mt-2 font-semibold">{pb.side_length_m ? `${Math.round(pb.side_length_m)} m` : "N/D"}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Parcelle d'angle</p>
+                    <p className="mt-2 font-semibold">{pm.is_corner_plot ? "Oui" : "Non"}</p>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
         </TabsContent>
