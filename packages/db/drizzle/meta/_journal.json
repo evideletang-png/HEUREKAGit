@@ -57,6 +57,13 @@
       "when": 1775472000000,
       "tag": "0007_regulatory_zone_section_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1775480400000,
+      "tag": "0008_regulatory_unit_reviews",
+      "breakpoints": true
     }
   ]
 }

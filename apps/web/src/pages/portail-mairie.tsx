@@ -101,6 +101,42 @@ type PluZoneReviewData = {
   sections: PluZoneReviewSection[];
 };
 
+type PluRuleReview = {
+  id: string;
+  zoneCode: string | null;
+  themeKey: string;
+  themeLabel: string;
+  title: string;
+  articleNumber: number | null;
+  sourceText: string;
+  confidence: string;
+  reviewStatus: "auto" | "validated" | "to_review" | "rejected";
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  startPage: number | null;
+  endPage: number | null;
+  document: {
+    id: string;
+    title: string;
+    documentType: string | null;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    isOpposable: boolean | null;
+  } | null;
+};
+
+type PluRuleReviewData = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    ruleCount: number;
+    validatedRuleCount: number;
+    pendingRuleCount: number;
+    readyStatus: "missing" | "ready" | "partial" | "needs_review";
+  };
+  rules: PluRuleReview[];
+};
+
 function getTextQualityBadgeMeta(label?: string) {
   switch (label) {
     case "excellent":
@@ -1067,13 +1103,21 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     enabled: currentCommune !== "all",
   });
 
+  const { data: ruleReviewsData, isLoading: loadingRuleReviews } = useQuery<PluRuleReviewData>({
+    queryKey: ["mairie-plu-rule-reviews", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-rule-reviews?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
   const scheduleDocumentsRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
     queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
+    queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews"] });
     [1500, 4000, 9000].forEach((delayMs) => {
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
         queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
+        queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews"] });
       }, delayMs);
     });
   };
@@ -1282,6 +1326,23 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     }
   });
 
+  const reviewRuleMutation = useMutation({
+    mutationFn: async ({ id, reviewStatus }: { id: string; reviewStatus: "validated" | "to_review" | "rejected" }) => {
+      return apiFetch(`/api/mairie/plu-rule-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewStatus }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      toast({ title: "Règle mise à jour" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de mettre à jour la règle.", variant: "destructive" });
+    }
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE" });
@@ -1291,6 +1352,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
       toast({ title: "Supprimé", description: "Document retiré de la base." });
     }
   });
@@ -1306,6 +1368,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
       toast({ title: "Base IA nettoyée", description: `${data.deletedDocuments || 0} document(s) supprimé(s).` });
     },
     onError: (err: any) => {
@@ -1342,6 +1405,8 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const allDocs = pluDocsData?.documents ?? [];
   const zoneReviewSections = zoneReviewsData?.sections ?? [];
   const zoneReadyMeta = getZoneReadyMeta(zoneReviewsData?.summary?.readyStatus);
+  const ruleReviewItems = ruleReviewsData?.rules ?? [];
+  const ruleReadyMeta = getZoneReadyMeta(ruleReviewsData?.summary?.readyStatus);
 
   const categorySummaries = useMemo(() => {
     return Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => {
@@ -1644,6 +1709,159 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             ) : (
               <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
                 Sélectionne une commune pour lire les zones PLU détectées.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {currentCommune !== "all" && (
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Scale className="w-4 h-4 text-primary" />
+                  Règles critiques proposées
+                </CardTitle>
+                <CardDescription>
+                  Le système isole les règles utiles pour la constructibilité. Tu confirmes seulement les extraits vraiment décisifs.
+                </CardDescription>
+              </div>
+              <Badge variant="outline" className={ruleReadyMeta.className}>
+                {ruleReadyMeta.text}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingRuleReviews ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Lecture des règles critiques...
+              </div>
+            ) : ruleReviewsData ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles proposées</div>
+                    <div className="mt-1 text-2xl font-bold">{ruleReviewsData.summary.ruleCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles validées</div>
+                    <div className="mt-1 text-2xl font-bold">{ruleReviewsData.summary.validatedRuleCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles à confirmer</div>
+                    <div className="mt-1 text-2xl font-bold">{ruleReviewsData.summary.pendingRuleCount}</div>
+                  </div>
+                </div>
+
+                {ruleReviewItems.length > 0 ? (
+                  <div className="space-y-3">
+                    {ruleReviewItems.map((rule) => {
+                      const statusMeta = getZoneReviewStatusMeta(rule.reviewStatus);
+                      const StatusIcon = statusMeta.icon;
+                      const linkedDoc = rule.document?.id ? allDocs.find((doc) => doc.id === rule.document?.id) : null;
+                      return (
+                        <div key={rule.id} className="rounded-xl border bg-background p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="space-y-2 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                                  {rule.zoneCode ? `Zone ${rule.zoneCode}` : "Zone globale"}
+                                </Badge>
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {rule.themeLabel}
+                                </Badge>
+                                {typeof rule.articleNumber === "number" && rule.articleNumber > 0 && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    Art. {rule.articleNumber}
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className={statusMeta.className}>
+                                  <StatusIcon className="mr-1 h-3 w-3" />
+                                  {statusMeta.text}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">{rule.title}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {rule.document?.title ? `${rule.document.title} · ` : ""}
+                                  Pages {rule.startPage ?? "?"}{rule.endPage && rule.endPage !== rule.startPage ? ` à ${rule.endPage}` : ""}
+                                </p>
+                              </div>
+                              <div className="rounded-lg bg-muted/20 px-3 py-2 text-sm text-foreground/90">
+                                {rule.sourceText}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                <Badge variant="outline">
+                                  Confiance {rule.confidence || "low"}
+                                </Badge>
+                                {rule.document?.textQualityLabel && (
+                                  <Badge variant="outline" className={getTextQualityBadgeMeta(rule.document.textQualityLabel).className}>
+                                    {getTextQualityBadgeMeta(rule.document.textQualityLabel).text}
+                                  </Badge>
+                                )}
+                              </div>
+                              {rule.reviewNotes && (
+                                <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+                                  {rule.reviewNotes}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 lg:justify-end">
+                              {linkedDoc && (
+                                <Button variant="outline" size="sm" onClick={() => setSelectedDoc(linkedDoc)}>
+                                  <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                  Ouvrir
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => reviewRuleMutation.mutate({ id: rule.id, reviewStatus: "validated" })}
+                              >
+                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                                Valider
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => reviewRuleMutation.mutate({ id: rule.id, reviewStatus: "to_review" })}
+                              >
+                                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+                                À revoir
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => reviewRuleMutation.mutate({ id: rule.id, reviewStatus: "rejected" })}
+                              >
+                                <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                Écarter
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Aucune règle critique n’a encore été stabilisée. L’ingestion continuera à en proposer dès que les unités réglementaires seront assez propres.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                Sélectionne une commune pour lire les règles critiques proposées.
               </div>
             )}
           </CardContent>

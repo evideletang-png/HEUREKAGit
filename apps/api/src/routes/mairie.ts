@@ -19,6 +19,7 @@ import {
   regulatoryZoneSectionsTable
 } from "@workspace/db";
 import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
+import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
@@ -124,6 +125,48 @@ function inferCanonicalDocumentType(documentType: string | null | undefined, cat
     return "plu_reglement";
   }
   return "other";
+}
+
+function inferCriticalRuleTheme(theme: string | null | undefined, articleNumber: number | null | undefined, sourceText: string | null | undefined) {
+  const haystack = `${theme || ""} ${sourceText || ""}`.toLowerCase();
+  if (articleNumber === 1 || articleNumber === 2 || /destination|usage|occupation du sol|interdit|autoris/gi.test(haystack)) {
+    return { key: "usages_destination", label: "Usages & destinations" };
+  }
+  if (articleNumber === 3 || /acc[eè]s|voirie|desserte|voie publique/gi.test(haystack)) {
+    return { key: "voirie_acces", label: "Voirie & accès" };
+  }
+  if (articleNumber === 6 || /alignement|recul|voie/gi.test(haystack)) {
+    return { key: "implantation_voie", label: "Implantation par rapport à la voie" };
+  }
+  if (articleNumber === 7 || /limite s[eé]parative|limites s[eé]paratives|prospect/gi.test(haystack)) {
+    return { key: "implantation_limites", label: "Implantation sur limites séparatives" };
+  }
+  if (articleNumber === 9 || /emprise|\bces\b|coefficient d[' ]emprise/gi.test(haystack)) {
+    return { key: "emprise_densite", label: "Emprise & densité" };
+  }
+  if (articleNumber === 10 || /hauteur|gabarit|fa[iî]tage|egout|égout/gi.test(haystack)) {
+    return { key: "hauteur_gabarit", label: "Hauteur & gabarit" };
+  }
+  if (articleNumber === 12 || /stationnement|parking|garage/gi.test(haystack)) {
+    return { key: "stationnement", label: "Accès & stationnement" };
+  }
+  if (articleNumber === 13 || /pleine terre|espace vert|espaces verts|plantation/gi.test(haystack)) {
+    return { key: "espaces_verts", label: "Espaces verts & pleine terre" };
+  }
+  return { key: "autres", label: theme?.trim() || "Autres règles" };
+}
+
+function confidenceRank(level: string | null | undefined) {
+  switch ((level || "").toLowerCase()) {
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 function mapCanonicalTypeToBaseIAType(canonicalType: string) {
@@ -1636,6 +1679,171 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
     return res.json({ success: true });
   } catch (err) {
     logger.error("[mairie/plu-zone-reviews POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const targetCommune = access.targetCommune;
+    const inseeCode = await resolveInseeCode(targetCommune);
+    const municipalityAliases = Array.from(new Set([targetCommune, inseeCode].filter((value): value is string => !!value)));
+
+    const docs = await db.select({
+      id: townHallDocumentsTable.id,
+      title: townHallDocumentsTable.title,
+      commune: townHallDocumentsTable.commune,
+      documentType: townHallDocumentsTable.documentType,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+      createdAt: townHallDocumentsTable.createdAt,
+      rawText: townHallDocumentsTable.rawText,
+      fileName: townHallDocumentsTable.fileName,
+      isOpposable: townHallDocumentsTable.isOpposable,
+    }).from(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
+      .orderBy(desc(townHallDocumentsTable.createdAt));
+
+    const docById = new Map(docs.map((doc) => [doc.id, doc]));
+
+    const units = await db.select().from(regulatoryUnitsTable)
+      .where(
+        and(
+          inArray(regulatoryUnitsTable.municipalityId, municipalityAliases),
+          eq(regulatoryUnitsTable.isOpposable, true),
+          inArray(regulatoryUnitsTable.documentType, ["plu_reglement", "plu_annexe", "oap"])
+        )
+      )
+      .orderBy(
+        desc(regulatoryUnitsTable.reviewedAt),
+        desc(regulatoryUnitsTable.sourceAuthority),
+        desc(regulatoryUnitsTable.updatedAt)
+      );
+
+    const grouped = new Map<string, typeof units[number]>();
+    for (const unit of units) {
+      const themeMeta = inferCriticalRuleTheme(unit.theme, unit.articleNumber, unit.sourceText);
+      if (themeMeta.key === "autres") continue;
+      const groupKey = `${unit.zoneCode || "GLOBAL"}|${themeMeta.key}`;
+      const existing = grouped.get(groupKey);
+      if (!existing) {
+        grouped.set(groupKey, unit);
+        continue;
+      }
+      const currentScore =
+        (unit.reviewStatus === "validated" ? 100 : unit.reviewStatus === "to_review" ? 50 : unit.reviewStatus === "rejected" ? -10 : 0) +
+        unit.sourceAuthority * 10 +
+        confidenceRank(unit.confidence);
+      const existingScore =
+        (existing.reviewStatus === "validated" ? 100 : existing.reviewStatus === "to_review" ? 50 : existing.reviewStatus === "rejected" ? -10 : 0) +
+        existing.sourceAuthority * 10 +
+        confidenceRank(existing.confidence);
+      if (currentScore > existingScore) {
+        grouped.set(groupKey, unit);
+      }
+    }
+
+    const reviewedRules = Array.from(grouped.values())
+      .map((unit) => {
+        const linkedDoc = unit.townHallDocumentId ? docById.get(unit.townHallDocumentId) : null;
+        const quality = linkedDoc ? getTownHallDocumentAvailability(linkedDoc) : null;
+        const themeMeta = inferCriticalRuleTheme(unit.theme, unit.articleNumber, unit.sourceText);
+        const parsedValues = typeof unit.parsedValues === "object" && unit.parsedValues ? unit.parsedValues as Record<string, any> : {};
+        const startPage = typeof parsedValues.start_page === "number" ? parsedValues.start_page : null;
+        const endPage = typeof parsedValues.end_page === "number" ? parsedValues.end_page : null;
+        return {
+          id: unit.id,
+          zoneCode: unit.zoneCode,
+          themeKey: themeMeta.key,
+          themeLabel: themeMeta.label,
+          title: unit.title,
+          articleNumber: unit.articleNumber,
+          sourceText: unit.sourceText.slice(0, 900),
+          confidence: unit.confidence,
+          reviewStatus: unit.reviewStatus,
+          reviewNotes: unit.reviewNotes,
+          reviewedAt: unit.reviewedAt,
+          startPage,
+          endPage,
+          document: linkedDoc ? {
+            id: linkedDoc.id,
+            title: linkedDoc.title,
+            documentType: linkedDoc.documentType,
+            textQualityLabel: quality?.textQualityLabel ?? null,
+            textQualityScore: quality?.textQualityScore ?? null,
+            isOpposable: linkedDoc.isOpposable,
+          } : null,
+        };
+      })
+      .sort((a, b) => `${a.zoneCode || ""}${a.themeLabel}`.localeCompare(`${b.zoneCode || ""}${b.themeLabel}`, "fr"));
+
+    const readyStatus = (() => {
+      if (reviewedRules.length === 0) return "missing";
+      const validatedCount = reviewedRules.filter((rule) => rule.reviewStatus === "validated").length;
+      if (validatedCount >= Math.max(3, Math.ceil(reviewedRules.length / 2))) return "ready";
+      if (validatedCount > 0) return "partial";
+      return "needs_review";
+    })();
+
+    return res.json({
+      commune: targetCommune,
+      municipalityId: inseeCode || targetCommune,
+      summary: {
+        ruleCount: reviewedRules.length,
+        validatedRuleCount: reviewedRules.filter((rule) => rule.reviewStatus === "validated").length,
+        pendingRuleCount: reviewedRules.filter((rule) => rule.reviewStatus === "auto" || rule.reviewStatus === "to_review").length,
+        readyStatus,
+      },
+      rules: reviewedRules,
+    });
+  } catch (err) {
+    logger.error("[mairie/plu-rule-reviews GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/plu-rule-reviews/:id/review", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const { reviewStatus, reviewNotes } = req.body || {};
+
+    const [unit] = await db.select({
+      id: regulatoryUnitsTable.id,
+      municipalityId: regulatoryUnitsTable.municipalityId,
+    }).from(regulatoryUnitsTable)
+      .where(eq(regulatoryUnitsTable.id, id))
+      .limit(1);
+
+    if (!unit) {
+      return res.status(404).json({ error: "RULE_NOT_FOUND" });
+    }
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || unit.municipalityId);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const allowedStatuses = new Set(["auto", "validated", "to_review", "rejected"]);
+    const nextStatus = allowedStatuses.has(String(reviewStatus || "")) ? String(reviewStatus) : "validated";
+
+    await db.update(regulatoryUnitsTable)
+      .set({
+        reviewStatus: nextStatus,
+        reviewNotes: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
+        reviewedBy: req.user!.userId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(regulatoryUnitsTable.id, id));
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/plu-rule-reviews POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
