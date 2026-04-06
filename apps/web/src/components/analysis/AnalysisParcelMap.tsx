@@ -99,6 +99,7 @@ export function AnalysisParcelMap({
   const [baseLayer, setBaseLayer] = useState<BaseLayerKey>("plan");
   const [showBuildings, setShowBuildings] = useState(true);
   const [showCentroid, setShowCentroid] = useState(true);
+  const [showParcelLabel, setShowParcelLabel] = useState(true);
   const [showOptionsPanel, setShowOptionsPanel] = useState(true);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
 
@@ -212,6 +213,16 @@ export function AnalysisParcelMap({
                 <MapPinned className="mr-1.5 h-3.5 w-3.5" />
                 Centre parcelle
               </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={showParcelLabel ? "secondary" : "outline"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setShowParcelLabel((value) => !value)}
+              >
+                <Info className="mr-1.5 h-3.5 w-3.5" />
+                Surface sur carte
+              </Button>
             </div>
           </div>
         )}
@@ -257,9 +268,18 @@ export function AnalysisParcelMap({
         <TileLayer url={activeBaseLayer.url} attribution={activeBaseLayer.attribution} />
 
         <Polygon positions={parcelPositions} pathOptions={{ color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.14, weight: 3.2 }}>
-          <LeafletTooltip permanent direction="center" className="border-0 bg-transparent font-bold text-base text-red-700 shadow-none">
-            {parcelSurfaceM2 ? `${parcelSurfaceM2} m²` : "Parcelle"}
-          </LeafletTooltip>
+          {showParcelLabel && (
+            <LeafletTooltip
+              permanent
+              direction="center"
+              offset={[0, 0]}
+              className="border-0 bg-transparent p-0 shadow-none"
+            >
+              <div className="rounded-md border border-white/80 bg-white/90 px-2 py-1 text-xs font-semibold text-red-700 shadow-sm backdrop-blur-sm">
+                {parcelSurfaceM2 ? `${parcelSurfaceM2} m²` : "Parcelle"}
+              </div>
+            </LeafletTooltip>
+          )}
         </Polygon>
 
         {showBuildings &&

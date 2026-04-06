@@ -15,7 +15,8 @@ import {
   municipalitySettingsTable,
   dossierEventsTable,
   ruleArticlesTable,
-  zoneAnalysesTable
+  zoneAnalysesTable,
+  regulatoryZoneSectionsTable
 } from "@workspace/db";
 import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
 import { createHash } from "crypto";
@@ -1489,6 +1490,154 @@ router.get("/documents", async (req: AuthRequest, res) => {
     });
     return res.json({ documents: filteredDocs });
   } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
+});
+
+router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const targetCommune = access.targetCommune;
+    const inseeCode = await resolveInseeCode(targetCommune);
+    const municipalityAliases = Array.from(new Set([targetCommune, inseeCode].filter((value): value is string => !!value)));
+
+    const docs = await db.select({
+      id: townHallDocumentsTable.id,
+      title: townHallDocumentsTable.title,
+      commune: townHallDocumentsTable.commune,
+      documentType: townHallDocumentsTable.documentType,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+      createdAt: townHallDocumentsTable.createdAt,
+      rawText: townHallDocumentsTable.rawText,
+      fileName: townHallDocumentsTable.fileName,
+      isOpposable: townHallDocumentsTable.isOpposable,
+    }).from(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
+      .orderBy(desc(townHallDocumentsTable.createdAt));
+
+    const docById = new Map(docs.map((doc) => [doc.id, doc]));
+
+    const sections = await db.select().from(regulatoryZoneSectionsTable)
+      .where(
+        and(
+          inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
+          eq(regulatoryZoneSectionsTable.isOpposable, true)
+        )
+      )
+      .orderBy(
+        desc(regulatoryZoneSectionsTable.reviewedAt),
+        desc(regulatoryZoneSectionsTable.updatedAt)
+      );
+
+    const sectionsWithDocs = sections.map((section) => {
+      const linkedDoc = section.townHallDocumentId ? docById.get(section.townHallDocumentId) : null;
+      const quality = linkedDoc ? getTownHallDocumentAvailability(linkedDoc) : null;
+      return {
+        id: section.id,
+        zoneCode: section.zoneCode,
+        parentZoneCode: section.reviewedParentZoneCode || section.parentZoneCode,
+        heading: section.heading,
+        startPage: section.reviewedStartPage ?? section.startPage,
+        endPage: section.reviewedEndPage ?? section.endPage,
+        isSubZone: section.reviewedIsSubZone ?? section.isSubZone,
+        documentType: section.documentType,
+        sourceAuthority: section.sourceAuthority,
+        reviewStatus: section.reviewStatus,
+        reviewNotes: section.reviewNotes,
+        reviewedAt: section.reviewedAt,
+        document: linkedDoc ? {
+          id: linkedDoc.id,
+          title: linkedDoc.title,
+          documentType: linkedDoc.documentType,
+          textQualityLabel: quality?.textQualityLabel ?? null,
+          textQualityScore: quality?.textQualityScore ?? null,
+          isOpposable: linkedDoc.isOpposable,
+        } : null,
+      };
+    });
+
+    const reviewableSections = sectionsWithDocs.filter((section) => !!section.document);
+    const readyStatus = (() => {
+      if (reviewableSections.length === 0) return "missing";
+      const validatedCount = reviewableSections.filter((section) => section.reviewStatus === "validated").length;
+      const criticalZonesCount = new Set(reviewableSections.map((section) => section.zoneCode)).size;
+      if (validatedCount >= Math.max(1, criticalZonesCount)) return "ready";
+      if (validatedCount > 0) return "partial";
+      return "needs_review";
+    })();
+
+    return res.json({
+      commune: targetCommune,
+      municipalityId: inseeCode || targetCommune,
+      summary: {
+        writtenRegulationCount: docs.filter((doc) => inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory) === "plu_reglement").length,
+        opposableDocumentCount: docs.filter((doc) => !!doc.isOpposable).length,
+        zoneSectionCount: reviewableSections.length,
+        validatedZoneCount: reviewableSections.filter((section) => section.reviewStatus === "validated").length,
+        pendingZoneCount: reviewableSections.filter((section) => section.reviewStatus === "to_review" || section.reviewStatus === "auto").length,
+        readyStatus,
+      },
+      sections: sectionsWithDocs,
+    });
+  } catch (err) {
+    logger.error("[mairie/plu-zone-reviews GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const {
+      reviewStatus,
+      reviewNotes,
+      reviewedStartPage,
+      reviewedEndPage,
+      reviewedParentZoneCode,
+      reviewedIsSubZone,
+    } = req.body || {};
+
+    const [section] = await db.select({
+      id: regulatoryZoneSectionsTable.id,
+      municipalityId: regulatoryZoneSectionsTable.municipalityId,
+    }).from(regulatoryZoneSectionsTable)
+      .where(eq(regulatoryZoneSectionsTable.id, id))
+      .limit(1);
+
+    if (!section) {
+      return res.status(404).json({ error: "ZONE_SECTION_NOT_FOUND" });
+    }
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || section.municipalityId);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const allowedStatuses = new Set(["auto", "validated", "to_review", "rejected"]);
+    const nextStatus = allowedStatuses.has(String(reviewStatus || "")) ? String(reviewStatus) : "validated";
+
+    await db.update(regulatoryZoneSectionsTable)
+      .set({
+        reviewStatus: nextStatus,
+        reviewNotes: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
+        reviewedStartPage: Number.isFinite(Number(reviewedStartPage)) ? Number(reviewedStartPage) : null,
+        reviewedEndPage: Number.isFinite(Number(reviewedEndPage)) ? Number(reviewedEndPage) : null,
+        reviewedParentZoneCode: typeof reviewedParentZoneCode === "string" && reviewedParentZoneCode.trim().length > 0 ? reviewedParentZoneCode.trim().toUpperCase() : null,
+        reviewedIsSubZone: typeof reviewedIsSubZone === "boolean" ? reviewedIsSubZone : null,
+        reviewedBy: req.user!.userId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(regulatoryZoneSectionsTable.id, id));
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/plu-zone-reviews POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
 });
 
 router.post("/documents/batch", upload.array("files", 10), async (req: AuthRequest, res) => {
