@@ -64,6 +64,43 @@ type Dossier = {
   } | null;
 };
 
+type PluZoneReviewSection = {
+  id: string;
+  zoneCode: string;
+  parentZoneCode: string | null;
+  heading: string;
+  startPage: number | null;
+  endPage: number | null;
+  isSubZone: boolean;
+  documentType: string | null;
+  sourceAuthority: number;
+  reviewStatus: "auto" | "validated" | "to_review" | "rejected";
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  document: {
+    id: string;
+    title: string;
+    documentType: string | null;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    isOpposable: boolean | null;
+  } | null;
+};
+
+type PluZoneReviewData = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    writtenRegulationCount: number;
+    opposableDocumentCount: number;
+    zoneSectionCount: number;
+    validatedZoneCount: number;
+    pendingZoneCount: number;
+    readyStatus: "missing" | "ready" | "partial" | "needs_review";
+  };
+  sections: PluZoneReviewSection[];
+};
+
 function getTextQualityBadgeMeta(label?: string) {
   switch (label) {
     case "excellent":
@@ -76,6 +113,32 @@ function getTextQualityBadgeMeta(label?: string) {
       return { text: "Texte faible", className: "bg-orange-50 text-orange-700 border-orange-200" };
     default:
       return { text: "Texte absent", className: "bg-muted text-muted-foreground border-border" };
+  }
+}
+
+function getZoneReviewStatusMeta(status?: string) {
+  switch (status) {
+    case "validated":
+      return { text: "Validé", className: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2 };
+    case "to_review":
+      return { text: "À revoir", className: "bg-amber-50 text-amber-700 border-amber-200", icon: AlertTriangle };
+    case "rejected":
+      return { text: "Écarté", className: "bg-rose-50 text-rose-700 border-rose-200", icon: XCircle };
+    default:
+      return { text: "Auto-détecté", className: "bg-sky-50 text-sky-700 border-sky-200", icon: BrainCircuit };
+  }
+}
+
+function getZoneReadyMeta(status?: string) {
+  switch (status) {
+    case "ready":
+      return { text: "PLU prêt", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "partial":
+      return { text: "Prêt partiellement", className: "bg-sky-50 text-sky-700 border-sky-200" };
+    case "needs_review":
+      return { text: "Revue ciblée utile", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    default:
+      return { text: "Corpus incomplet", className: "bg-muted text-muted-foreground border-border" };
   }
 }
 
@@ -998,11 +1061,19 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     queryFn: () => apiFetch(`/api/mairie/documents${currentCommune !== "all" ? `?commune=${encodeURIComponent(currentCommune)}` : ""}`),
   });
 
+  const { data: zoneReviewsData, isLoading: loadingZoneReviews } = useQuery<PluZoneReviewData>({
+    queryKey: ["mairie-plu-zone-reviews", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-zone-reviews?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
   const scheduleDocumentsRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+    queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
     [1500, 4000, 9000].forEach((delayMs) => {
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+        queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
       }, delayMs);
     });
   };
@@ -1194,6 +1265,23 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     }
   });
 
+  const reviewZoneMutation = useMutation({
+    mutationFn: async ({ id, reviewStatus }: { id: string; reviewStatus: "validated" | "to_review" | "rejected" }) => {
+      return apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewStatus }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      toast({ title: "Revue mise à jour" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de mettre à jour la revue.", variant: "destructive" });
+    }
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE" });
@@ -1202,6 +1290,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
       toast({ title: "Supprimé", description: "Document retiré de la base." });
     }
   });
@@ -1216,6 +1305,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
       toast({ title: "Base IA nettoyée", description: `${data.deletedDocuments || 0} document(s) supprimé(s).` });
     },
     onError: (err: any) => {
@@ -1250,6 +1340,8 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
   const totalDocuments = pluDocsData?.documents?.length ?? 0;
   const allDocs = pluDocsData?.documents ?? [];
+  const zoneReviewSections = zoneReviewsData?.sections ?? [];
+  const zoneReadyMeta = getZoneReadyMeta(zoneReviewsData?.summary?.readyStatus);
 
   const categorySummaries = useMemo(() => {
     return Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => {
@@ -1392,6 +1484,171 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </Button>
         </CardContent>
       </Card>
+
+      {currentCommune !== "all" && (
+        <Card className="border-primary/15 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-primary" />
+                  Zones PLU détectées
+                </CardTitle>
+                <CardDescription>
+                  Le système propose les plages de pages et l’héritage des zones. L’idée est de confirmer vite les points sensibles, pas de reconfigurer tout le PLU.
+                </CardDescription>
+              </div>
+              <Badge variant="outline" className={zoneReadyMeta.className}>
+                {zoneReadyMeta.text}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingZoneReviews ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Lecture des zones détectées...
+              </div>
+            ) : zoneReviewsData ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règlements écrits</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.writtenRegulationCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Documents opposables</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.opposableDocumentCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones détectées</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.zoneSectionCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones validées</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.validatedZoneCount}</div>
+                  </div>
+                </div>
+
+                {zoneReviewSections.length > 0 ? (
+                  <div className="space-y-3">
+                    {zoneReviewSections.map((section) => {
+                      const statusMeta = getZoneReviewStatusMeta(section.reviewStatus);
+                      const StatusIcon = statusMeta.icon;
+                      const linkedDoc = section.document?.id ? allDocs.find((doc) => doc.id === section.document?.id) : null;
+                      return (
+                        <div key={section.id} className="rounded-xl border bg-background p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="space-y-2 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                                  Zone {section.zoneCode}
+                                </Badge>
+                                {section.parentZoneCode && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    Hérite de {section.parentZoneCode}
+                                  </Badge>
+                                )}
+                                {section.isSubZone && (
+                                  <Badge variant="secondary" className="text-[10px]">
+                                    Sous-zone
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className={statusMeta.className}>
+                                  <StatusIcon className="mr-1 h-3 w-3" />
+                                  {statusMeta.text}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">{section.heading}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}
+                                  {section.document?.title ? ` · ${section.document.title}` : ""}
+                                </p>
+                              </div>
+                              {section.document && (
+                                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                  {section.document.textQualityLabel && (
+                                    <Badge variant="outline" className={getTextQualityBadgeMeta(section.document.textQualityLabel).className}>
+                                      {getTextQualityBadgeMeta(section.document.textQualityLabel).text}
+                                      {typeof section.document.textQualityScore === "number" ? ` · ${section.document.textQualityScore}%` : ""}
+                                    </Badge>
+                                  )}
+                                  {section.document.isOpposable && (
+                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                      Opposable
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+                              {section.reviewNotes && (
+                                <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+                                  {section.reviewNotes}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 lg:justify-end">
+                              {linkedDoc && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setSelectedDoc(linkedDoc)}
+                                >
+                                  <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                  Ouvrir
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "validated" })}
+                              >
+                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                                Valider
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "to_review" })}
+                              >
+                                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+                                À revoir
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "rejected" })}
+                              >
+                                <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                Écarter
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Aucune zone PLU n’a encore été détectée dans ce corpus. Réimporte le règlement écrit ou laisse l’ingestion le resegmenter.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                Sélectionne une commune pour lire les zones PLU détectées.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {visibleUploads.length > 0 && (
         <Card className="border-primary/20">
