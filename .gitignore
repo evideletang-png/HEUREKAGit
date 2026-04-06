@@ -48,3 +48,6 @@ Thumbs.db
 .cache/
 .local/
 .env
+
+# Local-only service kept outside Git / Railway builds
+services/parcel-analysis/
