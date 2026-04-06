@@ -262,6 +262,186 @@ export interface ZoneDigest {
   summary: string;
 }
 
+type DeterministicRuleSeed = {
+  articleNumber: number;
+  title: string;
+  patterns: RegExp[];
+};
+
+const DETERMINISTIC_RULE_SEEDS: DeterministicRuleSeed[] = [
+  {
+    articleNumber: 1,
+    title: "Destination et usages",
+    patterns: [/destination/i, /occupations?\s+du\s+sol/i, /usages?\s+adm(?:is|ises)|interdit/i],
+  },
+  {
+    articleNumber: 6,
+    title: "Implantation par rapport à la voie",
+    patterns: [/implantation[^.\n]{0,140}(voie|alignement|emprise publique)/i, /recul[^.\n]{0,140}(voie|alignement)/i, /alignement/i],
+  },
+  {
+    articleNumber: 7,
+    title: "Implantation sur limites séparatives",
+    patterns: [/limites?\s+s[ée]paratives/i, /prospect/i, /recul[^.\n]{0,140}limites?/i],
+  },
+  {
+    articleNumber: 9,
+    title: "Emprise au sol",
+    patterns: [/emprise\s+au\s+sol/i, /\bCES\b/i, /coefficient\s+d['’]emprise/i],
+  },
+  {
+    articleNumber: 10,
+    title: "Hauteur",
+    patterns: [/hauteur\s+des\s+constructions/i, /hauteur\s+maximale/i, /\bhauteur\b/i],
+  },
+  {
+    articleNumber: 12,
+    title: "Stationnement",
+    patterns: [/stationnement/i, /places?\s+de\s+stationnement/i, /parking/i],
+  },
+  {
+    articleNumber: 13,
+    title: "Espaces verts et pleine terre",
+    patterns: [/espaces?\s+verts/i, /pleine\s+terre/i, /plantations/i, /perm[ée]abilit[ée]/i],
+  },
+];
+
+function extractRegulatorySnippet(text: string, index: number): string {
+  const lookBehindStart = Math.max(0, index - 700);
+  const lookAheadEnd = Math.min(text.length, index + 1000);
+  const before = text.slice(lookBehindStart, index);
+  const after = text.slice(index, lookAheadEnd);
+
+  const paragraphStartOffset = Math.max(
+    before.lastIndexOf("\n\n"),
+    before.lastIndexOf(". "),
+    before.lastIndexOf(" : ")
+  );
+  const paragraphEndCandidates = [
+    after.indexOf("\n\n"),
+    after.indexOf(". "),
+    after.indexOf(" ; "),
+  ].filter((value) => value >= 0);
+  const paragraphEndOffset = paragraphEndCandidates.length > 0 ? Math.min(...paragraphEndCandidates) : -1;
+
+  const start = paragraphStartOffset >= 0 ? lookBehindStart + paragraphStartOffset + 1 : lookBehindStart;
+  const end = paragraphEndOffset >= 0 ? index + paragraphEndOffset + 1 : lookAheadEnd;
+
+  return text
+    .slice(start, end)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summariseDeterministicSnippet(snippet: string): string {
+  if (!snippet) return "";
+  const sentenceBreak = snippet.search(/[.;](\s|$)/);
+  const raw = sentenceBreak > 0 ? snippet.slice(0, sentenceBreak + 1) : snippet;
+  return raw.length > 220 ? `${raw.slice(0, 217).trim()}...` : raw;
+}
+
+function extractDimensionFromSnippet(snippet: string, unitPattern: RegExp): string | undefined {
+  const match = snippet.match(unitPattern);
+  return match ? match[0].replace(/\s+/g, " ").trim() : undefined;
+}
+
+export function extractDeterministicRegulatoryRules(text: string, zoneCode?: string): ArticleAnalysis[] {
+  const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
+  if (normalizedText.length < 200) return [];
+
+  const articles = DETERMINISTIC_RULE_SEEDS.map((seed): ArticleAnalysis | null => {
+    const match = seed.patterns
+      .map((pattern) => pattern.exec(normalizedText))
+      .filter((candidate): candidate is RegExpExecArray => !!candidate)
+      .sort((a, b) => a.index - b.index)[0];
+
+    if (!match) return null;
+
+    const snippet = extractRegulatorySnippet(normalizedText, match.index);
+    if (snippet.length < 90) return null;
+
+    const summary = summariseDeterministicSnippet(snippet);
+    const confidence: ArticleAnalysis["confidence"] = /\d/.test(snippet) ? "medium" : "low";
+
+    return {
+      articleNumber: seed.articleNumber,
+      title: seed.title,
+      sourceText: snippet,
+      interpretation: summary,
+      summary,
+      impactText: zoneCode ? `Extrait récupéré automatiquement pour la zone ${zoneCode}.` : "Extrait récupéré automatiquement depuis le texte réglementaire indexé.",
+      vigilanceText: "Preuve reconstruite automatiquement à partir du texte indexé ; à confirmer si le document est très ancien ou mal structuré.",
+      confidence,
+      structuredData: {
+        source: "deterministic_text_fallback",
+        theme: seed.title,
+        zoneCode: zoneCode || null,
+      },
+    };
+  });
+
+  return articles.filter((article): article is ArticleAnalysis => article !== null);
+}
+
+export function buildDeterministicZoneDigest(articles: ArticleAnalysis[], zoneCode?: string): ZoneDigest | null {
+  if (!Array.isArray(articles) || articles.length === 0) return null;
+
+  const byArticle = new Map<number, ArticleAnalysis>();
+  for (const article of articles) {
+    if (!byArticle.has(article.articleNumber)) {
+      byArticle.set(article.articleNumber, article);
+    }
+  }
+
+  const article6 = byArticle.get(6);
+  const article7 = byArticle.get(7);
+  const article9 = byArticle.get(9);
+  const article10 = byArticle.get(10);
+  const article13 = byArticle.get(13);
+
+  const maxFootprint = article9
+    ? extractDimensionFromSnippet(article9.sourceText, /\d+(?:[.,]\d+)?\s*(?:%|m²|m2)/i)
+    : undefined;
+  const maxHeight = article10
+    ? extractDimensionFromSnippet(article10.sourceText, /\d+(?:[.,]\d+)?\s*m\b/i)
+    : undefined;
+  const roadSetback = article6
+    ? extractDimensionFromSnippet(article6.sourceText, /\d+(?:[.,]\d+)?\s*m\b/i)
+    : undefined;
+  const boundarySetback = article7
+    ? extractDimensionFromSnippet(article7.sourceText, /\d+(?:[.,]\d+)?\s*m\b/i)
+    : undefined;
+  const greenSpace = article13
+    ? extractDimensionFromSnippet(article13.sourceText, /\d+(?:[.,]\d+)?\s*(?:%|m²|m2)/i) || article13.summary
+    : undefined;
+
+  const restrictions = [article6, article7, article9, article10]
+    .filter((article): article is ArticleAnalysis => !!article)
+    .map((article) => article.summary)
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const conditions = [byArticle.get(1), byArticle.get(12), article13]
+    .filter((article): article is ArticleAnalysis => !!article)
+    .map((article) => article.summary)
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const summary = `Lecture réglementaire partielle reconstituée automatiquement à partir des extraits indexés${zoneCode ? ` pour la zone ${zoneCode}` : ""}.`;
+
+  return {
+    dimensions: {
+      maxFootprint,
+      maxHeight,
+      minSetbacks: [roadSetback, boundarySetback].filter(Boolean).join(" / ") || undefined,
+      greenSpace,
+    },
+    restrictions,
+    conditions,
+    summary,
+  };
+}
+
 function coerceArticleConfidence(raw: unknown): "high" | "medium" | "low" | "unknown" {
   if (typeof raw === "string") {
     const normalized = raw.toLowerCase();
@@ -592,13 +772,21 @@ export async function analyzePLUZone(
       }
     }
 
+    if (!rawArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
+      const deterministicArticles = extractDeterministicRegulatoryRules(relevantText, zoneCode);
+      if (deterministicArticles.length > 0) {
+        rawArticles = deterministicArticles;
+      }
+    }
+
     const rankedArticles = rankRulesByRelevance(rawArticles, projectDescription || "", parcelData);
+    const effectiveDigest = digest || buildDeterministicZoneDigest(rankedArticles, zoneCode);
 
     const result: any = {
       zoneCode: String(parsed.zoneCode || zoneCode),
       zoneLabel: String(parsed.zoneLabel || zoneLabel),
       articles: rankedArticles,
-      digest,
+      digest: effectiveDigest,
       issues: Array.isArray(parsed.issues) ? parsed.issues : Array.isArray(parsed?.data?.issues) ? parsed.data.issues : [],
       calculationVariables: parsed.calculationVariables || parsed?.data?.calculationVariables || {
         maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null,

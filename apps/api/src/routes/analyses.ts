@@ -25,46 +25,23 @@ import {
 } from "../services/parcel.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { getZoningByCoords } from "../services/planning.js";
+import { extractDeterministicRegulatoryRules } from "../services/pluAnalysis.js";
 
 const router: IRouter = Router();
 
 function synthesizeEvidenceFromSourceExcerpt(zoneAnalysisId: string, sourceExcerpt: string | null | undefined) {
-  const text = String(sourceExcerpt || "").replace(/\s+/g, " ").trim();
-  if (text.length < 200) return [];
-
-  const candidates = [
-    { title: "Implantation par rapport à la voie", articleNumber: 6, pattern: /(implantation|alignement|voie|emprise publique|recul[^.]{0,80}voie)/i },
-    { title: "Implantation sur limites séparatives", articleNumber: 7, pattern: /(limites s[ée]paratives|recul[^.]{0,80}limites|prospect)/i },
-    { title: "Emprise au sol", articleNumber: 9, pattern: /(emprise au sol|ces\b|coefficient d['’]emprise)/i },
-    { title: "Hauteur", articleNumber: 10, pattern: /(hauteur des constructions|hauteur maximale|hauteur\b)/i },
-    { title: "Stationnement", articleNumber: 12, pattern: /(stationnement|places? de stationnement|parking)/i },
-    { title: "Espaces verts et pleine terre", articleNumber: 13, pattern: /(espaces verts|pleine terre|plantations|perm[ée]abilit[ée])/i },
-  ];
-
-  return candidates
-    .map((candidate, index) => {
-      const match = candidate.pattern.exec(text);
-      if (!match) return null;
-
-      const start = Math.max(0, match.index - 180);
-      const end = Math.min(text.length, match.index + 420);
-      const snippet = text.slice(start, end).trim();
-      if (snippet.length < 90) return null;
-
-      return {
-        id: `source-excerpt-${index}`,
-        zoneAnalysisId,
-        articleNumber: candidate.articleNumber,
-        title: candidate.title,
-        sourceText: snippet,
-        summary: `Extrait réglementaire repéré automatiquement dans la base documentaire pour le thème "${candidate.title.toLowerCase()}".`,
-        impactText: "",
-        vigilanceText: "Preuve affichée à partir du texte source indexé en attendant une structuration plus fine.",
-        confidence: "low",
-        structuredJson: JSON.stringify({ fallback: "source_excerpt", theme: candidate.title }),
-      };
-    })
-    .filter((article): article is NonNullable<typeof article> => article !== null);
+  return extractDeterministicRegulatoryRules(sourceExcerpt || "").map((article, index) => ({
+    id: `source-excerpt-${index}`,
+    zoneAnalysisId,
+    articleNumber: article.articleNumber,
+    title: article.title,
+    sourceText: article.sourceText,
+    summary: article.summary,
+    impactText: article.impactText,
+    vigilanceText: article.vigilanceText,
+    confidence: article.confidence,
+    structuredJson: JSON.stringify(article.structuredData || { fallback: "source_excerpt" }),
+  }));
 }
 
 type SelectedParcelPayload = {

@@ -17,7 +17,7 @@ import {
 } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import { createHash } from "crypto";
-import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates } from "./pluAnalysis.js";
+import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -622,6 +622,40 @@ export async function orchestrateDossierAnalysis(
     logger.error("[Orchestrator] Failed to parse rules JSON.");
   }
 
+  const parsedRulesHaveSubstance = parsedRules.some((rule: any) => {
+    const text = String(
+      rule?.sourceText
+      ?? rule?.source_text
+      ?? rule?.operational_rule
+      ?? rule?.rule
+      ?? rule?.summary
+      ?? rule?.content
+      ?? ""
+    ).trim();
+    return text.length >= 40;
+  });
+
+  if (!parsedRulesHaveSubstance) {
+    const deterministicRules = extractDeterministicRegulatoryRules(regulatoryContext, finalZone).map((rule) => ({
+      article: rule.articleNumber,
+      articleNumber: rule.articleNumber,
+      title: rule.title,
+      rule: rule.sourceText,
+      sourceText: rule.sourceText,
+      summary: rule.summary,
+      interpretation: rule.interpretation,
+      impactText: rule.impactText,
+      vigilanceText: rule.vigilanceText,
+      confidence: rule.confidence,
+      structuredData: rule.structuredData,
+    }));
+
+    if (deterministicRules.length > 0) {
+      parsedRules = deterministicRules;
+      logger.info(`[Orchestrator] Using ${deterministicRules.length} deterministic regulatory rules for zone ${finalZone}.`);
+    }
+  }
+
   const { NormalizationService } = await import("./normalizationService.js");
   const normalizedParams = await NormalizationService.normalizeRules(parsedRules);
 
@@ -907,6 +941,10 @@ export async function orchestrateDossierAnalysis(
         fullZoneAnalysis.articles = fallbackArticles;
         logger.info(`[Orchestrator] Using ${fallbackArticles.length} fallback regulatory evidence entries for zone ${finalZone}.`);
       }
+    }
+
+    if ((!fullZoneAnalysis.digest || typeof fullZoneAnalysis.digest !== "object") && Array.isArray(fullZoneAnalysis.articles) && fullZoneAnalysis.articles.length > 0) {
+      fullZoneAnalysis.digest = buildDeterministicZoneDigest(fullZoneAnalysis.articles, finalZone);
     }
 
     const [existingZone] = await db.select().from(zoneAnalysesTable)
