@@ -641,10 +641,29 @@ export async function orchestrateDossierAnalysis(
     return false;
   };
 
+  const isWrittenRegulationDoc = (doc: any) => {
+    const hint = [
+      doc?.documentType,
+      doc?.type,
+      doc?.category,
+      doc?.subCategory,
+      doc?.title,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+
+    if (hint.includes("padd") || hint.includes("oap") || hint.includes("orientation")) return false;
+    return hint.includes("reglement")
+      || hint.includes("règlement")
+      || hint.includes("regulation")
+      || hint.includes("written regulation")
+      || hint.includes("plu_reglement");
+  };
+
   const strictRegulatoryDocs = context.relevantDocs.filter((doc) => {
     const rawText = String(doc?.rawText || "").trim();
     return rawText.length >= 100 && isStrictRegulatoryDoc(doc);
   });
+  const primaryWrittenRegulationDocs = strictRegulatoryDocs.filter(isWrittenRegulationDoc);
+  const annexRegulatoryDocs = strictRegulatoryDocs.filter((doc) => !primaryWrittenRegulationDocs.includes(doc));
 
   const supplementaryPlanningDocs = context.relevantDocs.filter((doc) => {
     if (strictRegulatoryDocs.includes(doc)) return false;
@@ -660,7 +679,9 @@ export async function orchestrateDossierAnalysis(
     return hint.includes("oap") || hint.includes("orientation") || hint.includes("padd");
   });
 
-  const regulatoryContext = strictRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
+  const primaryRegulatoryContext = primaryWrittenRegulationDocs.map((d) => d.rawText || "").join("\n\n");
+  const annexRegulatoryContext = annexRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
+  const regulatoryContext = [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n--- ANNEXES OPPOSABLES ---\n\n");
   const supplementaryPlanningContext = supplementaryPlanningDocs.map((d) => d.rawText || "").join("\n\n");
   const canonicalUnits = await loadRegulatoryUnits({
     municipalityId: regulatoryCommune,
@@ -678,16 +699,14 @@ export async function orchestrateDossierAnalysis(
     parsedRules = buildParsedRulesFromRegulatoryUnits(canonicalUnits);
     logger.info(`[Orchestrator] Using ${canonicalUnits.length} canonical regulatory units for zone ${finalZone}.`);
   } else {
-    const rawRules = await extractRelevantRules(
-      [regulatoryContext, supplementaryPlanningContext].filter(Boolean).join("\n\n--- DOCUMENTS COMPLEMENTAIRES ---\n\n"),
-      {
+    const primaryRawRules = await extractRelevantRules(primaryRegulatoryContext || regulatoryContext, {
       zoneCode: finalZone,
       cityName: communeName,
       jurisdictionContext
     });
 
     try {
-      const parsed = JSON.parse(rawRules);
+      const parsed = JSON.parse(primaryRawRules);
       parsedRules = extractStructuredRuleCandidates(parsed);
 
       if (parsedRules.length === 0 && parsed && typeof parsed === "object") {
@@ -709,6 +728,42 @@ export async function orchestrateDossierAnalysis(
     } catch (e) {
       logger.error("[Orchestrator] Failed to parse rules JSON.");
     }
+
+    const parsedRulesHavePrimarySubstance = parsedRules.some((rule: any) => {
+      const text = String(
+        rule?.sourceText
+        ?? rule?.source_text
+        ?? rule?.operational_rule
+        ?? rule?.rule
+        ?? rule?.summary
+        ?? rule?.content
+        ?? ""
+      ).trim();
+      return text.length >= 40;
+    });
+
+    if (!parsedRulesHavePrimarySubstance && (annexRegulatoryContext || supplementaryPlanningContext)) {
+      const enrichedRawRules = await extractRelevantRules(
+        [primaryRegulatoryContext, annexRegulatoryContext, supplementaryPlanningContext]
+          .filter(Boolean)
+          .join("\n\n--- DOCUMENTS COMPLEMENTAIRES ---\n\n"),
+        {
+          zoneCode: finalZone,
+          cityName: communeName,
+          jurisdictionContext
+        }
+      );
+
+      try {
+        const parsed = JSON.parse(enrichedRawRules);
+        const enrichedRules = extractStructuredRuleCandidates(parsed);
+        if (enrichedRules.length > 0) {
+          parsedRules = enrichedRules;
+        }
+      } catch (e) {
+        logger.error("[Orchestrator] Failed to parse enriched rules JSON.");
+      }
+    }
   }
 
   const parsedRulesHaveSubstance = parsedRules.some((rule: any) => {
@@ -725,7 +780,10 @@ export async function orchestrateDossierAnalysis(
   });
 
   if (!parsedRulesHaveSubstance) {
-    const deterministicRules = extractDeterministicRegulatoryRules(regulatoryContext, finalZone).map((rule) => ({
+    const deterministicRules = extractDeterministicRegulatoryRules(
+      [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n"),
+      finalZone
+    ).map((rule) => ({
       article: rule.articleNumber,
       articleNumber: rule.articleNumber,
       title: rule.title,
@@ -748,7 +806,9 @@ export async function orchestrateDossierAnalysis(
   const { NormalizationService } = await import("./normalizationService.js");
   const normalizedParams = await NormalizationService.normalizeRules(parsedRules);
 
-  const hasPluSourceData = (regulatoryContext || "").trim().length >= 200 || parsedRules.length > 0;
+  const hasPluSourceData = (primaryRegulatoryContext || "").trim().length >= 200
+    || (annexRegulatoryContext || "").trim().length >= 200
+    || parsedRules.length > 0;
   const missingPluSourceMessage = hasPluSourceData
     ? null
     : `Aucun document PLU opposable indexe pour la zone ${finalZone} sur la commune ${communeName}.`;

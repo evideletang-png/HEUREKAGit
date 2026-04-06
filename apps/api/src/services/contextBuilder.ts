@@ -13,6 +13,51 @@ export interface AnalysisContext {
   relevantRules: any[];
 }
 
+async function collectPrioritizedRegulatoryChunks(
+  commune: string,
+  communeName: string,
+  zoneCode: string,
+  jurisdictionContext: JurisdictionContext,
+  limit = 30
+) {
+  const query = `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`;
+  const aliases = Array.from(new Set([commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const plans = [
+    { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 18) },
+    { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 8) },
+    { docTypes: ["plu_reglement"], strictZone: false, target: Math.min(limit, 24) },
+    { docTypes: ["plu_annexe"], strictZone: false, target: Math.min(limit, 30) },
+  ];
+
+  const seen = new Set<string>();
+  const results: any[] = [];
+
+  for (const plan of plans) {
+    for (const municipalityId of aliases) {
+      const chunks = await queryRelevantChunks(query, {
+        municipalityId,
+        zoneCode,
+        docTypes: plan.docTypes,
+        minAuthority: 7,
+        strictZone: plan.strictZone,
+        jurisdictionContext,
+        limit: plan.target,
+      });
+
+      for (const chunk of chunks) {
+        if (seen.has(chunk.id)) continue;
+        seen.add(chunk.id);
+        results.push(chunk);
+        if (results.length >= limit) return results;
+      }
+
+      if (results.length >= plan.target) break;
+    }
+  }
+
+  return results;
+}
+
 /**
  * Context Builder Service.
  * Selects only relevant documents and rules for analysis using strict Jurisdiction Scoping.
@@ -78,56 +123,44 @@ export async function buildAnalysisContext(
   // 3b. ALWAYS run semantic search against base_ia_embeddings for zone-specific PLU chunks.
   // This is the primary knowledge source — it returns the most relevant indexed PLU text
   // even when no full-document record exists for the commune.
-  const embeddingQuery = `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`;
   try {
-    let chunks = await queryRelevantChunks(embeddingQuery, {
-      municipalityId: commune,
-      zoneCode,
-      docTypes: ["plu_reglement", "plu_annexe"],
-      minAuthority: 7,
-      strictZone: true,
-      jurisdictionContext,
-      limit: 30,
-    });
-
-    // Fallback: try with commune name (some documents are indexed by name, not INSEE)
-    if (chunks.length === 0 && communeName) {
-      chunks = await queryRelevantChunks(embeddingQuery, {
-        municipalityId: communeName,
-        zoneCode,
-        docTypes: ["plu_reglement", "plu_annexe"],
-        minAuthority: 7,
-        strictZone: true,
-        jurisdictionContext,
-        limit: 30,
-      });
-    }
-
-    if (chunks.length === 0) {
-      chunks = await queryRelevantChunks(embeddingQuery, {
-        municipalityId: commune,
-        zoneCode,
-        docTypes: ["plu_reglement", "plu_annexe"],
-        minAuthority: 7,
-        jurisdictionContext,
-        limit: 30,
-      });
-    }
+    const chunks = await collectPrioritizedRegulatoryChunks(commune, communeName, zoneCode, jurisdictionContext, 30);
 
     if (chunks.length > 0) {
-      const embeddingText = chunks
-        .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)
-        .join("\n\n---\n\n");
-      // Prepend as the highest-priority synthetic document
-      relevantDocs.unshift({
-        id: `BASE_IA_${commune}_${zoneCode}`,
-        rawText: embeddingText,
-        municipalityId: commune,
-        status: "indexed",
-        documentType: "plu",
-        title: `Base IA — Zone ${zoneCode} — ${jurisdictionContext.name || commune}`,
-      });
-      console.log(`[ContextBuilder] ✅ ${chunks.length} Base IA embedding chunks injected for zone ${zoneCode} in ${jurisdictionContext.name || commune}`);
+      const writtenChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_reglement");
+      const annexChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_annexe");
+
+      if (annexChunks.length > 0) {
+        relevantDocs.unshift({
+          id: `BASE_IA_ANNEX_${commune}_${zoneCode}`,
+          rawText: annexChunks
+            .map((chunk) => `[Base IA annexe — Score: ${typeof chunk.similarity === "number" ? chunk.similarity.toFixed(2) : chunk.similarity}]\n${chunk.content}`)
+            .join("\n\n---\n\n"),
+          municipalityId: commune,
+          status: "indexed",
+          documentType: "plu_annexe",
+          title: `Base IA — Annexes ${zoneCode} — ${jurisdictionContext.name || commune}`,
+          isOpposable: true,
+        });
+      }
+
+      if (writtenChunks.length > 0) {
+        relevantDocs.unshift({
+          id: `BASE_IA_REGULATION_${commune}_${zoneCode}`,
+          rawText: writtenChunks
+            .map((chunk) => `[Base IA règlement écrit — Score: ${typeof chunk.similarity === "number" ? chunk.similarity.toFixed(2) : chunk.similarity}]\n${chunk.content}`)
+            .join("\n\n---\n\n"),
+          municipalityId: commune,
+          status: "indexed",
+          documentType: "plu_reglement",
+          title: `Base IA — Règlement écrit ${zoneCode} — ${jurisdictionContext.name || commune}`,
+          isOpposable: true,
+        });
+      }
+
+      console.log(
+        `[ContextBuilder] ✅ ${chunks.length} Base IA embedding chunks injected for zone ${zoneCode} in ${jurisdictionContext.name || commune} (${writtenChunks.length} règlement, ${annexChunks.length} annexes)`
+      );
     } else {
       console.warn(`[ContextBuilder] ⚠️  No Base IA chunks for zone ${zoneCode} in ${commune} — triggering auto-fetch from GPU / data.gouv.fr`);
 

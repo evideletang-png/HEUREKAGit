@@ -59,6 +59,48 @@ async function queryChunksWithMunicipalityAliases(
   return Array.from(resultsById.values()).slice(0, limit);
 }
 
+async function collectPrioritizedRegulatoryChunks(
+  queryStr: string,
+  options: {
+    cityName?: string;
+    zoneCode?: string;
+    jurisdictionContext?: JurisdictionContext;
+    limit?: number;
+  }
+) {
+  const limit = options.limit || 25;
+  const plans = [
+    { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 15) },
+    { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 22) },
+    { docTypes: ["plu_reglement"], strictZone: false, target: Math.min(limit, 25) },
+    { docTypes: ["plu_annexe"], strictZone: false, target: Math.min(limit, 25) },
+  ];
+
+  const seen = new Set<string>();
+  const chunks: any[] = [];
+
+  for (const plan of plans) {
+    const hits = await queryChunksWithMunicipalityAliases(queryStr, {
+      cityName: options.cityName,
+      zoneCode: options.zoneCode,
+      docTypes: plan.docTypes,
+      minAuthority: 7,
+      strictZone: plan.strictZone,
+      limit: plan.target,
+      jurisdictionContext: options.jurisdictionContext,
+    });
+
+    for (const hit of hits) {
+      if (seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      chunks.push(hit);
+      if (chunks.length >= limit) return chunks;
+    }
+  }
+
+  return chunks;
+}
+
 /**
  * Estimation rapide du nombre de tokens (1 token ~ 4 caractères pour du français/anglais).
  * On vise une limite de sécurité de 25k tokens pour un quota TPM de 30k.
@@ -344,6 +386,122 @@ function summariseDeterministicSnippet(snippet: string): string {
 function extractDimensionFromSnippet(snippet: string, unitPattern: RegExp): string | undefined {
   const match = snippet.match(unitPattern);
   return match ? match[0].replace(/\s+/g, " ").trim() : undefined;
+}
+
+function inferRegulatoryTitleFromSnippet(snippet: string): string {
+  const headingMatch = snippet.match(/(article\s+\d+[^\n.:;]{0,80}|art\.?\s*\d+[^\n.:;]{0,80})/i);
+  if (headingMatch?.[0]) {
+    return headingMatch[0].replace(/\s+/g, " ").trim();
+  }
+
+  const thematicTitle = (() => {
+    const lower = snippet.toLowerCase();
+    if (lower.includes("emprise") || lower.includes("ces")) return "Emprise & densité";
+    if (lower.includes("hauteur") || lower.includes("gabarit")) return "Hauteur & gabarit";
+    if (lower.includes("limite séparative") || lower.includes("limites séparatives") || lower.includes("recul") || lower.includes("prospect") || lower.includes("alignement") || lower.includes("voie")) {
+      return "Implantation & reculs";
+    }
+    if (lower.includes("stationnement") || lower.includes("parking") || lower.includes("accès")) return "Accès & stationnement";
+    if (lower.includes("pleine terre") || lower.includes("espace vert") || lower.includes("plantation") || lower.includes("perméabil")) return "Paysage & pleine terre";
+    if (lower.includes("destination") || lower.includes("usage") || lower.includes("occupation du sol")) return "Usages & destination";
+    if (lower.includes("aspect") || lower.includes("façade") || lower.includes("toiture") || lower.includes("matériau")) return "Aspect architectural";
+    if (lower.includes("servitude") || lower.includes("risque") || lower.includes("argile")) return "Contraintes & servitudes";
+    return null;
+  })();
+
+  if (thematicTitle) return thematicTitle;
+
+  const compact = snippet.replace(/\s+/g, " ").trim();
+  const firstSentence = compact.split(/[.;:]/)[0]?.trim() || compact;
+  return firstSentence.length > 72 ? `${firstSentence.slice(0, 69).trim()}...` : firstSentence;
+}
+
+function isMeaningfulRegulatoryBlock(block: string): boolean {
+  const compact = block.replace(/\s+/g, " ").trim();
+  if (compact.length < 90) return false;
+  if (/^\[base ia/i.test(compact)) return false;
+
+  const lower = compact.toLowerCase();
+  const keywords = [
+    "article",
+    "construction",
+    "implantation",
+    "recul",
+    "limite séparative",
+    "limites séparatives",
+    "alignement",
+    "voie",
+    "emprise",
+    "ces",
+    "hauteur",
+    "stationnement",
+    "parking",
+    "destination",
+    "usage",
+    "espace vert",
+    "pleine terre",
+    "plantation",
+    "façade",
+    "toiture",
+    "aspect",
+    "matériau",
+    "clôture",
+    "servitude",
+    "argile",
+    "risque",
+    "pente",
+    "réseau",
+    "assainissement",
+  ];
+
+  return keywords.some((keyword) => lower.includes(keyword)) || /\d/.test(compact);
+}
+
+export function extractComprehensiveRegulatoryRules(text: string, zoneCode?: string): ArticleAnalysis[] {
+  const repaired = repairExtractedText(text);
+  if (repaired.trim().length < 200) return [];
+
+  const blocks = repaired
+    .split(/\n\s*\n|---+\s*[A-ZÀ-ÿ0-9 ()-]*---+|===+\s*[A-ZÀ-ÿ0-9 ()-]*===+/g)
+    .map((block) => block.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const seen = new Set<string>();
+  const rules: ArticleAnalysis[] = [];
+
+  for (const block of blocks) {
+    if (!isMeaningfulRegulatoryBlock(block)) continue;
+
+    const normalized = block.replace(/\s+/g, " ").trim();
+    const dedupeKey = normalized.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const title = inferRegulatoryTitleFromSnippet(normalized);
+    const headingMatch = title.match(/article\s+(\d+)/i);
+    const articleNumber = headingMatch?.[1] ? parseInt(headingMatch[1], 10) : rules.length + 1;
+    const summary = summariseDeterministicSnippet(normalized);
+    const confidence: ArticleAnalysis["confidence"] = /\d/.test(normalized) || /article\s+\d+/i.test(normalized)
+      ? "medium"
+      : "low";
+
+    rules.push({
+      articleNumber,
+      title,
+      sourceText: normalized,
+      interpretation: summary,
+      summary,
+      impactText: zoneCode ? `Extrait identifié dans la matière réglementaire de la zone ${zoneCode}.` : "Extrait identifié dans la matière réglementaire indexée.",
+      vigilanceText: "Extrait automatique à vérifier contre le règlement écrit intégral si le PDF est ancien ou mal structuré.",
+      confidence,
+      structuredData: {
+        source: "comprehensive_text_fallback",
+        zoneCode: zoneCode || null,
+      },
+    });
+  }
+
+  return rules;
 }
 
 export function extractDeterministicRegulatoryRules(text: string, zoneCode?: string): ArticleAnalysis[] {
@@ -780,6 +938,13 @@ export async function analyzePLUZone(
     }
 
     if (!rawArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
+      const comprehensiveArticles = extractComprehensiveRegulatoryRules(relevantText, zoneCode);
+      if (comprehensiveArticles.length > 0) {
+        rawArticles = comprehensiveArticles;
+      }
+    }
+
+    if (!rawArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
       const deterministicArticles = extractDeterministicRegulatoryRules(relevantText, zoneCode);
       if (deterministicArticles.length > 0) {
         rawArticles = deterministicArticles;
@@ -1055,31 +1220,18 @@ export async function extractRelevantRules(
       const queryStr = `Règles d'urbanisme zone ${zoneCode}${topics.length > 0 ? `. Thématiques: ${topics.join(", ")}` : ""}`;
       console.log(`[pluAnalysis] Base IA semantic search: "${queryStr}" (${cityName})`);
 
-      let chunks = await queryChunksWithMunicipalityAliases(queryStr, {
+      let chunks = await collectPrioritizedRegulatoryChunks(queryStr, {
         cityName,
         zoneCode,
-        docTypes: regulatoryDocTypes,
-        minAuthority: 7,
-        strictZone: true,
-        limit: 25,
         jurisdictionContext,
+        limit: 25,
       });
-
-      if (chunks.length === 0) {
-        chunks = await queryChunksWithMunicipalityAliases(queryStr, {
-          cityName,
-          zoneCode,
-          docTypes: regulatoryDocTypes,
-          minAuthority: 7,
-          limit: 25,
-          jurisdictionContext,
-        });
-      }
 
       if (chunks.length > 0 && chunks.length < 5) {
         const broaderChunks = await queryChunksWithMunicipalityAliases(queryStr, {
           cityName,
           zoneCode,
+          docTypes: regulatoryDocTypes,
           limit: 25,
           jurisdictionContext,
         });
@@ -1115,8 +1267,22 @@ export async function extractRelevantRules(
       }
 
       if (chunks.length > 0) {
-        combinedText = chunks
-          .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)
+        const writtenChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_reglement");
+        const annexChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_annexe");
+        const orderedChunks = [...writtenChunks, ...annexChunks, ...chunks.filter((chunk) => {
+          const docType = chunk.metadata?.document_type;
+          return docType !== "plu_reglement" && docType !== "plu_annexe";
+        })];
+
+        combinedText = orderedChunks
+          .map(c => {
+            const prefix = c.metadata?.document_type === "plu_reglement"
+              ? "Base IA — Règlement écrit"
+              : c.metadata?.document_type === "plu_annexe"
+                ? "Base IA — Annexe opposable"
+                : "Base IA";
+            return `[${prefix} — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`;
+          })
           .join("\n\n---\n\n");
         console.log(`[pluAnalysis] ✅ ${chunks.length} Base IA chunks retrieved for ${cityName} zone ${zoneCode}`);
       } else {

@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
-import { extractDeterministicRegulatoryRules, buildDeterministicZoneDigest, type ArticleAnalysis, type ZoneDigest } from "./pluAnalysis.js";
+import { extractComprehensiveRegulatoryRules, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest, type ArticleAnalysis, type ZoneDigest } from "./pluAnalysis.js";
 import { smartArticleChunking } from "./baseIAIngestion.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 
@@ -57,12 +57,13 @@ function parseValuesFromArticle(article: ArticleAnalysis) {
 }
 
 function buildArticleCandidates(rawText: string, zoneCode?: string | null): ArticleAnalysis[] {
+  const comprehensiveArticles = extractComprehensiveRegulatoryRules(rawText, zoneCode || undefined);
   const wholeTextArticles = extractDeterministicRegulatoryRules(rawText, zoneCode || undefined);
 
   const chunkArticles = smartArticleChunking(rawText)
     .flatMap((chunk) => extractDeterministicRegulatoryRules(chunk.content, zoneCode || undefined));
 
-  return dedupeArticles([...wholeTextArticles, ...chunkArticles]);
+  return dedupeArticles([...comprehensiveArticles, ...wholeTextArticles, ...chunkArticles]);
 }
 
 export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryUnitsArgs) {

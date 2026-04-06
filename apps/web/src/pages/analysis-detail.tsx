@@ -128,6 +128,7 @@ function hasMeaningfulRegulatoryText(value: unknown): boolean {
 type RegulatoryInsight = {
   key: string;
   title: string;
+  detailLabel?: string;
   summary: string;
   sourceText: string;
   impactText?: string;
@@ -410,70 +411,38 @@ export default function AnalysisDetailPage() {
     : [];
 
   const thematicInsights: RegulatoryInsight[] = (() => {
-    const groups = new Map<string, RegulatoryInsight & { sourceTexts: string[]; summaries: string[]; impacts: string[]; vigilances: string[]; confidences: Array<AIConfidence | string> }>();
+    return meaningfulArticles
+      .map((article: any, index: number) => {
+        const extra = (() => {
+          try {
+            return JSON.parse(article.structuredJson || "{}");
+          } catch {
+            return {};
+          }
+        })();
+        const theme = getRegulatoryTheme(article);
+        const rawTitle = String(article.title || "").trim();
+        const detailLabel = rawTitle && rawTitle.toLowerCase() !== theme.title.toLowerCase()
+          ? rawTitle
+          : undefined;
 
-    for (const article of meaningfulArticles) {
-      const extra = (() => {
-        try {
-          return JSON.parse(article.structuredJson || "{}");
-        } catch {
-          return {};
-        }
-      })();
-      const theme = getRegulatoryTheme(article);
-      const existing = groups.get(theme.key);
-      const relevanceScore = Number(extra?.relevanceScore || 0);
-      const relevanceReason = typeof extra?.relevanceReason === "string" ? extra.relevanceReason : undefined;
-
-      if (!existing) {
-        groups.set(theme.key, {
-          key: theme.key,
+        return {
+          key: String(article.id || `${theme.key}-${index}`),
           title: theme.title,
+          detailLabel,
           summary: article.summary || article.sourceText || "",
           sourceText: article.sourceText || "",
           impactText: article.impactText || "",
           vigilanceText: article.vigilanceText || "",
           confidence: article.confidence || "unknown",
-          relevanceScore,
-          relevanceReason,
-          sourceTexts: article.sourceText ? [article.sourceText] : [],
-          summaries: article.summary ? [article.summary] : [],
-          impacts: article.impactText ? [article.impactText] : [],
-          vigilances: article.vigilanceText ? [article.vigilanceText] : [],
-          confidences: [article.confidence || "unknown"],
-        });
-        continue;
-      }
-
-      if (!existing.summary && article.summary) existing.summary = article.summary;
-      if (!existing.sourceText && article.sourceText) existing.sourceText = article.sourceText;
-      if (!existing.impactText && article.impactText) existing.impactText = article.impactText;
-      if (!existing.vigilanceText && article.vigilanceText) existing.vigilanceText = article.vigilanceText;
-      if (relevanceScore > existing.relevanceScore) {
-        existing.relevanceScore = relevanceScore;
-        existing.relevanceReason = relevanceReason;
-      }
-
-      if (article.sourceText && !existing.sourceTexts.includes(article.sourceText)) existing.sourceTexts.push(article.sourceText);
-      if (article.summary && !existing.summaries.includes(article.summary)) existing.summaries.push(article.summary);
-      if (article.impactText && !existing.impacts.includes(article.impactText)) existing.impacts.push(article.impactText);
-      if (article.vigilanceText && !existing.vigilances.includes(article.vigilanceText)) existing.vigilances.push(article.vigilanceText);
-      existing.confidences.push(article.confidence || "unknown");
-    }
-
-    return Array.from(groups.values())
-      .map((group) => ({
-        key: group.key,
-        title: group.title,
-        summary: group.summary || group.summaries[0] || "",
-        sourceText: group.sourceText || group.sourceTexts.join("\n\n---\n\n"),
-        impactText: group.impactText || group.impacts[0] || "",
-        vigilanceText: group.vigilanceText || group.vigilances[0] || "",
-        confidence: pickConfidence(group.confidences),
-        relevanceScore: group.relevanceScore,
-        relevanceReason: group.relevanceReason,
-      }))
-      .sort((left, right) => right.relevanceScore - left.relevanceScore);
+          relevanceScore: Number(extra?.relevanceScore || 0),
+          relevanceReason: typeof extra?.relevanceReason === "string" ? extra.relevanceReason : undefined,
+        };
+      })
+      .sort((left: RegulatoryInsight, right: RegulatoryInsight) => {
+        if (right.relevanceScore !== left.relevanceScore) return right.relevanceScore - left.relevanceScore;
+        return left.title.localeCompare(right.title);
+      });
   })();
 
   const digestHighlights = [
@@ -1216,6 +1185,9 @@ export default function AnalysisDetailPage() {
                               <CardTitle className="text-base">{insight.title}</CardTitle>
                               {isHighlyRelevant && <Badge className="bg-primary text-[9px] h-4 py-0 uppercase">Prioritaire</Badge>}
                             </div>
+                            {insight.detailLabel && (
+                              <p className="text-xs text-muted-foreground font-medium">{insight.detailLabel}</p>
+                            )}
                             {insight.relevanceReason && (
                               <p className="text-[10px] text-muted-foreground font-medium">{insight.relevanceReason}</p>
                             )}
