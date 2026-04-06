@@ -384,6 +384,7 @@ export default function AnalysisDetailPage() {
   const missingRequirements = gc?.missing_requirements ?? {};
   const missingPluIssue = zoneIssues.find((issue: any) => issue?.type === "NO_PLU_DATA" || issue?.code === "NO_PLU_DATA")
     || (missingRequirements?.plu_source ? { message: missingRequirements.plu_source } : null);
+  const zoneReadIssue = zoneIssues.find((issue: any) => issue?.type === "PLU_ZONE_READ_INSUFFICIENT" || issue?.code === "PLU_ZONE_READ_INSUFFICIENT") || null;
   const parsedDigest = (() => {
     try {
       if (!(zoneAnalysis as any)?.structuredJson) return null;
@@ -1086,6 +1087,19 @@ export default function AnalysisDetailPage() {
                  </div>
                )}
 
+               {!missingPluIssue && zoneReadIssue && (
+                 <div className="flex flex-col items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-4 text-sky-900 mb-6">
+                   <div className="flex items-center gap-2 font-semibold">
+                     <AlertTriangle className="w-4 h-4" />
+                     Lecture PLU encore incomplète pour cette zone
+                   </div>
+                   <p className="text-sm">{zoneReadIssue.message}</p>
+                   <p className="text-xs text-sky-800">
+                     Des documents réglementaires sont bien présents dans la Base IA, mais le moteur n'a pas encore reconstitué assez de matière opposable ciblée sur cette zone.
+                   </p>
+                 </div>
+               )}
+
                {/* NOUVEL AFFICHAGE DES ARTICLES (TUNNEL STEP 3) */}
                {regulationControls.length > 0 && (
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
@@ -1162,7 +1176,7 @@ export default function AnalysisDetailPage() {
                     <AlertTriangle className="w-8 h-8 text-amber-500 mb-3" />
                     <h4 className="font-semibold text-amber-800 mb-1">Aucune règle exploitable n'a été reconstituée</h4>
                     <p className="text-sm text-amber-700 max-w-sm">
-                      {missingPluIssue?.message || "La zone est identifiée, mais les documents indexés ne permettent pas encore de produire une lecture article par article suffisamment fiable."}
+                      {zoneReadIssue?.message || missingPluIssue?.message || "La zone est identifiée, mais les documents indexés ne permettent pas encore de produire une lecture article par article suffisamment fiable."}
                     </p>
                     <Button variant="outline" className="mt-4" onClick={() => setActiveTab("chat")}>
                       <MessageSquare className="w-4 h-4 mr-2" />

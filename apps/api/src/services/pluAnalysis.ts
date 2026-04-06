@@ -297,6 +297,39 @@ export interface ZoneAnalysisResult {
   globalConstraints: string[];
 }
 
+function buildPluAvailabilityIssue(params: {
+  zoneCode: string;
+  cityName?: string;
+  hasIndexedRegulatorySource: boolean;
+}) {
+  const target = params.cityName || params.zoneCode;
+  if (params.hasIndexedRegulatorySource) {
+    return {
+      zoneLabel: `Zone ${params.zoneCode} — documents PLU présents, lecture à confirmer`,
+      issue: {
+        article: "GLOBAL",
+        msg: `Des documents PLU sont bien indexés pour ${target}, mais la lecture réglementaire de la zone ${params.zoneCode} n'a pas encore pu être reconstituée assez fiablement.`,
+        severity: "majeure" as const,
+        type: "PLU_ZONE_READ_INSUFFICIENT",
+        code: "PLU_ZONE_READ_INSUFFICIENT",
+        message: `Des documents PLU sont indexés pour ${target}, mais les règles spécifiques à la zone ${params.zoneCode} n'ont pas encore pu être extraites de manière suffisamment fiable.`,
+      },
+    };
+  }
+
+  return {
+    zoneLabel: `Zone ${params.zoneCode} — aucun document PLU indexé`,
+    issue: {
+      article: "GLOBAL",
+      msg: `Aucun document PLU indexé pour ${target}. Importez les documents dans la Base IA mairie.`,
+      severity: "bloquante" as const,
+      type: "NO_PLU_DATA",
+      code: "NO_PLU_DATA",
+      message: `Aucun document PLU indexé pour ${target}. Importez les documents dans la Base IA mairie.`,
+    },
+  };
+}
+
 export interface ExtractedDocumentData {
   document_code: string;
   status: "ok" | "warning" | "error";
@@ -812,6 +845,7 @@ export async function analyzePLUZone(
   parcelData?: any,
   jurisdictionContext?: JurisdictionContext
 ): Promise<ZoneAnalysisResult & { digest?: ZoneDigest | null }> {
+  const hasIndexedRegulatorySource = rawText.replace(/\s+/g, " ").trim().length >= 250;
   const articleSchema = z.object({
     articleNumber: z.coerce.number(),
     title: z.string(),
@@ -886,21 +920,15 @@ export async function analyzePLUZone(
           console.log(`[pluAnalysis/analyzePLUZone] ✅ ${fallbackChunks.length} Base IA chunks used for ${cityName} zone ${zoneCode}`);
         } else {
           console.warn(`[pluAnalysis/analyzePLUZone] No PLU content found for ${cityName} zone ${zoneCode} — skipping AI call`);
+          const availability = buildPluAvailabilityIssue({ zoneCode, cityName, hasIndexedRegulatorySource });
           return {
             zoneCode,
-            zoneLabel: `Zone ${zoneCode} — aucun document PLU indexé`,
+            zoneLabel: availability.zoneLabel,
             articles: [],
             digest: null,
             calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
             globalConstraints: [],
-            issues: [{
-              article: "GLOBAL",
-              msg: `Aucun document PLU indexé pour ${cityName}. Importez les documents dans la Base IA mairie.`,
-              severity: "bloquante",
-              type: "NO_PLU_DATA",
-              code: "NO_PLU_DATA",
-              message: `Aucun document PLU indexé pour ${cityName}. Importez les documents dans la Base IA mairie.`,
-            }],
+            issues: [availability.issue],
           };
         }
       } catch (embErr) {
@@ -911,21 +939,15 @@ export async function analyzePLUZone(
     // Guard: if still no meaningful text after all fallbacks, skip AI entirely
     if (relevantText.trim().length < 200) {
       console.warn(`[pluAnalysis/analyzePLUZone] relevantText too short (${relevantText.length} chars) after all fallbacks — no AI call`);
+      const availability = buildPluAvailabilityIssue({ zoneCode, cityName, hasIndexedRegulatorySource });
       return {
         zoneCode,
-        zoneLabel: `Zone ${zoneCode} — aucun document PLU indexé`,
+        zoneLabel: availability.zoneLabel,
         articles: [],
         digest: null,
         calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
         globalConstraints: [],
-        issues: [{
-          article: "GLOBAL",
-          msg: `Aucun document PLU indexé pour ${cityName || zoneCode}. Importez les documents dans la Base IA mairie.`,
-          severity: "bloquante",
-          type: "NO_PLU_DATA",
-          code: "NO_PLU_DATA",
-          message: `Aucun document PLU indexé pour ${cityName || zoneCode}. Importez les documents dans la Base IA mairie.`,
-        }],
+        issues: [availability.issue],
       };
     }
 
