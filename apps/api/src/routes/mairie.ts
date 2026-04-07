@@ -1989,6 +1989,65 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
   }
 });
 
+router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+
+    const [section] = await db.select({
+      id: regulatoryZoneSectionsTable.id,
+      municipalityId: regulatoryZoneSectionsTable.municipalityId,
+      zoneCode: regulatoryZoneSectionsTable.zoneCode,
+      baseIADocumentId: regulatoryZoneSectionsTable.baseIADocumentId,
+      townHallDocumentId: regulatoryZoneSectionsTable.townHallDocumentId,
+    }).from(regulatoryZoneSectionsTable)
+      .where(eq(regulatoryZoneSectionsTable.id, id))
+      .limit(1);
+
+    if (!section) {
+      return res.status(404).json({ error: "ZONE_SECTION_NOT_FOUND" });
+    }
+
+    const access = await resolveAuthorizedTownHallCommune(
+      req.user!.userId,
+      req.query.commune as string | undefined || section.municipalityId,
+    );
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const relatedUnitFilter = and(
+      eq(regulatoryUnitsTable.municipalityId, section.municipalityId),
+      eq(regulatoryUnitsTable.zoneCode, section.zoneCode),
+      section.baseIADocumentId
+        ? eq(regulatoryUnitsTable.baseIADocumentId, section.baseIADocumentId)
+        : section.townHallDocumentId
+          ? eq(regulatoryUnitsTable.townHallDocumentId, section.townHallDocumentId)
+          : sql`TRUE`
+    );
+
+    const relatedUrbanRuleFilter = and(
+      eq(urbanRulesTable.municipalityId, section.municipalityId),
+      eq(urbanRulesTable.zoneCode, section.zoneCode),
+      section.baseIADocumentId
+        ? eq(urbanRulesTable.baseIADocumentId, section.baseIADocumentId)
+        : section.townHallDocumentId
+          ? eq(urbanRulesTable.townHallDocumentId, section.townHallDocumentId)
+          : sql`TRUE`
+    );
+
+    await db.transaction(async (tx) => {
+      await tx.delete(regulatoryZoneSectionsTable).where(eq(regulatoryZoneSectionsTable.id, id));
+      await tx.delete(regulatoryUnitsTable).where(relatedUnitFilter);
+      await tx.delete(urbanRulesTable).where(relatedUrbanRuleFilter);
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/plu-zone-reviews DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
   try {
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);

@@ -1383,6 +1383,23 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     }
   });
 
+  const deleteZoneMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiFetch(`/api/mairie/plu-zone-reviews/${id}?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      toast({ title: "Zone supprimée", description: "La zone détectée et ses règles dérivées ont été retirées de cette base." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de supprimer cette zone détectée.", variant: "destructive" });
+    }
+  });
+
   const reviewRuleMutation = useMutation({
     mutationFn: async ({ id, reviewStatus }: { id: string; reviewStatus: "validated" | "to_review" | "rejected" }) => {
       return apiFetch(`/api/mairie/plu-rule-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
@@ -1887,6 +1904,24 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                               >
                                 <XCircle className="mr-1.5 h-3.5 w-3.5" />
                                 Écarter
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-destructive/20 text-destructive hover:bg-destructive/5"
+                                disabled={deleteZoneMutation.isPending}
+                                onClick={() => {
+                                  const confirmed = window.confirm(`Supprimer définitivement la zone ${section.zoneCode} détectée dans ce document ?`);
+                                  if (!confirmed) return;
+                                  deleteZoneMutation.mutate(section.id);
+                                }}
+                              >
+                                {deleteZoneMutation.isPending ? (
+                                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                )}
+                                Supprimer
                               </Button>
                             </div>
                           </div>
