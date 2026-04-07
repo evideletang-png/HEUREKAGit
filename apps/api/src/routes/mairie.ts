@@ -119,6 +119,143 @@ function authorityForCanonicalType(canonicalType: string): number {
   return AUTHORITY_POLICY.UNKNOWN;
 }
 
+function buildMunicipalityAliasFilter(column: any, aliases: string[]) {
+  if (aliases.length === 0) return sql`FALSE`;
+  return or(
+    inArray(column, aliases),
+    ...aliases.map((alias) => sql`lower(${column}) = lower(${alias})`),
+  )!;
+}
+
+async function purgeMunicipalityStructuredKnowledge(args: {
+  requestedCommune: string;
+  municipalityAliases: string[];
+}) {
+  const municipalityFilter = buildMunicipalityAliasFilter(baseIADocumentsTable.municipalityId, args.municipalityAliases);
+
+  const baseDocs = await db.select({ id: baseIADocumentsTable.id })
+    .from(baseIADocumentsTable)
+    .where(municipalityFilter);
+
+  const baseDocIds = baseDocs.map((doc) => doc.id);
+
+  return db.transaction(async (tx) => {
+    const deletedConflicts = await tx.delete(urbanRuleConflictsTable)
+      .where(buildMunicipalityAliasFilter(urbanRuleConflictsTable.municipalityId, args.municipalityAliases))
+      .returning({ id: urbanRuleConflictsTable.id });
+
+    const deletedRules = await tx.delete(urbanRulesTable)
+      .where(buildMunicipalityAliasFilter(urbanRulesTable.municipalityId, args.municipalityAliases))
+      .returning({ id: urbanRulesTable.id });
+
+    const deletedUnits = await tx.delete(regulatoryUnitsTable)
+      .where(buildMunicipalityAliasFilter(regulatoryUnitsTable.municipalityId, args.municipalityAliases))
+      .returning({ id: regulatoryUnitsTable.id });
+
+    const deletedSections = await tx.delete(regulatoryZoneSectionsTable)
+      .where(buildMunicipalityAliasFilter(regulatoryZoneSectionsTable.municipalityId, args.municipalityAliases))
+      .returning({ id: regulatoryZoneSectionsTable.id });
+
+    const deletedProfiles = await tx.delete(documentKnowledgeProfilesTable)
+      .where(buildMunicipalityAliasFilter(documentKnowledgeProfilesTable.municipalityId, args.municipalityAliases))
+      .returning({ id: documentKnowledgeProfilesTable.id });
+
+    const deletedEmbeddings = baseDocIds.length > 0
+      ? await tx.delete(baseIAEmbeddingsTable)
+          .where(
+            or(
+              inArray(baseIAEmbeddingsTable.documentId, baseDocIds),
+              buildMunicipalityAliasFilter(baseIAEmbeddingsTable.municipalityId, args.municipalityAliases),
+              sql`lower(${baseIAEmbeddingsTable.metadata}->>'commune') = lower(${args.requestedCommune})`,
+            )!,
+          )
+          .returning({ id: baseIAEmbeddingsTable.id })
+      : await tx.delete(baseIAEmbeddingsTable)
+          .where(
+            or(
+              buildMunicipalityAliasFilter(baseIAEmbeddingsTable.municipalityId, args.municipalityAliases),
+              sql`lower(${baseIAEmbeddingsTable.metadata}->>'commune') = lower(${args.requestedCommune})`,
+            )!,
+          )
+          .returning({ id: baseIAEmbeddingsTable.id });
+
+    const deletedBaseDocs = await tx.delete(baseIADocumentsTable)
+      .where(buildMunicipalityAliasFilter(baseIADocumentsTable.municipalityId, args.municipalityAliases))
+      .returning({ id: baseIADocumentsTable.id });
+
+    return {
+      deletedProfiles: deletedProfiles.length,
+      deletedZoneSections: deletedSections.length,
+      deletedUnits: deletedUnits.length,
+      deletedRules: deletedRules.length,
+      deletedConflicts: deletedConflicts.length,
+      deletedEmbeddings: deletedEmbeddings.length,
+      deletedBaseDocs: deletedBaseDocs.length,
+    };
+  });
+}
+
+async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
+  const relatedProfileDocs = await db.select({ baseIADocumentId: documentKnowledgeProfilesTable.baseIADocumentId })
+    .from(documentKnowledgeProfilesTable)
+    .where(eq(documentKnowledgeProfilesTable.townHallDocumentId, docId));
+  const relatedSectionDocs = await db.select({ baseIADocumentId: regulatoryZoneSectionsTable.baseIADocumentId })
+    .from(regulatoryZoneSectionsTable)
+    .where(eq(regulatoryZoneSectionsTable.townHallDocumentId, docId));
+  const relatedUnitDocs = await db.select({ baseIADocumentId: regulatoryUnitsTable.baseIADocumentId })
+    .from(regulatoryUnitsTable)
+    .where(eq(regulatoryUnitsTable.townHallDocumentId, docId));
+  const relatedRuleDocs = await db.select({ baseIADocumentId: urbanRulesTable.baseIADocumentId })
+    .from(urbanRulesTable)
+    .where(eq(urbanRulesTable.townHallDocumentId, docId));
+
+  const baseDocIds = Array.from(new Set([
+    ...relatedProfileDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+    ...relatedSectionDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+    ...relatedUnitDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+    ...relatedRuleDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+  ]));
+
+  return db.transaction(async (tx) => {
+    const deletedRules = await tx.delete(urbanRulesTable)
+      .where(eq(urbanRulesTable.townHallDocumentId, docId))
+      .returning({ id: urbanRulesTable.id });
+
+    const deletedUnits = await tx.delete(regulatoryUnitsTable)
+      .where(eq(regulatoryUnitsTable.townHallDocumentId, docId))
+      .returning({ id: regulatoryUnitsTable.id });
+
+    const deletedSections = await tx.delete(regulatoryZoneSectionsTable)
+      .where(eq(regulatoryZoneSectionsTable.townHallDocumentId, docId))
+      .returning({ id: regulatoryZoneSectionsTable.id });
+
+    const deletedProfiles = await tx.delete(documentKnowledgeProfilesTable)
+      .where(eq(documentKnowledgeProfilesTable.townHallDocumentId, docId))
+      .returning({ id: documentKnowledgeProfilesTable.id });
+
+    const deletedEmbeddings = baseDocIds.length > 0
+      ? await tx.delete(baseIAEmbeddingsTable)
+          .where(inArray(baseIAEmbeddingsTable.documentId, baseDocIds))
+          .returning({ id: baseIAEmbeddingsTable.id })
+      : [];
+
+    const deletedBaseDocs = baseDocIds.length > 0
+      ? await tx.delete(baseIADocumentsTable)
+          .where(inArray(baseIADocumentsTable.id, baseDocIds))
+          .returning({ id: baseIADocumentsTable.id })
+      : [];
+
+    return {
+      deletedProfiles: deletedProfiles.length,
+      deletedZoneSections: deletedSections.length,
+      deletedUnits: deletedUnits.length,
+      deletedRules: deletedRules.length,
+      deletedEmbeddings: deletedEmbeddings.length,
+      deletedBaseDocs: deletedBaseDocs.length,
+    };
+  });
+}
+
 function normalizeConfiguredZoneCode(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const normalized = raw.replace(/\s+/g, "").trim().toUpperCase();
@@ -2921,21 +3058,22 @@ router.delete("/documents", async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
+    const inseeCode = await resolveInseeCode(requestedCommune);
+    const municipalityAliases = Array.from(new Set([requestedCommune, inseeCode].filter((value): value is string => !!value)));
     const docsToDelete = await db.select({ id: townHallDocumentsTable.id, fileName: townHallDocumentsTable.fileName })
       .from(townHallDocumentsTable)
       .where(eq(sql`lower(${townHallDocumentsTable.commune})`, requestedLower));
 
     const docIds = docsToDelete.map(d => d.id);
 
+    const cleanupSummary = await purgeMunicipalityStructuredKnowledge({
+      requestedCommune,
+      municipalityAliases,
+    });
+
     if (docIds.length > 0) {
       await db.delete(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, docIds));
     }
-
-    // Remove Base IA docs + embeddings for that commune key.
-    await db.delete(baseIAEmbeddingsTable)
-      .where(eq(sql`lower(${baseIAEmbeddingsTable.metadata}->>'commune')`, requestedLower));
-    await db.delete(baseIADocumentsTable)
-      .where(eq(sql`lower(${baseIADocumentsTable.municipalityId})`, requestedLower));
 
     // Cleanup persisted files if present
     for (const file of docsToDelete) {
@@ -2945,7 +3083,12 @@ router.delete("/documents", async (req: AuthRequest, res) => {
       }
     }
 
-    return res.json({ success: true, deletedDocuments: docIds.length, commune: requestedCommune });
+    return res.json({
+      success: true,
+      deletedDocuments: docIds.length,
+      commune: requestedCommune,
+      cleanupSummary,
+    });
   } catch (err) {
     logger.error("[mairie/documents DELETE bulk]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
@@ -2971,6 +3114,7 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
+    const cleanupSummary = await purgeTownHallDocumentStructuredKnowledge(doc.id);
     await db.delete(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id));
 
     const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
@@ -2978,7 +3122,7 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
       try { fs.unlinkSync(filePath); } catch {}
     }
 
-    return res.json({ success: true });
+    return res.json({ success: true, cleanupSummary });
   } catch(err) {
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
