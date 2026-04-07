@@ -163,10 +163,21 @@ type BuildabilitySourceDetail = {
   confidenceScore: number | null;
 };
 
+type BuildabilitySourceMeta = {
+  structuredRuleSource: "published_calibration" | "structured_urban_rules" | "none";
+  totalStructuredRules: number;
+  publishedRuleCount: number;
+  coveredFieldCount: number;
+  publishedCoveredFieldCount: number;
+  explicitFieldCount: number;
+};
+
 type BuildabilitySourceDetails = Partial<Record<
   "footprint" | "remainingFootprint" | "height" | "setbackRoad" | "setbackBoundary" | "parking" | "greenSpace",
   BuildabilitySourceDetail | null
->>;
+>> & {
+  meta?: BuildabilitySourceMeta;
+};
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -250,6 +261,20 @@ function formatBuildabilitySourceDetail(sourceDetail?: BuildabilitySourceDetail 
 
   if (parts.length === 0) return null;
   return `Source : ${parts.join(" · ")}`;
+}
+
+function formatBuildabilityConfidenceHint(meta?: BuildabilitySourceMeta) {
+  if (!meta) return "Confiance calculée à partir des variables réglementaires retrouvées.";
+
+  if (meta.structuredRuleSource === "published_calibration") {
+    return `${meta.publishedCoveredFieldCount}/${meta.explicitFieldCount} variables clés sont couvertes par des règles publiées.`;
+  }
+
+  if (meta.structuredRuleSource === "structured_urban_rules") {
+    return `${meta.coveredFieldCount}/${meta.explicitFieldCount} variables clés sont couvertes par des règles structurées non publiées.`;
+  }
+
+  return "Le score repose surtout sur des fallbacks documentaires, sans règle calibrée publiée.";
 }
 
 function formatMeasuredValue(
@@ -625,6 +650,7 @@ export default function AnalysisDetailPage() {
       return {};
     }
   })();
+  const buildabilityConfidenceHint = formatBuildabilityConfidenceHint(buildabilitySourceDetails.meta);
 
   // Formatting polygon data for Leaflet — handles both Polygon and MultiPolygon
   function extractFirstRing(geom: { type?: string; coordinates?: unknown }): number[][] | null {
@@ -1587,6 +1613,9 @@ export default function AnalysisDetailPage() {
                       <span className={`text-2xl font-bold ${buildabilityConfidencePct != null && buildabilityConfidencePct > 70 ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {buildabilityConfidencePct != null ? `${buildabilityConfidencePct}%` : "-"}
                       </span>
+                      <p className="mt-1 max-w-[220px] text-[11px] leading-relaxed text-muted-foreground">
+                        {buildabilityConfidenceHint}
+                      </p>
                     </div>
                   </div>
                 </CardHeader>

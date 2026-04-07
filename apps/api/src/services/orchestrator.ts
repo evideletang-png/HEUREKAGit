@@ -57,6 +57,15 @@ type BuildabilitySourceDetail = {
   confidenceScore: number | null;
 };
 
+type BuildabilitySourceMeta = {
+  structuredRuleSource: "published_calibration" | "structured_urban_rules" | "none";
+  totalStructuredRules: number;
+  publishedRuleCount: number;
+  coveredFieldCount: number;
+  publishedCoveredFieldCount: number;
+  explicitFieldCount: number;
+};
+
 type BuildabilitySourceDetails = {
   footprint: BuildabilitySourceDetail | null;
   remainingFootprint: BuildabilitySourceDetail | null;
@@ -65,6 +74,7 @@ type BuildabilitySourceDetails = {
   setbackBoundary: BuildabilitySourceDetail | null;
   parking: BuildabilitySourceDetail | null;
   greenSpace: BuildabilitySourceDetail | null;
+  meta: BuildabilitySourceMeta;
 };
 
 // ─── Geocoding cache helpers ────────────────────────────────────────────────
@@ -88,7 +98,10 @@ function extractCommuneNameFromAddress(address: string | null | undefined): stri
   return "";
 }
 
-async function buildBuildabilitySourceDetails(rules: StructuredUrbanRuleSource[]): Promise<BuildabilitySourceDetails> {
+async function buildBuildabilitySourceDetails(
+  rules: StructuredUrbanRuleSource[],
+  source: "published_calibration" | "structured_urban_rules" | "none",
+): Promise<BuildabilitySourceDetails> {
   const baseIds = Array.from(new Set(
     rules
       .filter((rule) => rule?.sourceDocumentKind === "base_ia_document" && typeof rule?.sourceDocumentId === "string")
@@ -147,8 +160,7 @@ async function buildBuildabilitySourceDetails(rules: StructuredUrbanRuleSource[]
 
   const footprintRule = pickRule("footprint") ?? pickRule("green_space");
   const boundaryRule = pickRule("setback_side") ?? pickRule("setback_rear");
-
-  return {
+  const details = {
     footprint: toDetail("footprint", footprintRule),
     remainingFootprint: toDetail("remainingFootprint", footprintRule),
     height: toDetail("height", pickRule("height")),
@@ -156,6 +168,28 @@ async function buildBuildabilitySourceDetails(rules: StructuredUrbanRuleSource[]
     setbackBoundary: toDetail("setbackBoundary", boundaryRule),
     parking: toDetail("parking", pickRule("parking")),
     greenSpace: toDetail("greenSpace", pickRule("green_space")),
+  };
+  const explicitFields = [
+    details.footprint,
+    details.height,
+    details.setbackRoad,
+    details.setbackBoundary,
+    details.parking,
+    details.greenSpace,
+  ];
+  const coveredFieldCount = explicitFields.filter(Boolean).length;
+  const publishedCoveredFieldCount = explicitFields.filter((detail) => detail?.reviewStatus === "published").length;
+
+  return {
+    ...details,
+    meta: {
+      structuredRuleSource: source,
+      totalStructuredRules: rules.length,
+      publishedRuleCount: rules.filter((rule) => rule.reviewStatus === "published").length,
+      coveredFieldCount,
+      publishedCoveredFieldCount,
+      explicitFieldCount: explicitFields.length,
+    },
   };
 }
 
@@ -973,7 +1007,7 @@ export async function orchestrateDossierAnalysis(
         ...(calculations.blocking_constraints ?? []),
         ...(calculations.uncertainties ?? []),
       ];
-      const sourceDetails = await buildBuildabilitySourceDetails(structuredUrbanRules);
+      const sourceDetails = await buildBuildabilitySourceDetails(structuredUrbanRules, structuredRuleLoad.source);
       const explicitSignals = [
         maxFootprint != null || normalizedParams.green_space_ratio?.[0] != null,
         maxHeight != null,
@@ -982,7 +1016,18 @@ export async function orchestrateDossierAnalysis(
         parkingReq != null,
         greenSpaceReq != null,
       ];
-      const computedConfidenceScore = explicitSignals.filter(Boolean).length / explicitSignals.length;
+      const coverageScore = explicitSignals.filter(Boolean).length / explicitSignals.length;
+      const provenanceScore = structuredRuleLoad.source === "published_calibration"
+        ? 1
+        : structuredRuleLoad.source === "structured_urban_rules"
+          ? 0.55
+          : 0.25;
+      const publishedCoverageScore = sourceDetails.meta.explicitFieldCount > 0
+        ? sourceDetails.meta.publishedCoveredFieldCount / sourceDetails.meta.explicitFieldCount
+        : 0;
+      const computedConfidenceScore = structuredRuleLoad.source === "published_calibration"
+        ? Math.round(((coverageScore * 0.7) + (publishedCoverageScore * 0.3)) * 100) / 100
+        : Math.round(((coverageScore * 0.7) + (provenanceScore * 0.3)) * 100) / 100;
 
       const buildabilityData = {
         analysisId,
@@ -995,7 +1040,7 @@ export async function orchestrateDossierAnalysis(
         greenSpaceRequirement: greenSpaceReq ? String(greenSpaceReq) : null,
         assumptionsJson: JSON.stringify(assumptions),
         sourceDetailsJson: JSON.stringify(sourceDetails),
-        confidenceScore: calculations.confidence_score ?? Math.round(computedConfidenceScore * 100) / 100,
+        confidenceScore: computedConfidenceScore,
         resultSummary: calculations.theoretical_potential_synthesis
           ?? `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m`,
       };
