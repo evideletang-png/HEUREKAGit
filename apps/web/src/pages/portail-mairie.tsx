@@ -115,6 +115,10 @@ type PluRuleReview = {
   reviewedAt: string | null;
   startPage: number | null;
   endPage: number | null;
+  valueHint?: string | null;
+  requiresManualValidation?: boolean;
+  conflictFlag?: boolean;
+  sourceExcerpt?: string | null;
   document: {
     id: string;
     title: string;
@@ -135,6 +139,50 @@ type PluRuleReviewData = {
     readyStatus: "missing" | "ready" | "partial" | "needs_review";
   };
   rules: PluRuleReview[];
+};
+
+type PluKnowledgeSummary = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    documentCount: number;
+    structuredDocumentCount: number;
+    zoneCount: number;
+    ruleCount: number;
+    conflictCount: number;
+    manualReviewCount: number;
+  };
+  documents: Array<{
+    id: string;
+    title: string;
+    fileName: string | null;
+    documentType: string | null;
+    opposable: boolean;
+    availabilityStatus: string;
+    availabilityMessage: string;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    profile: {
+      id: string;
+      status: string;
+      extractionMode: string;
+      extractionReliability: number | null;
+      manualReviewRequired: boolean;
+      detectedZonesCount: number;
+      structuredTopicsCount: number;
+    } | null;
+    extractedRuleCount: number;
+  }>;
+  conflicts: Array<{
+    id: string;
+    zoneCode: string | null;
+    ruleFamily: string;
+    ruleTopic: string;
+    conflictType: string;
+    conflictSummary: string;
+    status: string;
+    requiresManualValidation: boolean;
+  }>;
 };
 
 function getTextQualityBadgeMeta(label?: string) {
@@ -1109,13 +1157,21 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     enabled: currentCommune !== "all",
   });
 
+  const { data: knowledgeSummaryData, isLoading: loadingKnowledgeSummary } = useQuery<PluKnowledgeSummary>({
+    queryKey: ["mairie-plu-knowledge-summary", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-knowledge-summary?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
   const scheduleDocumentsRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+    queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary"] });
     queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
     queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews"] });
     [1500, 4000, 9000].forEach((delayMs) => {
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+        queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary"] });
         queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
         queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews"] });
       }, delayMs);
@@ -1319,6 +1375,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
       toast({ title: "Revue mise à jour" });
     },
     onError: (err: any) => {
@@ -1336,6 +1393,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
       toast({ title: "Règle mise à jour" });
     },
     onError: (err: any) => {
@@ -1351,6 +1409,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
       toast({ title: "Supprimé", description: "Document retiré de la base." });
@@ -1367,6 +1426,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
       queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
       toast({ title: "Base IA nettoyée", description: `${data.deletedDocuments || 0} document(s) supprimé(s).` });
@@ -1403,6 +1463,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
   const totalDocuments = pluDocsData?.documents?.length ?? 0;
   const allDocs = pluDocsData?.documents ?? [];
+  const knowledgeConflicts = knowledgeSummaryData?.conflicts ?? [];
   const zoneReviewSections = zoneReviewsData?.sections ?? [];
   const zoneReadyMeta = getZoneReadyMeta(zoneReviewsData?.summary?.readyStatus);
   const ruleReviewItems = ruleReviewsData?.rules ?? [];
@@ -1549,6 +1610,139 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </Button>
         </CardContent>
       </Card>
+
+      {currentCommune !== "all" && (
+        <Card className="border-primary/15 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-primary" />
+                  Santé documentaire réglementaire
+                </CardTitle>
+                <CardDescription>
+                  Cette vue montre ce que le moteur a réellement structuré : documents profilés, zones détectées, règles canoniques et conflits à arbitrer.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingKnowledgeSummary ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Lecture de la base réglementaire structurée...
+              </div>
+            ) : knowledgeSummaryData ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Documents</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.documentCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Profils structurés</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.structuredDocumentCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.zoneCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles canoniques</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.ruleCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Conflits</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.conflictCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Revue manuelle</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.manualReviewCount}</div>
+                  </div>
+                </div>
+
+                {knowledgeSummaryData.documents.length > 0 && (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {knowledgeSummaryData.documents.slice(0, 4).map((doc) => (
+                      <div key={doc.id} className="rounded-xl border bg-background p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                            {doc.documentType || "Document"}
+                          </Badge>
+                          {doc.textQualityLabel && (
+                            <Badge variant="outline" className={getTextQualityBadgeMeta(doc.textQualityLabel).className}>
+                              {getTextQualityBadgeMeta(doc.textQualityLabel).text}
+                            </Badge>
+                          )}
+                          {doc.profile?.manualReviewRequired && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                              Revue utile
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="mt-3 text-sm font-semibold">{doc.title}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{doc.availabilityMessage}</p>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                          <div className="rounded-lg bg-muted/20 p-2">
+                            <div className="uppercase tracking-wide text-muted-foreground">Zones</div>
+                            <div className="mt-1 font-semibold">{doc.profile?.detectedZonesCount ?? 0}</div>
+                          </div>
+                          <div className="rounded-lg bg-muted/20 p-2">
+                            <div className="uppercase tracking-wide text-muted-foreground">Thèmes</div>
+                            <div className="mt-1 font-semibold">{doc.profile?.structuredTopicsCount ?? 0}</div>
+                          </div>
+                          <div className="rounded-lg bg-muted/20 p-2">
+                            <div className="uppercase tracking-wide text-muted-foreground">Règles</div>
+                            <div className="mt-1 font-semibold">{doc.extractedRuleCount}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="rounded-xl border bg-muted/10 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Conflits documentaires détectés</p>
+                      <p className="text-xs text-muted-foreground">
+                        Le moteur ne tranche pas silencieusement : si deux règles se contredisent, elles remontent ici pour arbitrage.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={knowledgeConflicts.length > 0 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}>
+                      {knowledgeConflicts.length > 0 ? `${knowledgeConflicts.length} conflit(s)` : "Aucun conflit ouvert"}
+                    </Badge>
+                  </div>
+
+                  {knowledgeConflicts.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {knowledgeConflicts.map((conflict) => (
+                        <div key={conflict.id} className="rounded-lg border bg-background px-3 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {conflict.zoneCode && (
+                              <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                                Zone {conflict.zoneCode}
+                              </Badge>
+                            )}
+                            <Badge variant="secondary" className="text-[10px]">
+                              {conflict.ruleTopic}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-sm">{conflict.conflictSummary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                Sélectionne une commune pour lire la base documentaire structurée.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {currentCommune !== "all" && (
         <Card className="border-primary/15 shadow-sm">
@@ -1797,12 +1991,32 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                 <Badge variant="outline">
                                   Confiance {rule.confidence || "low"}
                                 </Badge>
+                                {rule.valueHint && (
+                                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                    Valeur {rule.valueHint}
+                                  </Badge>
+                                )}
+                                {rule.conflictFlag && (
+                                  <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">
+                                    Conflit détecté
+                                  </Badge>
+                                )}
+                                {rule.requiresManualValidation && (
+                                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                                    Validation recommandée
+                                  </Badge>
+                                )}
                                 {rule.document?.textQualityLabel && (
                                   <Badge variant="outline" className={getTextQualityBadgeMeta(rule.document.textQualityLabel).className}>
                                     {getTextQualityBadgeMeta(rule.document.textQualityLabel).text}
                                   </Badge>
                                 )}
                               </div>
+                              {rule.sourceExcerpt && rule.sourceExcerpt !== rule.sourceText && (
+                                <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+                                  Extrait source : {rule.sourceExcerpt}
+                                </p>
+                              )}
                               {rule.reviewNotes && (
                                 <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
                                   {rule.reviewNotes}

@@ -19,6 +19,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { createHash } from "crypto";
 import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
 import { loadRegulatoryUnits, buildParsedRulesFromRegulatoryUnits, buildArticlesFromRegulatoryUnits, buildDigestFromRegulatoryUnits } from "./regulatoryUnitService.js";
+import { buildArticlesFromUrbanRules, buildParsedRulesFromUrbanRules, loadUrbanRules } from "./urbanRuleExtractionService.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -698,19 +699,30 @@ export async function orchestrateDossierAnalysis(
   const annexRegulatoryContext = annexRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
   const regulatoryContext = [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n--- ANNEXES OPPOSABLES ---\n\n");
   const supplementaryPlanningContext = supplementaryPlanningDocs.map((d) => d.rawText || "").join("\n\n");
-  const canonicalUnits = await loadRegulatoryUnits({
+  const structuredUrbanRules = await loadUrbanRules({
+    municipalityId: regulatoryCommune,
+    communeName,
+    zoneCode: finalZone,
+    minAuthority: 7,
+  });
+  const canonicalUnits = structuredUrbanRules.length === 0 ? await loadRegulatoryUnits({
     municipalityId: regulatoryCommune,
     communeName,
     zoneCode: finalZone,
     minAuthority: 7,
     documentTypes: ["plu_reglement", "plu_annexe"],
-  });
+  }) : [];
 
   let parsedRules: any[] = [];
-  const canonicalArticles = canonicalUnits.length > 0 ? buildArticlesFromRegulatoryUnits(canonicalUnits) : [];
+  const canonicalArticles = structuredUrbanRules.length > 0
+    ? buildArticlesFromUrbanRules(structuredUrbanRules)
+    : (canonicalUnits.length > 0 ? buildArticlesFromRegulatoryUnits(canonicalUnits) : []);
   const canonicalDigest = canonicalUnits.length > 0 ? buildDigestFromRegulatoryUnits(canonicalUnits, finalZone) : null;
 
-  if (canonicalUnits.length > 0) {
+  if (structuredUrbanRules.length > 0) {
+    parsedRules = buildParsedRulesFromUrbanRules(structuredUrbanRules);
+    logger.info(`[Orchestrator] Using ${structuredUrbanRules.length} structured urban rules for zone ${finalZone}.`);
+  } else if (canonicalUnits.length > 0) {
     parsedRules = buildParsedRulesFromRegulatoryUnits(canonicalUnits);
     logger.info(`[Orchestrator] Using ${canonicalUnits.length} canonical regulatory units for zone ${finalZone}.`);
   } else {

@@ -174,6 +174,28 @@ function confidenceRank(level: string | null | undefined) {
   }
 }
 
+function formatUrbanRuleValueHint(rule: {
+  ruleValueType?: string | null;
+  ruleValueMin?: number | null;
+  ruleValueMax?: number | null;
+  ruleValueExact?: number | null;
+  ruleUnit?: string | null;
+}) {
+  const unit = rule.ruleUnit ? ` ${rule.ruleUnit}` : "";
+  switch (rule.ruleValueType) {
+    case "exact":
+      return rule.ruleValueExact != null ? `${rule.ruleValueExact}${unit}` : null;
+    case "min":
+      return rule.ruleValueMin != null ? `>= ${rule.ruleValueMin}${unit}` : null;
+    case "max":
+      return rule.ruleValueMax != null ? `<= ${rule.ruleValueMax}${unit}` : null;
+    case "range":
+      return rule.ruleValueMin != null && rule.ruleValueMax != null ? `${rule.ruleValueMin}${unit} à ${rule.ruleValueMax}${unit}` : null;
+    default:
+      return null;
+  }
+}
+
 function mapCanonicalTypeToBaseIAType(canonicalType: string) {
   if (canonicalType === "plu_reglement" || canonicalType === "plu_annexe") return "plu";
   if (canonicalType === "oap") return "oap";
@@ -436,6 +458,23 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
           extractedRuleCount: rulesByDocumentId.get(doc.id) || 0,
         };
       }),
+      conflicts: conflicts
+        .sort((left, right) => {
+          const leftScore = left.requiresManualValidation ? 1 : 0;
+          const rightScore = right.requiresManualValidation ? 1 : 0;
+          return rightScore - leftScore;
+        })
+        .slice(0, 8)
+        .map((conflict) => ({
+          id: conflict.id,
+          zoneCode: conflict.zoneCode,
+          ruleFamily: conflict.ruleFamily,
+          ruleTopic: conflict.ruleTopic,
+          conflictType: conflict.conflictType,
+          conflictSummary: conflict.conflictSummary,
+          status: conflict.status,
+          requiresManualValidation: conflict.requiresManualValidation,
+        })),
     });
   } catch (err) {
     logger.error("[mairie/plu-knowledge-summary GET]", err);
@@ -1978,21 +2017,22 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
 
     const docById = new Map(docs.map((doc) => [doc.id, doc]));
 
-    let units = await db.select().from(regulatoryUnitsTable)
+    let rules = await db.select().from(urbanRulesTable)
       .where(
         and(
-          inArray(regulatoryUnitsTable.municipalityId, municipalityAliases),
-          eq(regulatoryUnitsTable.isOpposable, true),
-          inArray(regulatoryUnitsTable.documentType, ["plu_reglement", "plu_annexe", "oap"])
+          inArray(urbanRulesTable.municipalityId, municipalityAliases),
+          eq(urbanRulesTable.isOpposable, true),
+          ne(urbanRulesTable.reviewStatus, "rejected")
         )
       )
       .orderBy(
-        desc(regulatoryUnitsTable.reviewedAt),
-        desc(regulatoryUnitsTable.sourceAuthority),
-        desc(regulatoryUnitsTable.updatedAt)
+        desc(urbanRulesTable.rulePriority),
+        desc(urbanRulesTable.sourceAuthority),
+        desc(urbanRulesTable.confidenceScore),
+        desc(urbanRulesTable.updatedAt)
       );
 
-    if (units.length === 0) {
+    if (rules.length === 0) {
       const municipalityKey = inseeCode || targetCommune;
       for (const doc of docs) {
         const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
@@ -2024,66 +2064,67 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
         });
       }
 
-      units = await db.select().from(regulatoryUnitsTable)
+      rules = await db.select().from(urbanRulesTable)
         .where(
           and(
-            inArray(regulatoryUnitsTable.municipalityId, municipalityAliases),
-            eq(regulatoryUnitsTable.isOpposable, true),
-            inArray(regulatoryUnitsTable.documentType, ["plu_reglement", "plu_annexe", "oap"])
+            inArray(urbanRulesTable.municipalityId, municipalityAliases),
+            eq(urbanRulesTable.isOpposable, true),
+            ne(urbanRulesTable.reviewStatus, "rejected")
           )
         )
         .orderBy(
-          desc(regulatoryUnitsTable.reviewedAt),
-          desc(regulatoryUnitsTable.sourceAuthority),
-          desc(regulatoryUnitsTable.updatedAt)
+          desc(urbanRulesTable.rulePriority),
+          desc(urbanRulesTable.sourceAuthority),
+          desc(urbanRulesTable.confidenceScore),
+          desc(urbanRulesTable.updatedAt)
         );
     }
 
-    const grouped = new Map<string, typeof units[number]>();
-    for (const unit of units) {
-      const themeMeta = inferCriticalRuleTheme(unit.theme, unit.articleNumber, unit.sourceText);
-      if (themeMeta.key === "autres") continue;
-      const groupKey = `${unit.zoneCode || "GLOBAL"}|${themeMeta.key}`;
+    const grouped = new Map<string, typeof rules[number]>();
+    for (const rule of rules) {
+      const groupKey = `${rule.zoneCode || "GLOBAL"}|${rule.ruleFamily}|${rule.ruleTopic}`;
       const existing = grouped.get(groupKey);
       if (!existing) {
-        grouped.set(groupKey, unit);
+        grouped.set(groupKey, rule);
         continue;
       }
       const currentScore =
-        (unit.reviewStatus === "validated" ? 100 : unit.reviewStatus === "to_review" ? 50 : unit.reviewStatus === "rejected" ? -10 : 0) +
-        unit.sourceAuthority * 10 +
-        confidenceRank(unit.confidence);
+        (rule.reviewStatus === "validated" ? 100 : rule.reviewStatus === "to_review" ? 50 : 0) +
+        rule.rulePriority +
+        rule.sourceAuthority * 10 +
+        Math.round((rule.confidenceScore ?? 0) * 10);
       const existingScore =
         (existing.reviewStatus === "validated" ? 100 : existing.reviewStatus === "to_review" ? 50 : existing.reviewStatus === "rejected" ? -10 : 0) +
+        existing.rulePriority +
         existing.sourceAuthority * 10 +
-        confidenceRank(existing.confidence);
+        Math.round((existing.confidenceScore ?? 0) * 10);
       if (currentScore > existingScore) {
-        grouped.set(groupKey, unit);
+        grouped.set(groupKey, rule);
       }
     }
 
     const reviewedRules = Array.from(grouped.values())
-      .map((unit) => {
-        const linkedDoc = unit.townHallDocumentId ? docById.get(unit.townHallDocumentId) : null;
+      .map((rule) => {
+        const linkedDoc = rule.townHallDocumentId ? docById.get(rule.townHallDocumentId) : null;
         const quality = linkedDoc ? getTownHallDocumentAvailability(linkedDoc) : null;
-        const themeMeta = inferCriticalRuleTheme(unit.theme, unit.articleNumber, unit.sourceText);
-        const parsedValues = typeof unit.parsedValues === "object" && unit.parsedValues ? unit.parsedValues as Record<string, any> : {};
-        const startPage = typeof parsedValues.start_page === "number" ? parsedValues.start_page : null;
-        const endPage = typeof parsedValues.end_page === "number" ? parsedValues.end_page : null;
         return {
-          id: unit.id,
-          zoneCode: unit.zoneCode,
-          themeKey: themeMeta.key,
-          themeLabel: themeMeta.label,
-          title: unit.title,
-          articleNumber: unit.articleNumber,
-          sourceText: unit.sourceText.slice(0, 900),
-          confidence: unit.confidence,
-          reviewStatus: unit.reviewStatus,
-          reviewNotes: unit.reviewNotes,
-          reviewedAt: unit.reviewedAt,
-          startPage,
-          endPage,
+          id: rule.id,
+          zoneCode: rule.zoneCode,
+          themeKey: rule.ruleTopic,
+          themeLabel: rule.ruleLabel,
+          title: rule.ruleLabel,
+          articleNumber: rule.sourceArticle ? Number.parseInt(rule.sourceArticle.replace(/\D+/g, ""), 10) || null : null,
+          sourceText: rule.ruleTextRaw.slice(0, 900),
+          confidence: (rule.confidenceScore ?? 0) >= 0.85 ? "high" : (rule.confidenceScore ?? 0) >= 0.6 ? "medium" : "low",
+          reviewStatus: rule.reviewStatus,
+          reviewNotes: rule.validationNote,
+          reviewedAt: rule.updatedAt,
+          startPage: rule.sourcePage,
+          endPage: rule.sourcePage,
+          valueHint: formatUrbanRuleValueHint(rule),
+          requiresManualValidation: rule.requiresManualValidation,
+          conflictFlag: rule.ruleConflictFlag,
+          sourceExcerpt: rule.sourceExcerpt,
           document: linkedDoc ? {
             id: linkedDoc.id,
             title: linkedDoc.title,
@@ -2126,18 +2167,18 @@ router.post("/plu-rule-reviews/:id/review", async (req: AuthRequest, res) => {
     const id = req.params.id as string;
     const { reviewStatus, reviewNotes } = req.body || {};
 
-    const [unit] = await db.select({
-      id: regulatoryUnitsTable.id,
-      municipalityId: regulatoryUnitsTable.municipalityId,
-    }).from(regulatoryUnitsTable)
-      .where(eq(regulatoryUnitsTable.id, id))
+    const [rule] = await db.select({
+      id: urbanRulesTable.id,
+      municipalityId: urbanRulesTable.municipalityId,
+    }).from(urbanRulesTable)
+      .where(eq(urbanRulesTable.id, id))
       .limit(1);
 
-    if (!unit) {
+    if (!rule) {
       return res.status(404).json({ error: "RULE_NOT_FOUND" });
     }
 
-    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || unit.municipalityId);
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || rule.municipalityId);
     if (!access.ok) {
       return res.status(access.status).json(access.error);
     }
@@ -2145,19 +2186,64 @@ router.post("/plu-rule-reviews/:id/review", async (req: AuthRequest, res) => {
     const allowedStatuses = new Set(["auto", "validated", "to_review", "rejected"]);
     const nextStatus = allowedStatuses.has(String(reviewStatus || "")) ? String(reviewStatus) : "validated";
 
-    await db.update(regulatoryUnitsTable)
+    await db.update(urbanRulesTable)
       .set({
         reviewStatus: nextStatus,
-        reviewNotes: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
-        reviewedBy: req.user!.userId,
-        reviewedAt: new Date(),
+        validationNote: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
+        validatedByUser: req.user!.userId,
         updatedAt: new Date(),
       })
-      .where(eq(regulatoryUnitsTable.id, id));
+      .where(eq(urbanRulesTable.id, id));
 
     return res.json({ success: true });
   } catch (err) {
     logger.error("[mairie/plu-rule-reviews POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/plu-rule-conflicts", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const targetCommune = access.targetCommune;
+    const inseeCode = await resolveInseeCode(targetCommune);
+    const municipalityAliases = Array.from(new Set([targetCommune, inseeCode].filter((value): value is string => !!value)));
+
+    const conflicts = await db.select().from(urbanRuleConflictsTable)
+      .where(
+        and(
+          inArray(urbanRuleConflictsTable.municipalityId, municipalityAliases),
+          ne(urbanRuleConflictsTable.status, "resolved"),
+        )
+      )
+      .orderBy(desc(urbanRuleConflictsTable.updatedAt));
+
+    return res.json({
+      commune: targetCommune,
+      municipalityId: inseeCode || targetCommune,
+      summary: {
+        conflictCount: conflicts.length,
+        openCount: conflicts.filter((conflict) => conflict.status === "open").length,
+        manualReviewCount: conflicts.filter((conflict) => conflict.requiresManualValidation).length,
+      },
+      conflicts: conflicts.map((conflict) => ({
+        id: conflict.id,
+        zoneCode: conflict.zoneCode,
+        ruleFamily: conflict.ruleFamily,
+        ruleTopic: conflict.ruleTopic,
+        conflictType: conflict.conflictType,
+        conflictSummary: conflict.conflictSummary,
+        requiresManualValidation: conflict.requiresManualValidation,
+        status: conflict.status,
+        resolutionNote: conflict.resolutionNote,
+      })),
+    });
+  } catch (err) {
+    logger.error("[mairie/plu-rule-conflicts GET]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });

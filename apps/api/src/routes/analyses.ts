@@ -27,6 +27,7 @@ import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { getZoningByCoords } from "../services/planning.js";
 import { extractDeterministicRegulatoryRules } from "../services/pluAnalysis.js";
 import { loadRegulatoryUnits, buildArticlesFromRegulatoryUnits } from "../services/regulatoryUnitService.js";
+import { buildArticlesFromUrbanRules, loadUrbanRules } from "../services/urbanRuleExtractionService.js";
 
 const router: IRouter = Router();
 
@@ -387,7 +388,15 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
         : null;
       const municipalityId = geoContext?.source_lock?.inseeCode || analysis.city || null;
       const communeName = geoContext?.source_lock?.city || analysis.city || null;
-      const canonicalUnits = municipalityId
+      const structuredUrbanRules = municipalityId
+        ? await loadUrbanRules({
+            municipalityId,
+            communeName,
+            zoneCode: zoneData.zoneCode || analysis.zoneCode || undefined,
+            minAuthority: 7,
+          })
+        : [];
+      const canonicalUnits = municipalityId && structuredUrbanRules.length === 0
         ? await loadRegulatoryUnits({
             municipalityId,
             communeName,
@@ -396,8 +405,11 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
           })
         : [];
 
-      if (canonicalUnits.length > 0) {
-        articles = buildArticlesFromRegulatoryUnits(canonicalUnits).map((article, index) => ({
+      if (structuredUrbanRules.length > 0 || canonicalUnits.length > 0) {
+        const sourceArticles = structuredUrbanRules.length > 0
+          ? buildArticlesFromUrbanRules(structuredUrbanRules)
+          : buildArticlesFromRegulatoryUnits(canonicalUnits);
+        articles = sourceArticles.map((article, index) => ({
           id: `canonical-${index}`,
           zoneAnalysisId: zoneData.id,
           articleNumber: article.articleNumber,
