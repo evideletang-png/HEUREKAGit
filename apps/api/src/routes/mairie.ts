@@ -2690,6 +2690,115 @@ router.patch("/documents/:id/metadata", async (req: AuthRequest, res) => {
   }
 });
 
+router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+
+    const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
+      .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
+    const role = currentUser[0]?.role;
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+
+    const [doc] = await db.select({
+      id: townHallDocumentsTable.id,
+      commune: townHallDocumentsTable.commune,
+      title: townHallDocumentsTable.title,
+      rawText: townHallDocumentsTable.rawText,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+      documentType: townHallDocumentsTable.documentType,
+      isOpposable: townHallDocumentsTable.isOpposable,
+    }).from(townHallDocumentsTable)
+      .where(eq(townHallDocumentsTable.id, id))
+      .limit(1);
+
+    if (!doc) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+    if (!canAccessCommune(role, assignedCommunes, doc.commune)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
+    }
+
+    const rawText = doc.rawText || "";
+    const sourceName = doc.title || "Document réglementaire";
+    const communeName = doc.commune || "";
+
+    if (!communeName) {
+      return res.status(400).json({
+        error: "DOCUMENT_COMMUNE_MISSING",
+        message: "La commune du document est manquante. Réassocie le document à une commune avant re-segmentation.",
+      });
+    }
+
+    if (!hasUsableTownHallText(rawText)) {
+      return res.status(400).json({
+        error: "TEXT_NOT_USABLE",
+        message: "Le document ne contient pas assez de texte exploitable pour une re-segmentation automatique.",
+      });
+    }
+
+    const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
+    if (!isRegulatoryLikeDocument(doc.documentType, doc.category, doc.subCategory) || canonicalType === "other") {
+      return res.status(400).json({
+        error: "DOCUMENT_NOT_REGULATORY",
+        message: "Ce document n'est pas de type réglementaire exploitable pour une re-segmentation PLU.",
+      });
+    }
+
+    const municipalityId = (await resolveInseeCode(communeName)) || communeName;
+    const sourceAuthority = authorityForCanonicalType(canonicalType);
+
+    await persistRegulatoryZoneSectionsForDocument({
+      townHallDocumentId: doc.id,
+      municipalityId,
+      documentType: canonicalType,
+      sourceAuthority,
+      isOpposable: !!doc.isOpposable,
+      rawText,
+    });
+
+    await persistRegulatoryUnitsForDocument({
+      townHallDocumentId: doc.id,
+      municipalityId,
+      documentType: canonicalType,
+      sourceAuthority,
+      isOpposable: !!doc.isOpposable,
+      rawText,
+    });
+
+    await persistStructuredKnowledgeForDocument({
+      townHallDocumentId: doc.id,
+      municipalityId,
+      documentType: canonicalType,
+      documentSubtype: doc.documentType || null,
+      sourceName,
+      sourceAuthority,
+      opposable: !!doc.isOpposable,
+      rawText,
+      rawClassification: {
+        category: doc.category,
+        subCategory: doc.subCategory,
+        documentType: doc.documentType,
+        source: "manual_resegment",
+      },
+    });
+
+    const [sectionCount, ruleCount] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(regulatoryZoneSectionsTable)
+        .where(eq(regulatoryZoneSectionsTable.townHallDocumentId, doc.id)),
+      db.select({ count: sql<number>`count(*)::int` }).from(urbanRulesTable)
+        .where(eq(urbanRulesTable.townHallDocumentId, doc.id)),
+    ]);
+
+    return res.json({
+      success: true,
+      sectionCount: Number(sectionCount[0]?.count || 0),
+      ruleCount: Number(ruleCount[0]?.count || 0),
+    });
+  } catch (err) {
+    logger.error("[mairie/documents resegment]", err);
+    return res.status(500).json({ error: "RESEGMENT_FAILED" });
+  }
+});
+
 // ─── PROMPTS PERSONNALISES ────────────────────────────────────────────────────
 
 router.get("/prompts/:commune", async (req: AuthRequest, res) => {

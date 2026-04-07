@@ -1400,6 +1400,27 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     }
   });
 
+  const resegmentDocumentMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiFetch(`/api/mairie/documents/${id}/resegment?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "POST",
+      });
+    },
+    onSuccess: (result: any) => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      toast({
+        title: "Document re-segmenté",
+        description: `${result?.sectionCount ?? 0} zone(s) et ${result?.ruleCount ?? 0} règle(s) ont été recalculées.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de re-segmenter ce document.", variant: "destructive" });
+    }
+  });
+
   const reviewRuleMutation = useMutation({
     mutationFn: async ({ id, reviewStatus }: { id: string; reviewStatus: "validated" | "to_review" | "rejected" }) => {
       return apiFetch(`/api/mairie/plu-rule-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
@@ -1866,14 +1887,30 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
                             <div className="flex flex-wrap gap-2 lg:justify-end">
                               {linkedDoc && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setSelectedDoc(linkedDoc)}
-                                >
-                                  <Eye className="mr-1.5 h-3.5 w-3.5" />
-                                  Ouvrir
-                                </Button>
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setSelectedDoc(linkedDoc)}
+                                  >
+                                    <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                    Ouvrir
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="border-primary/20 text-primary hover:bg-primary/5"
+                                    disabled={resegmentDocumentMutation.isPending}
+                                    onClick={() => resegmentDocumentMutation.mutate(linkedDoc.id)}
+                                  >
+                                    {resegmentDocumentMutation.isPending ? (
+                                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                                    )}
+                                    Re-segmenter
+                                  </Button>
+                                </>
                               )}
                               <Button
                                 variant="outline"
@@ -2356,6 +2393,20 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   disabled={selectedDoc?.hasStoredFile === false}
                 >
                   <Zap className="w-3.5 h-3.5" /> Ouvrir plein écran
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-2"
+                  onClick={() => selectedDoc?.id && resegmentDocumentMutation.mutate(selectedDoc.id)}
+                  disabled={!selectedDoc?.id || resegmentDocumentMutation.isPending}
+                >
+                  {resegmentDocumentMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                  Re-segmenter
                 </Button>
               </div>
             </div>
