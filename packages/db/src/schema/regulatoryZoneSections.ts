@@ -19,6 +19,7 @@ export const regulatoryZoneSectionsTable = pgTable("regulatory_zone_sections", {
   endPage: integer("end_page"),
   isSubZone: boolean("is_sub_zone").notNull().default(false),
   reviewStatus: text("review_status").notNull().default("auto"),
+  reviewedZoneCode: text("reviewed_zone_code"),
   reviewedStartPage: integer("reviewed_start_page"),
   reviewedEndPage: integer("reviewed_end_page"),
   reviewedParentZoneCode: text("reviewed_parent_zone_code"),

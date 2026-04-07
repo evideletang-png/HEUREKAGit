@@ -51,8 +51,9 @@ function normalizeSourceArticle(articleNumber: number | null) {
 function getSourcePageFromParsedValues(parsedValues: unknown): number | null {
   if (!parsedValues || typeof parsedValues !== "object") return null;
   const value = (parsedValues as Record<string, unknown>).start_page;
+  if (value == null || value === "") return null;
   const page = Number(value);
-  return Number.isFinite(page) ? page : null;
+  return Number.isFinite(page) && page > 0 ? page : null;
 }
 
 function getParentZoneFromParsedValues(parsedValues: unknown): string | null {

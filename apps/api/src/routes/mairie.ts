@@ -15,14 +15,14 @@ import {
   municipalitySettingsTable,
   dossierEventsTable,
   ruleArticlesTable,
-  zoneAnalysesTable,
-  regulatoryZoneSectionsTable
+  zoneAnalysesTable
 } from "@workspace/db";
 import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
 import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urbanRuleConflicts.js";
 import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
+import { regulatoryZoneSectionsTable } from "../../../../packages/db/src/schema/regulatoryZoneSections.js";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
@@ -117,6 +117,19 @@ function authorityForCanonicalType(canonicalType: string): number {
   if (canonicalType === "plu_annexe") return AUTHORITY_POLICY.ANNEX_TECHNICAL;
   if (canonicalType === "padd") return AUTHORITY_POLICY.ADMIN_GUIDE;
   return AUTHORITY_POLICY.UNKNOWN;
+}
+
+function normalizeConfiguredZoneCode(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const normalized = raw.replace(/\s+/g, "").trim().toUpperCase();
+  return /^[A-Z]{1,4}[A-Z0-9-]*$/.test(normalized) ? normalized : null;
+}
+
+function deriveParentZoneCode(zoneCode: string | null): string | null {
+  if (!zoneCode) return null;
+  const match = zoneCode.match(/^([A-Z]+)/);
+  const parent = match?.[1]?.toUpperCase() || null;
+  return parent && parent !== zoneCode ? parent : null;
 }
 
 function inferCanonicalDocumentType(documentType: string | null | undefined, category?: string | null, subCategory?: string | null) {
@@ -338,8 +351,9 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
     if (profiles.length === 0) {
       const municipalityKey = inseeCode || targetCommune;
       for (const doc of docs) {
-        const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
-        if (!isRegulatoryLikeDocument(doc.documentType, doc.category, doc.subCategory)) continue;
+        const classification = await maybeSyncTownHallDocumentClassification(doc);
+        const canonicalType = classification.canonicalType;
+        if (!classification.isRegulatory) continue;
         if (!hasUsableTownHallText(doc.rawText)) continue;
 
         await persistRegulatoryZoneSectionsForDocument({
@@ -364,15 +378,17 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
           townHallDocumentId: doc.id,
           municipalityId: municipalityKey,
           documentType: canonicalType,
-          documentSubtype: doc.documentType || null,
+          documentSubtype: classification.resolved.documentType || null,
           sourceName: doc.title,
           sourceAuthority: authorityForCanonicalType(canonicalType),
-          opposable: !!doc.isOpposable,
+          opposable: classification.isOpposable,
           rawText: doc.rawText,
           rawClassification: {
-            category: doc.category,
-            subCategory: doc.subCategory,
-            documentType: doc.documentType,
+            category: classification.resolved.category,
+            subCategory: classification.resolved.subCategory,
+            requestedDocumentType: doc.documentType,
+            resolvedDocumentType: classification.resolved.documentType,
+            autoCorrected: classification.autoCorrected,
             source: "knowledge_summary_backfill",
           },
         });
@@ -434,14 +450,21 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
       documents: docs.map((doc) => {
         const profile = profileByTownHallDocId.get(doc.id);
         const availability = getTownHallDocumentAvailability(doc);
+        const classification = resolveTownHallClassification({
+          rawText: doc.rawText || "",
+          fileName: doc.title || doc.fileName || "document",
+          category: doc.category,
+          subCategory: doc.subCategory,
+          documentType: doc.documentType,
+        });
         const zones = Array.isArray(profile?.detectedZones) ? profile.detectedZones : [];
         const topics = Array.isArray(profile?.structuredTopics) ? profile.structuredTopics : [];
         return {
           id: doc.id,
           title: doc.title,
           fileName: doc.fileName,
-          documentType: doc.documentType,
-          opposable: !!doc.isOpposable,
+          documentType: classification.resolved.documentType,
+          opposable: isCanonicalTypeOpposable(classification.canonicalType),
           availabilityStatus: availability.availabilityStatus,
           availabilityMessage: availability.availabilityMessage,
           textQualityLabel: availability.textQualityLabel,
@@ -1059,6 +1082,8 @@ interface SuggestedClassification {
   subCategory: string;
   documentType: string;
   tags: string[];
+  confidence: number;
+  reason?: string;
 }
 
 interface TownHallExtractionContext {
@@ -1100,55 +1125,215 @@ function normalizeTownHallClassification(input: {
   };
 }
 
+function countPatternMatches(content: string, pattern: RegExp) {
+  const matches = content.match(pattern);
+  return matches ? matches.length : 0;
+}
+
 function autoSuggestClassification(text: string, fileName: string): SuggestedClassification {
-  const content = (text + " " + fileName).toLowerCase();
-  
-  if (content.includes("plu") || content.includes("règlement") || content.includes("zonage")) {
-    let docType = "Written regulation";
-    if (content.includes("plan") || content.includes("graphique") || content.includes("carte")) docType = "Zoning map";
-    if (content.includes("padd")) docType = "PADD";
-    if (content.includes("oap")) docType = "OAP";
-    
-    return {
+  const content = `${text || ""}\n${fileName || ""}`.toLowerCase();
+  const firstWindow = content.slice(0, 20000);
+
+  const writtenRegulationScore =
+    countPatternMatches(firstWindow, /r[ée]glement\s+de\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
+    countPatternMatches(firstWindow, /dispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
+    countPatternMatches(firstWindow, /article\s+(?:1|2|3|4|6|7|8|9|10|11|12|13|14)\b/gi) * 2 +
+    countPatternMatches(firstWindow, /implantation\s+par\s+rapport\s+aux\s+voies/gi) * 3 +
+    countPatternMatches(firstWindow, /emprise\s+au\s+sol/gi) * 3 +
+    countPatternMatches(firstWindow, /hauteur\s+(?:des\s+constructions|maximale|au\s+fa[iî]tage|à?\s+l['’]égout)/gi) * 3 +
+    countPatternMatches(firstWindow, /stationnement/gi) * 2 +
+    countPatternMatches(firstWindow, /espaces?\s+libres?|pleine\s+terre|plantations/gi) * 2 +
+    (firstWindow.includes("sommaire") && firstWindow.includes("règlement de la zone") ? 5 : 0) +
+    (firstWindow.includes("sommaire") && firstWindow.includes("reglement de la zone") ? 5 : 0);
+
+  const oapScore =
+    countPatternMatches(firstWindow, /\boap\b/gi) * 6 +
+    countPatternMatches(firstWindow, /orientation(?:s)?\s+d['’]am[ée]nagement(?:\s+et\s+de\s+programmation)?/gi) * 7 +
+    countPatternMatches(firstWindow, /principes?\s+d['’]am[ée]nagement/gi) * 3 +
+    countPatternMatches(firstWindow, /sch[eé]ma\s+d['’]am[ée]nagement/gi) * 3;
+
+  const paddScore =
+    countPatternMatches(firstWindow, /\bpadd\b/gi) * 7 +
+    countPatternMatches(firstWindow, /projet\s+d['’]am[ée]nagement\s+et\s+de\s+d[ée]veloppement\s+durables/gi) * 8;
+
+  const zoningMapScore =
+    countPatternMatches(firstWindow, /plan\s+de\s+zonage/gi) * 7 +
+    countPatternMatches(firstWindow, /document\s+graphique/gi) * 6 +
+    countPatternMatches(firstWindow, /planche\s+de\s+zonage/gi) * 6 +
+    countPatternMatches(firstWindow, /zonage\s+r[ée]glementaire/gi) * 5 +
+    countPatternMatches(firstWindow, /l[ée]gende/gi) * 2;
+
+  const administrativeActScore =
+    countPatternMatches(firstWindow, /arr[eê]t[eé]/gi) * 5 +
+    countPatternMatches(firstWindow, /d[ée]lib[ée]ration/gi) * 5 +
+    countPatternMatches(firstWindow, /approbation/gi) * 3 +
+    countPatternMatches(firstWindow, /modification\s+simplifi[ée]e?/gi) * 4 +
+    countPatternMatches(firstWindow, /mise\s+[àa]\s+jour/gi) * 2;
+
+  const riskScore =
+    countPatternMatches(firstWindow, /\bpprn\b/gi) * 7 +
+    countPatternMatches(firstWindow, /\bpprt\b/gi) * 7 +
+    countPatternMatches(firstWindow, /inondation|zone\s+inondable|al[ée]a/gi) * 3;
+
+  const heritageScore =
+    countPatternMatches(firstWindow, /\babf\b/gi) * 6 +
+    countPatternMatches(firstWindow, /monuments?\s+historiques?|patrimoine|site\s+class[ée]/gi) * 3;
+
+  const networkScore =
+    countPatternMatches(firstWindow, /\baep\b|eau\s+potable|assainissement|r[ée]seau|gaz|electricit[ée]/gi) * 3;
+
+  const candidates: SuggestedClassification[] = [
+    {
       category: "REGULATORY",
       subCategory: "PLU",
-      documentType: docType,
-      tags: ["PLU", content.includes("article") ? "Article" : ""].filter(Boolean)
-    };
-  }
-  
-  if (content.includes("pprn") || content.includes("pprt") || content.includes("risque") || content.includes("inondation")) {
-    return {
+      documentType: "Written regulation",
+      tags: ["PLU", writtenRegulationScore >= 8 ? "Article" : ""].filter(Boolean),
+      confidence: Math.min(1, writtenRegulationScore / 14),
+      reason: "chapter_based_regulation_detection",
+    },
+    {
+      category: "REGULATORY",
+      subCategory: "PLU",
+      documentType: "OAP",
+      tags: ["PLU", "OAP"],
+      confidence: Math.min(1, oapScore / 10),
+      reason: "oap_detection",
+    },
+    {
+      category: "REGULATORY",
+      subCategory: "PLU",
+      documentType: "PADD",
+      tags: ["PLU", "PADD"],
+      confidence: Math.min(1, paddScore / 9),
+      reason: "padd_detection",
+    },
+    {
+      category: "ZONING",
+      subCategory: "PLANS",
+      documentType: "Zoning map",
+      tags: ["PLU", "Zoning"],
+      confidence: Math.min(1, zoningMapScore / 10),
+      reason: "graphic_zoning_detection",
+    },
+    {
+      category: "REGULATORY",
+      subCategory: "PLU",
+      documentType: "Administrative Act",
+      tags: ["PLU", "Administrative"],
+      confidence: Math.min(1, administrativeActScore / 8),
+      reason: "administrative_act_detection",
+    },
+    {
       category: "ANNEXES",
       subCategory: "RISKS",
-      documentType: content.includes("pprn") ? "PPRN" : (content.includes("pprt") ? "PPRT" : "Risk Map"),
-      tags: ["Risk", content.includes("flood") || content.includes("inondation") ? "Flood_risk" : ""].filter(Boolean)
-    };
-  }
-  
-  if (content.includes("abf") || content.includes("monument") || content.includes("patrimoine")) {
-    return {
+      documentType: firstWindow.includes("pprn") ? "PPRN" : (firstWindow.includes("pprt") ? "PPRT" : "Risk Map"),
+      tags: ["Risk", firstWindow.includes("inondation") ? "Flood_risk" : ""].filter(Boolean),
+      confidence: Math.min(1, riskScore / 8),
+      reason: "risk_detection",
+    },
+    {
       category: "ANNEXES",
       subCategory: "HERITAGE",
       documentType: "ABF perimeter",
-      tags: ["Heritage", "ABF"]
-    };
-  }
-  
-  if (content.includes("eau") || content.includes("edf") || content.includes("assainissement") || content.includes("réseau")) {
-    return {
+      tags: ["Heritage", "ABF"],
+      confidence: Math.min(1, heritageScore / 7),
+      reason: "heritage_detection",
+    },
+    {
       category: "INFRASTRUCTURE",
       subCategory: "NETWORKS",
-      documentType: content.includes("eau") ? "Water" : (content.includes("assainissement") ? "Sanitation" : "Electricity"),
-      tags: ["Infrastructure", "Network"]
-    };
+      documentType: firstWindow.includes("assainissement") ? "Sanitation" : (firstWindow.includes("eau") ? "Water" : "Electricity"),
+      tags: ["Infrastructure", "Network"],
+      confidence: Math.min(1, networkScore / 6),
+      reason: "network_detection",
+    },
+  ];
+
+  const best = candidates
+    .sort((left, right) => right.confidence - left.confidence)[0];
+
+  if (best && best.confidence >= 0.3) {
+    return best;
   }
 
   return {
     category: "ANNEXES",
     subCategory: "MISC",
     documentType: "Other",
-    tags: []
+    tags: [],
+    confidence: 0,
+    reason: "fallback_other",
+  };
+}
+
+function resolveTownHallClassification(input: {
+  rawText: string;
+  fileName: string;
+  category?: string | null;
+  subCategory?: string | null;
+  documentType?: string | null;
+  requestedTags?: string[];
+}) {
+  const requested = normalizeTownHallClassification({
+    category: input.category,
+    subCategory: input.subCategory,
+    documentType: input.documentType,
+  });
+  const suggestion = autoSuggestClassification(input.rawText, input.fileName);
+  const requestedCanonical = inferCanonicalDocumentType(requested.documentType, requested.category, requested.subCategory);
+  const suggestionCanonical = inferCanonicalDocumentType(suggestion.documentType, suggestion.category, suggestion.subCategory);
+  const hasExplicitDocType = Boolean((input.documentType || "").trim());
+  const requestedTypeLower = requested.documentType.toLowerCase();
+
+  const shouldTrustSuggestion =
+    !hasExplicitDocType
+    || requested.documentType === "Other"
+    || requested.documentType === "Administrative Act"
+    || (
+      suggestion.confidence >= 0.7
+      && suggestionCanonical === "plu_reglement"
+      && requestedCanonical !== "plu_reglement"
+    )
+    || (
+      suggestion.confidence >= 0.75
+      && requestedCanonical === "other"
+      && suggestionCanonical !== "other"
+    )
+    || (
+      suggestion.confidence >= 0.8
+      && requestedTypeLower === "oap"
+      && suggestion.documentType === "Written regulation"
+    );
+
+  const resolved = shouldTrustSuggestion ? suggestion : {
+    ...requested,
+    tags: input.requestedTags && input.requestedTags.length > 0 ? input.requestedTags : suggestion.tags,
+    confidence: suggestion.confidence,
+    reason: "manual_or_slot_preserved",
+  };
+  const canonicalType = inferCanonicalDocumentType(
+    resolved.documentType,
+    resolved.category,
+    resolved.subCategory,
+  );
+
+  return {
+    requested,
+    suggestion,
+    resolved: {
+      category: resolved.category,
+      subCategory: resolved.subCategory,
+      documentType: resolved.documentType,
+      tags: input.requestedTags && input.requestedTags.length > 0 ? input.requestedTags : resolved.tags,
+    },
+    canonicalType,
+    autoCorrected: shouldTrustSuggestion && (
+      requested.category !== resolved.category
+      || requested.subCategory !== resolved.subCategory
+      || requested.documentType !== resolved.documentType
+    ),
+    suggestionConfidence: suggestion.confidence,
+    suggestionReason: suggestion.reason,
   };
 }
 
@@ -1366,6 +1551,59 @@ function getTownHallDocumentAvailability(doc: {
   };
 }
 
+async function maybeSyncTownHallDocumentClassification(doc: {
+  id: string;
+  title?: string | null;
+  fileName: string | null;
+  rawText: string | null;
+  category?: string | null;
+  subCategory?: string | null;
+  documentType?: string | null;
+  tags?: unknown;
+}) {
+  const resolved = resolveTownHallClassification({
+    rawText: doc.rawText || "",
+    fileName: doc.title || doc.fileName || "document",
+    category: doc.category,
+    subCategory: doc.subCategory,
+    documentType: doc.documentType,
+    requestedTags: parseDocumentTags(doc.tags),
+  });
+
+  const canonicalType = inferCanonicalDocumentType(
+    resolved.resolved.documentType,
+    resolved.resolved.category,
+    resolved.resolved.subCategory,
+  );
+  const isRegulatory = isRegulatoryLikeDocument(
+    resolved.resolved.documentType,
+    resolved.resolved.category,
+    resolved.resolved.subCategory,
+  );
+  const isOpposable = isCanonicalTypeOpposable(canonicalType);
+
+  if (resolved.autoCorrected) {
+    await db.update(townHallDocumentsTable)
+      .set({
+        category: resolved.resolved.category,
+        subCategory: resolved.resolved.subCategory,
+        documentType: resolved.resolved.documentType,
+        tags: resolved.resolved.tags,
+        isRegulatory,
+        isOpposable,
+        updatedAt: new Date(),
+      })
+      .where(eq(townHallDocumentsTable.id, doc.id));
+  }
+
+  return {
+    ...resolved,
+    canonicalType,
+    isRegulatory,
+    isOpposable,
+  };
+}
+
 async function queueTownHallDocumentIndexing(args: {
   docId: string;
   persistentPath: string;
@@ -1386,16 +1624,18 @@ async function queueTownHallDocumentIndexing(args: {
         category: args.category,
         subCategory: args.subCategory,
       });
-      const suggestion = autoSuggestClassification(rawText, args.originalName);
-      const classification = normalizeTownHallClassification({
-        category: args.category || suggestion.category,
-        subCategory: args.subCategory || suggestion.subCategory,
-        documentType: args.documentType || suggestion.documentType,
+      const classification = resolveTownHallClassification({
+        rawText,
+        fileName: args.originalName,
+        category: args.category,
+        subCategory: args.subCategory,
+        documentType: args.documentType,
+        requestedTags: args.requestedTags,
       });
-      const category = classification.category;
-      const subCategory = classification.subCategory;
-      const documentType = classification.documentType;
-      const tags = args.requestedTags.length > 0 ? args.requestedTags : suggestion.tags;
+      const category = classification.resolved.category;
+      const subCategory = classification.resolved.subCategory;
+      const documentType = classification.resolved.documentType;
+      const tags = classification.resolved.tags;
       const canonicalType = inferCanonicalDocumentType(documentType, category, subCategory);
       const isOpposable = isCanonicalTypeOpposable(canonicalType);
       const isRegulatory = isRegulatoryLikeDocument(documentType, category, subCategory);
@@ -1475,7 +1715,11 @@ async function queueTownHallDocumentIndexing(args: {
         rawClassification: {
           category,
           subCategory,
-          documentType: args.documentType || null,
+          requestedDocumentType: args.documentType || null,
+          resolvedDocumentType: documentType,
+          autoCorrected: classification.autoCorrected,
+          suggestionConfidence: classification.suggestionConfidence,
+          suggestionReason: classification.suggestionReason,
           source: "mairie_upload",
         },
       });
@@ -1763,22 +2007,18 @@ router.get("/documents", async (req: AuthRequest, res) => {
       ? filteredByAccess.filter(d => (d.commune || "").toLowerCase().trim() === requestedCommune.toLowerCase().trim())
       : filteredByAccess;
     
-    const filteredDocs = docsForCommune.map(d => {
+    const filteredDocs = await Promise.all(docsForCommune.map(async (d) => {
       const availability = getTownHallDocumentAvailability(d);
-      const classification = normalizeTownHallClassification({
-        category: d.category,
-        subCategory: d.subCategory,
-        documentType: d.documentType,
-      });
+      const classification = await maybeSyncTownHallDocumentClassification(d);
       return {
         id: d.id,
         title: d.title,
         fileName: d.fileName,
         createdAt: d.createdAt,
         commune: d.commune,
-        category: classification.category,
-        subCategory: classification.subCategory,
-        documentType: classification.documentType,
+        category: classification.resolved.category,
+        subCategory: classification.resolved.subCategory,
+        documentType: classification.resolved.documentType,
         explanatoryNote: d.explanatoryNote,
         tags: d.tags,
         hasStoredFile: availability.hasStoredFile,
@@ -1790,8 +2030,9 @@ router.get("/documents", async (req: AuthRequest, res) => {
         textQualityMessage: availability.textQualityMessage,
         extractionHint: availability.extractionHint,
         hasVisualRegulatoryAnalysis: availability.hasVisualRegulatoryAnalysis,
+        rawTextPreview: d.rawText ? normalizeExtractedText(d.rawText).slice(0, 6000) : null,
       };
-    });
+    }));
     return res.json({ documents: filteredDocs });
   } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
 });
@@ -1839,7 +2080,8 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
     if (sections.length === 0) {
       const municipalityKey = inseeCode || targetCommune;
       for (const doc of docs) {
-        const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
+        const classification = await maybeSyncTownHallDocumentClassification(doc);
+        const canonicalType = classification.canonicalType;
         if (!["plu_reglement", "plu_annexe"].includes(canonicalType)) continue;
         if (!hasUsableTownHallText(doc.rawText)) continue;
         await persistRegulatoryZoneSectionsForDocument({
@@ -1854,16 +2096,18 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
           townHallDocumentId: doc.id,
           municipalityId: municipalityKey,
           documentType: canonicalType,
-          documentSubtype: doc.documentType || null,
+          documentSubtype: classification.resolved.documentType || null,
           sourceName: doc.title,
           sourceAuthority: authorityForCanonicalType(canonicalType),
-          opposable: !!doc.isOpposable,
+          opposable: classification.isOpposable,
           rawText: doc.rawText,
           rawClassification: {
-            category: doc.category,
-            subCategory: doc.subCategory,
-            documentType: doc.documentType,
-            source: "zone_review_backfill",
+            category: classification.resolved.category,
+            subCategory: classification.resolved.subCategory,
+            requestedDocumentType: doc.documentType,
+            resolvedDocumentType: classification.resolved.documentType,
+            autoCorrected: classification.autoCorrected,
+            source: "rule_review_backfill",
           },
         });
       }
@@ -1884,9 +2128,19 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
     const sectionsWithDocs = sections.map((section) => {
       const linkedDoc = section.townHallDocumentId ? docById.get(section.townHallDocumentId) : null;
       const quality = linkedDoc ? getTownHallDocumentAvailability(linkedDoc) : null;
+      const classification = linkedDoc
+        ? resolveTownHallClassification({
+            rawText: linkedDoc.rawText || "",
+            fileName: linkedDoc.title || linkedDoc.fileName || "document",
+            category: linkedDoc.category,
+            subCategory: linkedDoc.subCategory,
+            documentType: linkedDoc.documentType,
+          })
+        : null;
+      const effectiveZoneCode = section.reviewedZoneCode || section.zoneCode;
       return {
         id: section.id,
-        zoneCode: section.zoneCode,
+        zoneCode: effectiveZoneCode,
         parentZoneCode: section.reviewedParentZoneCode || section.parentZoneCode,
         heading: section.heading,
         startPage: section.reviewedStartPage ?? section.startPage,
@@ -1900,7 +2154,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
         document: linkedDoc ? {
           id: linkedDoc.id,
           title: linkedDoc.title,
-          documentType: linkedDoc.documentType,
+          documentType: classification?.resolved.documentType || linkedDoc.documentType,
           textQualityLabel: quality?.textQualityLabel ?? null,
           textQualityScore: quality?.textQualityScore ?? null,
           isOpposable: linkedDoc.isOpposable,
@@ -1909,6 +2163,13 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
     });
 
     const reviewableSections = sectionsWithDocs.filter((section) => !!section.document);
+    const resolvedDocs = docs.map((doc) => resolveTownHallClassification({
+      rawText: doc.rawText || "",
+      fileName: doc.title || doc.fileName || "document",
+      category: doc.category,
+      subCategory: doc.subCategory,
+      documentType: doc.documentType,
+    }));
     const readyStatus = (() => {
       if (reviewableSections.length === 0) return "missing";
       const validatedCount = reviewableSections.filter((section) => section.reviewStatus === "validated").length;
@@ -1922,8 +2183,8 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
       commune: targetCommune,
       municipalityId: inseeCode || targetCommune,
       summary: {
-        writtenRegulationCount: docs.filter((doc) => inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory) === "plu_reglement").length,
-        opposableDocumentCount: docs.filter((doc) => !!doc.isOpposable).length,
+        writtenRegulationCount: resolvedDocs.filter((doc) => inferCanonicalDocumentType(doc.resolved.documentType, doc.resolved.category, doc.resolved.subCategory) === "plu_reglement").length,
+        opposableDocumentCount: resolvedDocs.filter((doc) => isCanonicalTypeOpposable(inferCanonicalDocumentType(doc.resolved.documentType, doc.resolved.category, doc.resolved.subCategory))).length,
         zoneSectionCount: reviewableSections.length,
         validatedZoneCount: reviewableSections.filter((section) => section.reviewStatus === "validated").length,
         pendingZoneCount: reviewableSections.filter((section) => section.reviewStatus === "to_review" || section.reviewStatus === "auto").length,
@@ -1943,6 +2204,7 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
     const {
       reviewStatus,
       reviewNotes,
+      reviewedZoneCode,
       reviewedStartPage,
       reviewedEndPage,
       reviewedParentZoneCode,
@@ -1952,6 +2214,14 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
     const [section] = await db.select({
       id: regulatoryZoneSectionsTable.id,
       municipalityId: regulatoryZoneSectionsTable.municipalityId,
+      zoneCode: regulatoryZoneSectionsTable.zoneCode,
+      reviewedZoneCode: regulatoryZoneSectionsTable.reviewedZoneCode,
+      reviewedStartPage: regulatoryZoneSectionsTable.reviewedStartPage,
+      reviewedEndPage: regulatoryZoneSectionsTable.reviewedEndPage,
+      reviewedParentZoneCode: regulatoryZoneSectionsTable.reviewedParentZoneCode,
+      reviewedIsSubZone: regulatoryZoneSectionsTable.reviewedIsSubZone,
+      baseIADocumentId: regulatoryZoneSectionsTable.baseIADocumentId,
+      townHallDocumentId: regulatoryZoneSectionsTable.townHallDocumentId,
     }).from(regulatoryZoneSectionsTable)
       .where(eq(regulatoryZoneSectionsTable.id, id))
       .limit(1);
@@ -1967,20 +2237,102 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
 
     const allowedStatuses = new Set(["auto", "validated", "to_review", "rejected"]);
     const nextStatus = allowedStatuses.has(String(reviewStatus || "")) ? String(reviewStatus) : "validated";
+    const nextReviewedZoneCode =
+      reviewedZoneCode === undefined
+        ? section.reviewedZoneCode
+        : normalizeConfiguredZoneCode(reviewedZoneCode);
+    const nextReviewedParentZoneCode =
+      reviewedParentZoneCode === undefined
+        ? section.reviewedParentZoneCode
+        : normalizeConfiguredZoneCode(reviewedParentZoneCode) ?? (nextReviewedZoneCode ? deriveParentZoneCode(nextReviewedZoneCode) : null);
+    const nextReviewedIsSubZone =
+      reviewedIsSubZone === undefined
+        ? section.reviewedIsSubZone
+        : typeof reviewedIsSubZone === "boolean"
+        ? reviewedIsSubZone
+        : nextReviewedZoneCode
+          ? nextReviewedParentZoneCode !== null
+          : null;
+    const previousEffectiveZoneCode = section.reviewedZoneCode || section.zoneCode;
+    const nextEffectiveZoneCode = nextReviewedZoneCode || section.zoneCode;
 
-    await db.update(regulatoryZoneSectionsTable)
-      .set({
-        reviewStatus: nextStatus,
-        reviewNotes: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
-        reviewedStartPage: Number.isFinite(Number(reviewedStartPage)) ? Number(reviewedStartPage) : null,
-        reviewedEndPage: Number.isFinite(Number(reviewedEndPage)) ? Number(reviewedEndPage) : null,
-        reviewedParentZoneCode: typeof reviewedParentZoneCode === "string" && reviewedParentZoneCode.trim().length > 0 ? reviewedParentZoneCode.trim().toUpperCase() : null,
-        reviewedIsSubZone: typeof reviewedIsSubZone === "boolean" ? reviewedIsSubZone : null,
-        reviewedBy: req.user!.userId,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(regulatoryZoneSectionsTable.id, id));
+    const relatedUnitFilter = and(
+      eq(regulatoryUnitsTable.municipalityId, section.municipalityId),
+      eq(regulatoryUnitsTable.zoneCode, previousEffectiveZoneCode),
+      section.baseIADocumentId
+        ? eq(regulatoryUnitsTable.baseIADocumentId, section.baseIADocumentId)
+        : section.townHallDocumentId
+          ? eq(regulatoryUnitsTable.townHallDocumentId, section.townHallDocumentId)
+          : sql`TRUE`
+    );
+
+    const relatedUrbanRuleFilter = and(
+      eq(urbanRulesTable.municipalityId, section.municipalityId),
+      eq(urbanRulesTable.zoneCode, previousEffectiveZoneCode),
+      section.baseIADocumentId
+        ? eq(urbanRulesTable.baseIADocumentId, section.baseIADocumentId)
+        : section.townHallDocumentId
+          ? eq(urbanRulesTable.townHallDocumentId, section.townHallDocumentId)
+          : sql`TRUE`
+    );
+
+    await db.transaction(async (tx) => {
+      await tx.update(regulatoryZoneSectionsTable)
+        .set({
+          reviewStatus: nextStatus,
+          reviewNotes: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
+          reviewedZoneCode: nextReviewedZoneCode,
+          reviewedStartPage:
+            reviewedStartPage === undefined
+              ? section.reviewedStartPage
+              : Number.isFinite(Number(reviewedStartPage))
+                ? Number(reviewedStartPage)
+                : null,
+          reviewedEndPage:
+            reviewedEndPage === undefined
+              ? section.reviewedEndPage
+              : Number.isFinite(Number(reviewedEndPage))
+                ? Number(reviewedEndPage)
+                : null,
+          reviewedParentZoneCode: nextReviewedParentZoneCode,
+          reviewedIsSubZone: nextReviewedIsSubZone,
+          reviewedBy: req.user!.userId,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(regulatoryZoneSectionsTable.id, id));
+
+      const relatedUnits = await tx.select({
+        id: regulatoryUnitsTable.id,
+        parsedValues: regulatoryUnitsTable.parsedValues,
+      }).from(regulatoryUnitsTable)
+        .where(relatedUnitFilter);
+
+      for (const unit of relatedUnits) {
+        const parsedValues =
+          unit.parsedValues && typeof unit.parsedValues === "object" && !Array.isArray(unit.parsedValues)
+            ? { ...(unit.parsedValues as Record<string, unknown>) }
+            : {};
+        parsedValues.zone_code = nextEffectiveZoneCode;
+        parsedValues.parent_zone_code = nextReviewedParentZoneCode;
+
+        await tx.update(regulatoryUnitsTable)
+          .set({
+            zoneCode: nextEffectiveZoneCode,
+            parsedValues,
+            updatedAt: new Date(),
+          })
+          .where(eq(regulatoryUnitsTable.id, unit.id));
+      }
+
+      await tx.update(urbanRulesTable)
+        .set({
+          zoneCode: nextEffectiveZoneCode,
+          subzoneCode: nextReviewedIsSubZone ? nextEffectiveZoneCode : null,
+          updatedAt: new Date(),
+        })
+        .where(relatedUrbanRuleFilter);
+    });
 
     return res.json({ success: true });
   } catch (err) {
@@ -1997,6 +2349,7 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
       id: regulatoryZoneSectionsTable.id,
       municipalityId: regulatoryZoneSectionsTable.municipalityId,
       zoneCode: regulatoryZoneSectionsTable.zoneCode,
+      reviewedZoneCode: regulatoryZoneSectionsTable.reviewedZoneCode,
       baseIADocumentId: regulatoryZoneSectionsTable.baseIADocumentId,
       townHallDocumentId: regulatoryZoneSectionsTable.townHallDocumentId,
     }).from(regulatoryZoneSectionsTable)
@@ -2015,9 +2368,11 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
       return res.status(access.status).json(access.error);
     }
 
+    const effectiveZoneCode = section.reviewedZoneCode || section.zoneCode;
+
     const relatedUnitFilter = and(
       eq(regulatoryUnitsTable.municipalityId, section.municipalityId),
-      eq(regulatoryUnitsTable.zoneCode, section.zoneCode),
+      eq(regulatoryUnitsTable.zoneCode, effectiveZoneCode),
       section.baseIADocumentId
         ? eq(regulatoryUnitsTable.baseIADocumentId, section.baseIADocumentId)
         : section.townHallDocumentId
@@ -2027,7 +2382,7 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
 
     const relatedUrbanRuleFilter = and(
       eq(urbanRulesTable.municipalityId, section.municipalityId),
-      eq(urbanRulesTable.zoneCode, section.zoneCode),
+      eq(urbanRulesTable.zoneCode, effectiveZoneCode),
       section.baseIADocumentId
         ? eq(urbanRulesTable.baseIADocumentId, section.baseIADocumentId)
         : section.townHallDocumentId
@@ -2094,7 +2449,8 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
     if (rules.length === 0) {
       const municipalityKey = inseeCode || targetCommune;
       for (const doc of docs) {
-        const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
+        const classification = await maybeSyncTownHallDocumentClassification(doc);
+        const canonicalType = classification.canonicalType;
         if (!["plu_reglement", "plu_annexe", "oap"].includes(canonicalType)) continue;
         if (!hasUsableTownHallText(doc.rawText)) continue;
         await persistRegulatoryUnitsForDocument({
@@ -2109,15 +2465,17 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
           townHallDocumentId: doc.id,
           municipalityId: municipalityKey,
           documentType: canonicalType,
-          documentSubtype: doc.documentType || null,
+          documentSubtype: classification.resolved.documentType || null,
           sourceName: doc.title,
           sourceAuthority: authorityForCanonicalType(canonicalType),
-          opposable: !!doc.isOpposable,
+          opposable: classification.isOpposable,
           rawText: doc.rawText,
           rawClassification: {
-            category: doc.category,
-            subCategory: doc.subCategory,
-            documentType: doc.documentType,
+            category: classification.resolved.category,
+            subCategory: classification.resolved.subCategory,
+            requestedDocumentType: doc.documentType,
+            resolvedDocumentType: classification.resolved.documentType,
+            autoCorrected: classification.autoCorrected,
             source: "rule_review_backfill",
           },
         });
@@ -2187,7 +2545,13 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
           document: linkedDoc ? {
             id: linkedDoc.id,
             title: linkedDoc.title,
-            documentType: linkedDoc.documentType,
+            documentType: resolveTownHallClassification({
+              rawText: linkedDoc.rawText || "",
+              fileName: linkedDoc.title || linkedDoc.fileName || "document",
+              category: linkedDoc.category,
+              subCategory: linkedDoc.subCategory,
+              documentType: linkedDoc.documentType,
+            }).resolved.documentType,
             textQualityLabel: quality?.textQualityLabel ?? null,
             textQualityScore: quality?.textQualityScore ?? null,
             isOpposable: linkedDoc.isOpposable,
@@ -2224,11 +2588,12 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
 router.post("/plu-rule-reviews/:id/review", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    const { reviewStatus, reviewNotes } = req.body || {};
+    const { reviewStatus, reviewNotes, reviewedZoneCode } = req.body || {};
 
     const [rule] = await db.select({
       id: urbanRulesTable.id,
       municipalityId: urbanRulesTable.municipalityId,
+      zoneCode: urbanRulesTable.zoneCode,
     }).from(urbanRulesTable)
       .where(eq(urbanRulesTable.id, id))
       .limit(1);
@@ -2244,10 +2609,13 @@ router.post("/plu-rule-reviews/:id/review", async (req: AuthRequest, res) => {
 
     const allowedStatuses = new Set(["auto", "validated", "to_review", "rejected"]);
     const nextStatus = allowedStatuses.has(String(reviewStatus || "")) ? String(reviewStatus) : "validated";
+    const nextZoneCode = normalizeConfiguredZoneCode(reviewedZoneCode) || rule.zoneCode;
 
     await db.update(urbanRulesTable)
       .set({
         reviewStatus: nextStatus,
+        zoneCode: nextZoneCode,
+        subzoneCode: deriveParentZoneCode(nextZoneCode) ? nextZoneCode : null,
         validationNote: typeof reviewNotes === "string" ? reviewNotes.trim() || null : null,
         validatedByUser: req.user!.userId,
         updatedAt: new Date(),
@@ -2371,18 +2739,21 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             category: req.body.category || null,
             subCategory: req.body.subCategory || null,
           });
-          const suggestion = autoSuggestClassification(rawText, file.originalname);
-          const classification = normalizeTownHallClassification({
-            category: req.body.category || suggestion.category,
-            subCategory: req.body.subCategory || suggestion.subCategory,
-            documentType: req.body.documentType || suggestion.documentType,
+          const requestedTags = req.body.tags ? JSON.parse(req.body.tags) : [];
+          const classification = resolveTownHallClassification({
+            rawText,
+            fileName: file.originalname,
+            category: req.body.category || null,
+            subCategory: req.body.subCategory || null,
+            documentType: req.body.documentType || null,
+            requestedTags,
           });
-          const category = classification.category;
-          const subCategory = classification.subCategory;
-          const tags = req.body.tags ? JSON.parse(req.body.tags) : suggestion.tags;
-          const canonicalType = inferCanonicalDocumentType(classification.documentType, category, subCategory);
+          const category = classification.resolved.category;
+          const subCategory = classification.resolved.subCategory;
+          const tags = classification.resolved.tags;
+          const canonicalType = inferCanonicalDocumentType(classification.resolved.documentType, category, subCategory);
           const isOpposable = isCanonicalTypeOpposable(canonicalType);
-          const isRegulatory = isRegulatoryLikeDocument(classification.documentType, category, subCategory);
+          const isRegulatory = isRegulatoryLikeDocument(classification.resolved.documentType, category, subCategory);
           const inseeCode = targetCommune ? await resolveInseeCode(targetCommune) : null;
           const municipalityKey = inseeCode || targetCommune || null;
 
@@ -2408,7 +2779,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             rawText: rawText,
             category,
             subCategory,
-            documentType: classification.documentType,
+            documentType: classification.resolved.documentType,
             isRegulatory,
             isOpposable,
             tags,
@@ -2703,6 +3074,7 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
       id: townHallDocumentsTable.id,
       commune: townHallDocumentsTable.commune,
       title: townHallDocumentsTable.title,
+      fileName: townHallDocumentsTable.fileName,
       rawText: townHallDocumentsTable.rawText,
       category: townHallDocumentsTable.category,
       subCategory: townHallDocumentsTable.subCategory,
@@ -2735,8 +3107,9 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
       });
     }
 
-    const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
-    if (!isRegulatoryLikeDocument(doc.documentType, doc.category, doc.subCategory) || canonicalType === "other") {
+    const classification = await maybeSyncTownHallDocumentClassification(doc);
+    const canonicalType = classification.canonicalType;
+    if (!classification.isRegulatory || canonicalType === "other") {
       return res.status(400).json({
         error: "DOCUMENT_NOT_REGULATORY",
         message: "Ce document n'est pas de type réglementaire exploitable pour une re-segmentation PLU.",
@@ -2768,15 +3141,17 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
       townHallDocumentId: doc.id,
       municipalityId,
       documentType: canonicalType,
-      documentSubtype: doc.documentType || null,
+      documentSubtype: classification.resolved.documentType || null,
       sourceName,
       sourceAuthority,
-      opposable: !!doc.isOpposable,
+      opposable: classification.isOpposable,
       rawText,
       rawClassification: {
-        category: doc.category,
-        subCategory: doc.subCategory,
-        documentType: doc.documentType,
+        category: classification.resolved.category,
+        subCategory: classification.resolved.subCategory,
+        requestedDocumentType: doc.documentType,
+        resolvedDocumentType: classification.resolved.documentType,
+        autoCorrected: classification.autoCorrected,
         source: "manual_resegment",
       },
     });

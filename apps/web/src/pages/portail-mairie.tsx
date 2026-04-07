@@ -1366,11 +1366,19 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   });
 
   const reviewZoneMutation = useMutation({
-    mutationFn: async ({ id, reviewStatus }: { id: string; reviewStatus: "validated" | "to_review" | "rejected" }) => {
+    mutationFn: async ({
+      id,
+      reviewStatus,
+      reviewedZoneCode,
+    }: {
+      id: string;
+      reviewStatus: "validated" | "to_review" | "rejected";
+      reviewedZoneCode?: string;
+    }) => {
       return apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewStatus }),
+        body: JSON.stringify({ reviewStatus, reviewedZoneCode }),
       });
     },
     onSuccess: () => {
@@ -1422,11 +1430,19 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   });
 
   const reviewRuleMutation = useMutation({
-    mutationFn: async ({ id, reviewStatus }: { id: string; reviewStatus: "validated" | "to_review" | "rejected" }) => {
+    mutationFn: async ({
+      id,
+      reviewStatus,
+      reviewedZoneCode,
+    }: {
+      id: string;
+      reviewStatus: "validated" | "to_review" | "rejected";
+      reviewedZoneCode?: string;
+    }) => {
       return apiFetch(`/api/mairie/plu-rule-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewStatus }),
+        body: JSON.stringify({ reviewStatus, reviewedZoneCode }),
       });
     },
     onSuccess: () => {
@@ -1915,6 +1931,24 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                className="border-primary/20 text-primary hover:bg-primary/5"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => {
+                                  const reviewedZoneCode = window.prompt("Zone correcte pour cette section", section.zoneCode || "");
+                                  if (reviewedZoneCode == null) return;
+                                  reviewZoneMutation.mutate({
+                                    id: section.id,
+                                    reviewStatus: "to_review",
+                                    reviewedZoneCode,
+                                  });
+                                }}
+                              >
+                                <MapPin className="mr-1.5 h-3.5 w-3.5" />
+                                Corriger zone
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
                                 disabled={reviewZoneMutation.isPending}
                                 onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "validated" })}
@@ -2103,6 +2137,24 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                   Ouvrir
                                 </Button>
                               )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-primary/20 text-primary hover:bg-primary/5"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => {
+                                  const reviewedZoneCode = window.prompt("Zone correcte pour cette règle", rule.zoneCode || "");
+                                  if (reviewedZoneCode == null) return;
+                                  reviewRuleMutation.mutate({
+                                    id: rule.id,
+                                    reviewStatus: "to_review",
+                                    reviewedZoneCode,
+                                  });
+                                }}
+                              >
+                                <MapPin className="mr-1.5 h-3.5 w-3.5" />
+                                Corriger zone
+                              </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -2416,13 +2468,35 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             {/* GAUCHE: PDF PREVIEW */}
             <div className="flex-1 bg-muted/30 relative">
               {selectedDoc?.hasStoredFile === false ? (
-                <div className="absolute inset-0 flex items-center justify-center p-8">
-                  <div className="max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-amber-800 shadow-sm">
-                    <AlertTriangle className="w-8 h-8 mx-auto mb-3 text-amber-600" />
-                    <h4 className="font-semibold mb-2">Fichier source indisponible</h4>
-                    <p className="text-sm leading-relaxed">
-                      {selectedDoc?.availabilityMessage || "Le PDF n'est plus present sur le disque. Reimporte ce document pour retrouver la previsualisation et son contenu source."}
-                    </p>
+                <div className="absolute inset-0 overflow-auto p-8">
+                  <div className="mx-auto flex h-full max-w-4xl flex-col gap-6">
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">
+                      <AlertTriangle className="w-8 h-8 mb-3 text-amber-600" />
+                      <h4 className="font-semibold mb-2">Fichier source indisponible</h4>
+                      <p className="text-sm leading-relaxed">
+                        {selectedDoc?.availabilityMessage || "Le PDF n'est plus present sur le disque. Reimporte ce document pour retrouver la previsualisation et son contenu source."}
+                      </p>
+                    </div>
+
+                    {selectedDoc?.rawTextPreview ? (
+                      <div className="rounded-2xl border bg-background shadow-sm">
+                        <div className="border-b px-5 py-3">
+                          <p className="text-sm font-semibold">Texte indexé disponible</p>
+                          <p className="text-xs text-muted-foreground">
+                            La prévisualisation PDF est absente, mais voici un extrait du texte réellement exploité par le moteur.
+                          </p>
+                        </div>
+                        <div className="max-h-[70vh] overflow-auto px-5 py-4">
+                          <pre className="whitespace-pre-wrap text-xs leading-6 text-foreground/90">
+                            {selectedDoc.rawTextPreview}
+                          </pre>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed bg-background/80 p-6 text-sm text-muted-foreground">
+                        Aucun extrait texte n'est disponible pour ce document. Une réimportation du fichier est recommandée.
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : selectedDoc ? (
