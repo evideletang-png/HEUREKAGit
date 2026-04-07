@@ -15,7 +15,7 @@ import {
   municipalitySettingsTable,
   dossierEventsTable,
   ruleArticlesTable,
-  zoneAnalysesTable
+  zoneAnalysesTable,
 } from "@workspace/db";
 import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
 import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
@@ -23,6 +23,12 @@ import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulat
 import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urbanRuleConflicts.js";
 import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
 import { regulatoryZoneSectionsTable } from "../../../../packages/db/src/schema/regulatoryZoneSections.js";
+import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/schema/regulatoryCalibrationZones.js";
+import { regulatoryThemeTaxonomyTable } from "../../../../packages/db/src/schema/regulatoryThemeTaxonomy.js";
+import { calibratedExcerptsTable } from "../../../../packages/db/src/schema/calibratedExcerpts.js";
+import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
+import { regulatoryValidationHistoryTable } from "../../../../packages/db/src/schema/regulatoryValidationHistory.js";
+import { regulatoryRuleConflictsTable } from "../../../../packages/db/src/schema/regulatoryRuleConflicts.js";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
@@ -31,6 +37,17 @@ import { persistRegulatoryUnitsForDocument } from "../services/regulatoryUnitSer
 import { persistRegulatoryZoneSectionsForDocument } from "../services/regulatoryZoneSectionService.js";
 import { persistDocumentKnowledgeProfile } from "../services/documentKnowledgeService.js";
 import { persistUrbanRulesForDocument } from "../services/urbanRuleExtractionService.js";
+import {
+  REGULATORY_ARTICLE_REFERENCE,
+  buildCalibrationSuggestionsForDocument,
+  ensureRegulatoryThemeTaxonomySeed,
+  listDocumentCalibrationData,
+  listPublishedRulesForCommune,
+  recordRegulatoryValidationHistory,
+  recomputeIndexedRuleConflicts,
+  splitDocumentIntoCalibrationPages,
+  validateIndexedRuleForPublication,
+} from "../services/regulatoryCalibrationService.js";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import multer from "multer";
 import fs from "fs";
@@ -140,6 +157,26 @@ async function purgeMunicipalityStructuredKnowledge(args: {
   const baseDocIds = baseDocs.map((doc) => doc.id);
 
   return db.transaction(async (tx) => {
+    const deletedValidationHistory = await tx.delete(regulatoryValidationHistoryTable)
+      .where(buildMunicipalityAliasFilter(regulatoryValidationHistoryTable.communeId, args.municipalityAliases))
+      .returning({ id: regulatoryValidationHistoryTable.id });
+
+    const deletedCalibrationConflicts = await tx.delete(regulatoryRuleConflictsTable)
+      .where(buildMunicipalityAliasFilter(regulatoryRuleConflictsTable.communeId, args.municipalityAliases))
+      .returning({ id: regulatoryRuleConflictsTable.id });
+
+    const deletedIndexedRules = await tx.delete(indexedRegulatoryRulesTable)
+      .where(buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, args.municipalityAliases))
+      .returning({ id: indexedRegulatoryRulesTable.id });
+
+    const deletedExcerpts = await tx.delete(calibratedExcerptsTable)
+      .where(buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, args.municipalityAliases))
+      .returning({ id: calibratedExcerptsTable.id });
+
+    const deletedCalibrationZones = await tx.delete(regulatoryCalibrationZonesTable)
+      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.municipalityAliases))
+      .returning({ id: regulatoryCalibrationZonesTable.id });
+
     const deletedConflicts = await tx.delete(urbanRuleConflictsTable)
       .where(buildMunicipalityAliasFilter(urbanRuleConflictsTable.municipalityId, args.municipalityAliases))
       .returning({ id: urbanRuleConflictsTable.id });
@@ -185,6 +222,11 @@ async function purgeMunicipalityStructuredKnowledge(args: {
 
     return {
       deletedProfiles: deletedProfiles.length,
+      deletedCalibrationZones: deletedCalibrationZones.length,
+      deletedExcerpts: deletedExcerpts.length,
+      deletedIndexedRules: deletedIndexedRules.length,
+      deletedCalibrationConflicts: deletedCalibrationConflicts.length,
+      deletedValidationHistory: deletedValidationHistory.length,
       deletedZoneSections: deletedSections.length,
       deletedUnits: deletedUnits.length,
       deletedRules: deletedRules.length,
@@ -217,6 +259,14 @@ async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
   ]));
 
   return db.transaction(async (tx) => {
+    const deletedIndexedRules = await tx.delete(indexedRegulatoryRulesTable)
+      .where(eq(indexedRegulatoryRulesTable.documentId, docId))
+      .returning({ id: indexedRegulatoryRulesTable.id });
+
+    const deletedExcerpts = await tx.delete(calibratedExcerptsTable)
+      .where(eq(calibratedExcerptsTable.documentId, docId))
+      .returning({ id: calibratedExcerptsTable.id });
+
     const deletedRules = await tx.delete(urbanRulesTable)
       .where(eq(urbanRulesTable.townHallDocumentId, docId))
       .returning({ id: urbanRulesTable.id });
@@ -246,6 +296,8 @@ async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
       : [];
 
     return {
+      deletedCalibrationExcerpts: deletedExcerpts.length,
+      deletedIndexedRules: deletedIndexedRules.length,
       deletedProfiles: deletedProfiles.length,
       deletedZoneSections: deletedSections.length,
       deletedUnits: deletedUnits.length,
@@ -413,6 +465,15 @@ async function resolveAuthorizedTownHallCommune(userId: string, requestedCommune
     currentUser,
     assignedCommunes,
     targetCommune,
+  };
+}
+
+async function resolveCommuneAliases(commune: string) {
+  const inseeCode = await resolveInseeCode(commune);
+  return {
+    inseeCode,
+    communeAliases: Array.from(new Set([commune, inseeCode].filter((value): value is string => !!value))),
+    communeKey: inseeCode || commune,
   };
 }
 
@@ -2172,6 +2233,628 @@ router.get("/documents", async (req: AuthRequest, res) => {
     }));
     return res.json({ documents: filteredDocs });
   } catch(err) { return res.status(500).json({ error: "INTERNAL_ERROR" }); }
+});
+
+router.get("/regulatory-calibration/themes", async (_req: AuthRequest, res) => {
+  try {
+    const themes = await ensureRegulatoryThemeTaxonomySeed();
+    return res.json({
+      themes: themes.map((theme) => ({
+        id: theme.id,
+        code: theme.code,
+        label: theme.label,
+        description: theme.description,
+        articleHint: theme.articleHint,
+        sortOrder: theme.sortOrder,
+      })),
+      articleReference: REGULATORY_ARTICLE_REFERENCE,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/themes GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/regulatory-calibration/overview", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+
+    const [documents, zones, excerpts, rules, conflicts] = await Promise.all([
+      db.select({ id: townHallDocumentsTable.id })
+        .from(townHallDocumentsTable)
+        .where(eq(sql`lower(${townHallDocumentsTable.commune})`, access.targetCommune.toLowerCase())),
+      db.select({ id: regulatoryCalibrationZonesTable.id })
+        .from(regulatoryCalibrationZonesTable)
+        .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases)),
+      db.select({ id: calibratedExcerptsTable.id, status: calibratedExcerptsTable.status })
+        .from(calibratedExcerptsTable)
+        .where(buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, communeAliases)),
+      db.select({ id: indexedRegulatoryRulesTable.id, status: indexedRegulatoryRulesTable.status, conflictFlag: indexedRegulatoryRulesTable.conflictFlag })
+        .from(indexedRegulatoryRulesTable)
+        .where(buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, communeAliases)),
+      db.select({ id: regulatoryRuleConflictsTable.id, status: regulatoryRuleConflictsTable.status })
+        .from(regulatoryRuleConflictsTable)
+        .where(buildMunicipalityAliasFilter(regulatoryRuleConflictsTable.communeId, communeAliases)),
+    ]);
+
+    const countByStatus = (items: Array<{ status: string | null }>, status: string) => items.filter((item) => item.status === status).length;
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: communeKey,
+      summary: {
+        documentCount: documents.length,
+        zoneCount: zones.length,
+        excerptCount: excerpts.length,
+        ruleCount: rules.length,
+        publishedRuleCount: countByStatus(rules, "published"),
+        validatedRuleCount: countByStatus(rules, "validated"),
+        inReviewRuleCount: countByStatus(rules, "in_review"),
+        draftRuleCount: countByStatus(rules, "draft"),
+        conflictCount: conflicts.length,
+        openConflictCount: countByStatus(conflicts, "open"),
+      },
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/overview GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+
+    const zones = await db.select()
+      .from(regulatoryCalibrationZonesTable)
+      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases))
+      .orderBy(regulatoryCalibrationZonesTable.displayOrder, regulatoryCalibrationZonesTable.zoneCode);
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: communeKey,
+      zones,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/zones GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeKey, communeAliases } = await resolveCommuneAliases(access.targetCommune);
+    const zoneCode = normalizeConfiguredZoneCode(req.body.zoneCode);
+    if (!zoneCode) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Code zone invalide." });
+    }
+
+    const existing = await db.select({ id: regulatoryCalibrationZonesTable.id })
+      .from(regulatoryCalibrationZonesTable)
+      .where(
+        and(
+          buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases),
+          eq(regulatoryCalibrationZonesTable.zoneCode, zoneCode),
+        ),
+      )
+      .limit(1);
+
+    let zone;
+    if (existing[0]) {
+      const [updated] = await db.update(regulatoryCalibrationZonesTable)
+        .set({
+          zoneLabel: typeof req.body.zoneLabel === "string" ? req.body.zoneLabel.trim() || null : null,
+          parentZoneCode: normalizeConfiguredZoneCode(req.body.parentZoneCode),
+          sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
+          guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
+          displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
+          isActive: req.body.isActive === false ? false : true,
+          updatedBy: req.user!.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(regulatoryCalibrationZonesTable.id, existing[0].id))
+        .returning();
+      zone = updated;
+      await recordRegulatoryValidationHistory({
+        communeId: communeKey,
+        entityType: "zone",
+        entityId: zone.id,
+        action: "zone_updated",
+        userId: req.user!.userId,
+        snapshot: zone as Record<string, unknown>,
+      });
+    } else {
+      const [created] = await db.insert(regulatoryCalibrationZonesTable).values({
+        communeId: communeKey,
+        zoneCode,
+        zoneLabel: typeof req.body.zoneLabel === "string" ? req.body.zoneLabel.trim() || null : null,
+        parentZoneCode: normalizeConfiguredZoneCode(req.body.parentZoneCode),
+        sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
+        guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
+        displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
+        isActive: req.body.isActive === false ? false : true,
+        createdBy: req.user!.userId,
+        updatedBy: req.user!.userId,
+      }).returning();
+      zone = created;
+      await recordRegulatoryValidationHistory({
+        communeId: communeKey,
+        entityType: "zone",
+        entityId: zone.id,
+        action: "zone_created",
+        userId: req.user!.userId,
+        snapshot: zone as Record<string, unknown>,
+      });
+    }
+
+    return res.json({ zone });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/zones POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [zone] = await db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, id)).limit(1);
+    if (!zone) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || zone.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const [updated] = await db.update(regulatoryCalibrationZonesTable)
+      .set({
+        zoneCode: normalizeConfiguredZoneCode(req.body.zoneCode) || zone.zoneCode,
+        zoneLabel: typeof req.body.zoneLabel === "string" ? req.body.zoneLabel.trim() || null : zone.zoneLabel,
+        parentZoneCode: req.body.parentZoneCode === undefined ? zone.parentZoneCode : normalizeConfiguredZoneCode(req.body.parentZoneCode),
+        sectorCode: req.body.sectorCode === undefined ? zone.sectorCode : (typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null),
+        guidanceNotes: req.body.guidanceNotes === undefined ? zone.guidanceNotes : (typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null),
+        displayOrder: req.body.displayOrder === undefined ? zone.displayOrder : (Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : zone.displayOrder),
+        isActive: req.body.isActive === undefined ? zone.isActive : !!req.body.isActive,
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(regulatoryCalibrationZonesTable.id, id))
+      .returning();
+
+    await recordRegulatoryValidationHistory({
+      communeId: updated.communeId,
+      entityType: "zone",
+      entityId: updated.id,
+      action: "zone_updated",
+      userId: req.user!.userId,
+      snapshot: updated as Record<string, unknown>,
+    });
+
+    return res.json({ zone: updated });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/zones PATCH]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.delete("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [zone] = await db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, id)).limit(1);
+    if (!zone) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || zone.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    await db.delete(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, id));
+    await recordRegulatoryValidationHistory({
+      communeId: zone.communeId,
+      entityType: "zone",
+      entityId: zone.id,
+      action: "zone_deleted",
+      userId: req.user!.userId,
+      snapshot: zone as Record<string, unknown>,
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/zones DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [doc] = await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id)).limit(1);
+    if (!doc) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || doc.commune || undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+    const themes = await ensureRegulatoryThemeTaxonomySeed();
+    const pages = splitDocumentIntoCalibrationPages(doc.rawText || "").map((page) => ({
+      pageNumber: page.pageNumber,
+      text: page.text,
+      startOffset: page.startOffset,
+      endOffset: page.endOffset,
+    }));
+    const calibrationData = await listDocumentCalibrationData({ communeAliases, documentId: id });
+    const suggestions = await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: id });
+    const zoneMap = new Map(calibrationData.zones.map((zone) => [zone.id, zone]));
+    const docAvailability = getTownHallDocumentAvailability(doc);
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: communeKey,
+      document: {
+        id: doc.id,
+        title: doc.title,
+        fileName: doc.fileName,
+        category: doc.category,
+        subCategory: doc.subCategory,
+        documentType: doc.documentType,
+        hasStoredFile: docAvailability.hasStoredFile,
+        availabilityStatus: docAvailability.availabilityStatus,
+        availabilityMessage: docAvailability.availabilityMessage,
+        rawTextLength: (doc.rawText || "").length,
+      },
+      zones: calibrationData.zones,
+      themes: themes.map((theme) => ({
+        code: theme.code,
+        label: theme.label,
+        description: theme.description,
+        articleHint: theme.articleHint,
+      })),
+      articleReference: REGULATORY_ARTICLE_REFERENCE,
+      pages,
+      excerpts: calibrationData.excerpts.map((excerpt) => ({
+        ...excerpt,
+        zone: zoneMap.get(excerpt.zoneId) || null,
+        rules: calibrationData.rules.filter((rule) => rule.excerptId === excerpt.id),
+      })),
+      conflicts: calibrationData.conflicts,
+      aiSuggestions: suggestions,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/workspace GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) => {
+  try {
+    const {
+      commune,
+      zoneId,
+      documentId,
+      articleCode,
+      selectionLabel,
+      sourceText,
+      sourcePage,
+      sourcePageEnd,
+      selectionStartOffset,
+      selectionEndOffset,
+      aiSuggested,
+      metadata,
+    } = req.body || {};
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, commune);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const { communeKey } = await resolveCommuneAliases(access.targetCommune);
+
+    const [zone, doc] = await Promise.all([
+      db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, zoneId)).limit(1),
+      db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, documentId)).limit(1),
+    ]);
+
+    if (!zone[0]) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+    if (!doc[0]) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+    if (!sourceText || String(sourceText).trim().length < 8) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Sélection de texte obligatoire." });
+    }
+    if (!Number.isFinite(Number(sourcePage)) || Number(sourcePage) <= 0) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Page source obligatoire." });
+    }
+
+    const [excerpt] = await db.insert(calibratedExcerptsTable).values({
+      communeId: communeKey,
+      zoneId,
+      documentId,
+      articleCode: typeof articleCode === "string" ? articleCode.trim() || null : null,
+      selectionLabel: typeof selectionLabel === "string" ? selectionLabel.trim() || null : null,
+      sourceText: String(sourceText).trim(),
+      normalizedSourceText: normalizeExtractedText(sourceText),
+      sourcePage: Number(sourcePage),
+      sourcePageEnd: Number.isFinite(Number(sourcePageEnd)) ? Number(sourcePageEnd) : null,
+      selectionStartOffset: Number.isFinite(Number(selectionStartOffset)) ? Number(selectionStartOffset) : null,
+      selectionEndOffset: Number.isFinite(Number(selectionEndOffset)) ? Number(selectionEndOffset) : null,
+      aiSuggested: !!aiSuggested,
+      status: "draft",
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
+      createdBy: req.user!.userId,
+      updatedBy: req.user!.userId,
+    }).returning();
+
+    await recordRegulatoryValidationHistory({
+      communeId: communeKey,
+      entityType: "excerpt",
+      entityId: excerpt.id,
+      action: "excerpt_created",
+      toStatus: excerpt.status,
+      userId: req.user!.userId,
+      snapshot: excerpt as Record<string, unknown>,
+    });
+
+    return res.json({ excerpt });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/excerpts POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [excerpt] = await db.select().from(calibratedExcerptsTable).where(eq(calibratedExcerptsTable.id, id)).limit(1);
+    if (!excerpt) return res.status(404).json({ error: "EXCERPT_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || excerpt.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const {
+      articleCode,
+      themeCode,
+      ruleLabel,
+      operator,
+      valueNumeric,
+      valueText,
+      unit,
+      conditionText,
+      interpretationNote,
+      scopeType,
+      confidenceScore,
+      aiSuggested,
+      validationNote,
+      rawSuggestion,
+    } = req.body || {};
+
+    if (!themeCode || typeof themeCode !== "string") {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Thème métier obligatoire." });
+    }
+    if (!ruleLabel || typeof ruleLabel !== "string") {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Libellé de règle obligatoire." });
+    }
+
+    const [rule] = await db.insert(indexedRegulatoryRulesTable).values({
+      communeId: excerpt.communeId,
+      zoneId: excerpt.zoneId,
+      documentId: excerpt.documentId,
+      excerptId: excerpt.id,
+      articleCode: typeof articleCode === "string" && articleCode.trim() ? articleCode.trim() : excerpt.articleCode || "unknown",
+      themeCode: themeCode.trim(),
+      ruleLabel: ruleLabel.trim(),
+      operator: typeof operator === "string" ? operator.trim() || null : null,
+      valueNumeric: Number.isFinite(Number(valueNumeric)) ? Number(valueNumeric) : null,
+      valueText: typeof valueText === "string" ? valueText.trim() || null : null,
+      unit: typeof unit === "string" ? unit.trim() || null : null,
+      conditionText: typeof conditionText === "string" ? conditionText.trim() || null : null,
+      interpretationNote: typeof interpretationNote === "string" ? interpretationNote.trim() || null : null,
+      scopeType: typeof scopeType === "string" && scopeType.trim() ? scopeType.trim() : "zone",
+      sourceText: excerpt.sourceText,
+      sourcePage: excerpt.sourcePage,
+      sourcePageEnd: excerpt.sourcePageEnd,
+      confidenceScore: Number.isFinite(Number(confidenceScore)) ? Number(confidenceScore) : 0.5,
+      conflictFlag: false,
+      status: "draft",
+      aiSuggested: !!aiSuggested,
+      validationNote: typeof validationNote === "string" ? validationNote.trim() || null : null,
+      rawSuggestion: rawSuggestion && typeof rawSuggestion === "object" ? rawSuggestion : {},
+      createdBy: req.user!.userId,
+      updatedBy: req.user!.userId,
+    }).returning();
+
+    await recordRegulatoryValidationHistory({
+      communeId: excerpt.communeId,
+      entityType: "rule",
+      entityId: rule.id,
+      action: "rule_created",
+      toStatus: rule.status,
+      userId: req.user!.userId,
+      snapshot: rule as Record<string, unknown>,
+    });
+
+    return res.json({ rule });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rules POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [rule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, id)).limit(1);
+    if (!rule) return res.status(404).json({ error: "RULE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || rule.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const [updated] = await db.update(indexedRegulatoryRulesTable)
+      .set({
+        articleCode: typeof req.body.articleCode === "string" && req.body.articleCode.trim() ? req.body.articleCode.trim() : rule.articleCode,
+        themeCode: typeof req.body.themeCode === "string" && req.body.themeCode.trim() ? req.body.themeCode.trim() : rule.themeCode,
+        ruleLabel: typeof req.body.ruleLabel === "string" && req.body.ruleLabel.trim() ? req.body.ruleLabel.trim() : rule.ruleLabel,
+        operator: req.body.operator === undefined ? rule.operator : (typeof req.body.operator === "string" ? req.body.operator.trim() || null : null),
+        valueNumeric: req.body.valueNumeric === undefined ? rule.valueNumeric : (Number.isFinite(Number(req.body.valueNumeric)) ? Number(req.body.valueNumeric) : null),
+        valueText: req.body.valueText === undefined ? rule.valueText : (typeof req.body.valueText === "string" ? req.body.valueText.trim() || null : null),
+        unit: req.body.unit === undefined ? rule.unit : (typeof req.body.unit === "string" ? req.body.unit.trim() || null : null),
+        conditionText: req.body.conditionText === undefined ? rule.conditionText : (typeof req.body.conditionText === "string" ? req.body.conditionText.trim() || null : null),
+        interpretationNote: req.body.interpretationNote === undefined ? rule.interpretationNote : (typeof req.body.interpretationNote === "string" ? req.body.interpretationNote.trim() || null : null),
+        scopeType: req.body.scopeType === undefined ? rule.scopeType : (typeof req.body.scopeType === "string" && req.body.scopeType.trim() ? req.body.scopeType.trim() : rule.scopeType),
+        validationNote: req.body.validationNote === undefined ? rule.validationNote : (typeof req.body.validationNote === "string" ? req.body.validationNote.trim() || null : null),
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(indexedRegulatoryRulesTable.id, id))
+      .returning();
+
+    await recordRegulatoryValidationHistory({
+      communeId: updated.communeId,
+      entityType: "rule",
+      entityId: updated.id,
+      action: "rule_updated",
+      fromStatus: rule.status,
+      toStatus: updated.status,
+      userId: req.user!.userId,
+      snapshot: updated as Record<string, unknown>,
+    });
+
+    return res.json({ rule: updated });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rules PATCH]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [rule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, id)).limit(1);
+    if (!rule) return res.status(404).json({ error: "RULE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || rule.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const allowedStatuses = new Set(["draft", "in_review", "validated", "published"]);
+    const nextStatus = allowedStatuses.has(String(req.body.status || "")) ? String(req.body.status) : "draft";
+
+    if (nextStatus === "published") {
+      const publicationCheck = validateIndexedRuleForPublication(rule);
+      if (!publicationCheck.ok) {
+        return res.status(400).json({ error: "PUBLISH_VALIDATION_FAILED", message: publicationCheck.message });
+      }
+    }
+
+    const [updated] = await db.update(indexedRegulatoryRulesTable)
+      .set({
+        status: nextStatus,
+        publishedAt: nextStatus === "published" ? new Date() : null,
+        publishedBy: nextStatus === "published" ? req.user!.userId : null,
+        validationNote: typeof req.body.validationNote === "string" ? req.body.validationNote.trim() || null : rule.validationNote,
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(indexedRegulatoryRulesTable.id, id))
+      .returning();
+
+    await recordRegulatoryValidationHistory({
+      communeId: updated.communeId,
+      entityType: "rule",
+      entityId: updated.id,
+      action: "rule_status_changed",
+      fromStatus: rule.status,
+      toStatus: nextStatus,
+      note: typeof req.body.validationNote === "string" ? req.body.validationNote.trim() || null : null,
+      userId: req.user!.userId,
+      snapshot: updated as Record<string, unknown>,
+    });
+
+    await recomputeIndexedRuleConflicts({ communeId: updated.communeId, zoneId: updated.zoneId });
+
+    return res.json({ rule: updated });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rules/status POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+    const visibility = String(req.query.visibility || "internal");
+
+    const themes = await ensureRegulatoryThemeTaxonomySeed();
+    const themeMap = new Map(themes.map((theme) => [theme.code, theme]));
+
+    const baseRuleQuery = db.select({
+      id: indexedRegulatoryRulesTable.id,
+      communeId: indexedRegulatoryRulesTable.communeId,
+      zoneId: indexedRegulatoryRulesTable.zoneId,
+      articleCode: indexedRegulatoryRulesTable.articleCode,
+      themeCode: indexedRegulatoryRulesTable.themeCode,
+      ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
+      operator: indexedRegulatoryRulesTable.operator,
+      valueNumeric: indexedRegulatoryRulesTable.valueNumeric,
+      valueText: indexedRegulatoryRulesTable.valueText,
+      unit: indexedRegulatoryRulesTable.unit,
+      conditionText: indexedRegulatoryRulesTable.conditionText,
+      interpretationNote: indexedRegulatoryRulesTable.interpretationNote,
+      sourceText: indexedRegulatoryRulesTable.sourceText,
+      sourcePage: indexedRegulatoryRulesTable.sourcePage,
+      confidenceScore: indexedRegulatoryRulesTable.confidenceScore,
+      conflictFlag: indexedRegulatoryRulesTable.conflictFlag,
+      status: indexedRegulatoryRulesTable.status,
+      publishedAt: indexedRegulatoryRulesTable.publishedAt,
+      zoneCode: regulatoryCalibrationZonesTable.zoneCode,
+      zoneLabel: regulatoryCalibrationZonesTable.zoneLabel,
+      documentTitle: townHallDocumentsTable.title,
+    })
+      .from(indexedRegulatoryRulesTable)
+      .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
+      .leftJoin(townHallDocumentsTable, eq(indexedRegulatoryRulesTable.documentId, townHallDocumentsTable.id))
+      .where(
+        and(
+          buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, communeAliases),
+          visibility === "published"
+            ? eq(indexedRegulatoryRulesTable.status, "published")
+            : sql`TRUE`,
+        ),
+      )
+      .orderBy(desc(indexedRegulatoryRulesTable.updatedAt));
+
+    const [rules, conflicts, history] = await Promise.all([
+      baseRuleQuery,
+      db.select().from(regulatoryRuleConflictsTable)
+        .where(buildMunicipalityAliasFilter(regulatoryRuleConflictsTable.communeId, communeAliases))
+        .orderBy(desc(regulatoryRuleConflictsTable.updatedAt)),
+      db.select().from(regulatoryValidationHistoryTable)
+        .where(buildMunicipalityAliasFilter(regulatoryValidationHistoryTable.communeId, communeAliases))
+        .orderBy(desc(regulatoryValidationHistoryTable.createdAt))
+        .limit(40),
+    ]);
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: communeKey,
+      visibility,
+      summary: {
+        ruleCount: rules.length,
+        publishedCount: rules.filter((rule) => rule.status === "published").length,
+        conflictCount: conflicts.filter((conflict) => conflict.status === "open").length,
+        historyCount: history.length,
+      },
+      rules: rules.map((rule) => ({
+        ...rule,
+        themeLabel: themeMap.get(rule.themeCode)?.label || rule.themeCode,
+      })),
+      conflicts,
+      history,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/library GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
 });
 
 router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {

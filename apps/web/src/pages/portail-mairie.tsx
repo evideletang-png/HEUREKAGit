@@ -18,6 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+import { RegulatoryCalibrationModule } from "@/components/mairie/RegulatoryCalibrationModule";
 
 type Dossier = {
   id: string;
@@ -1571,6 +1572,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
   const visibleUploads = activeUploads.filter((item) => currentCommune === "all" || item.commune?.toLowerCase() === currentCommune.toLowerCase());
   const hasRunningUploads = visibleUploads.some((item) => ["uploading", "uploaded", "processing"].includes(item.status));
+  const useRegulatoryCalibrationModule = true;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -1665,7 +1667,15 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </CardContent>
       </Card>
 
-      {currentCommune !== "all" && (
+      {useRegulatoryCalibrationModule && currentCommune !== "all" && (
+        <RegulatoryCalibrationModule
+          currentCommune={currentCommune}
+          documents={allDocs}
+          loadingDocuments={loadingPluDocs}
+        />
+      )}
+
+      {!useRegulatoryCalibrationModule && currentCommune !== "all" && (
         <Card className="border-primary/15 shadow-sm">
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -2015,7 +2025,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </Card>
       )}
 
-      {currentCommune !== "all" && (
+      {!useRegulatoryCalibrationModule && currentCommune !== "all" && (
         <Card className="border-primary/10 shadow-sm">
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -2259,7 +2269,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </Card>
       )}
 
-      {allDocs.length > 0 && (
+      {!useRegulatoryCalibrationModule && allDocs.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -2421,6 +2431,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       </Accordion>
 
       {/* MODAL DE DÉTAILS ET PRÉVISUALISATION PDF */}
+      {!useRegulatoryCalibrationModule && (
       <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>
         <SheetContent side="right" className="sm:max-w-[80vw] p-0 overflow-hidden flex flex-col">
           <SheetHeader className="p-6 border-b bg-muted/10">
@@ -2611,6 +2622,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </div>
         </SheetContent>
       </Sheet>
+      )}
     </div>
   );
 }
