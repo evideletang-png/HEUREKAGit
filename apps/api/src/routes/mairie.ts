@@ -3106,7 +3106,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
 
     const docById = new Map(docs.map((doc) => [doc.id, doc]));
 
-    let sections = await db.select().from(regulatoryZoneSectionsTable)
+    let allSections = await db.select().from(regulatoryZoneSectionsTable)
       .where(
         and(
           inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
@@ -3118,7 +3118,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
         desc(regulatoryZoneSectionsTable.updatedAt)
       );
 
-    if (sections.length === 0) {
+    if (allSections.length === 0) {
       const municipalityKey = inseeCode || targetCommune;
       for (const doc of docs) {
         const classification = await maybeSyncTownHallDocumentClassification(doc);
@@ -3153,7 +3153,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
         });
       }
 
-      sections = await db.select().from(regulatoryZoneSectionsTable)
+      allSections = await db.select().from(regulatoryZoneSectionsTable)
         .where(
           and(
             inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
@@ -3166,7 +3166,9 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
         );
     }
 
-    const sectionsWithDocs = sections.map((section) => {
+    const visibleSections = allSections.filter((section) => section.reviewStatus !== "rejected");
+
+    const sectionsWithDocs = visibleSections.map((section) => {
       const linkedDoc = section.townHallDocumentId ? docById.get(section.townHallDocumentId) : null;
       const quality = linkedDoc ? getTownHallDocumentAvailability(linkedDoc) : null;
       const classification = linkedDoc
@@ -3409,11 +3411,11 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
       return res.status(access.status).json(access.error);
     }
 
-    const effectiveZoneCode = section.reviewedZoneCode || section.zoneCode;
+    const effectiveZoneCodes = Array.from(new Set([section.zoneCode, section.reviewedZoneCode].filter((value): value is string => !!value)));
 
     const relatedUnitFilter = and(
       eq(regulatoryUnitsTable.municipalityId, section.municipalityId),
-      eq(regulatoryUnitsTable.zoneCode, effectiveZoneCode),
+      effectiveZoneCodes.length > 0 ? inArray(regulatoryUnitsTable.zoneCode, effectiveZoneCodes) : sql`TRUE`,
       section.baseIADocumentId
         ? eq(regulatoryUnitsTable.baseIADocumentId, section.baseIADocumentId)
         : section.townHallDocumentId
@@ -3423,7 +3425,7 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
 
     const relatedUrbanRuleFilter = and(
       eq(urbanRulesTable.municipalityId, section.municipalityId),
-      eq(urbanRulesTable.zoneCode, effectiveZoneCode),
+      effectiveZoneCodes.length > 0 ? inArray(urbanRulesTable.zoneCode, effectiveZoneCodes) : sql`TRUE`,
       section.baseIADocumentId
         ? eq(urbanRulesTable.baseIADocumentId, section.baseIADocumentId)
         : section.townHallDocumentId
@@ -3432,7 +3434,17 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
     );
 
     await db.transaction(async (tx) => {
-      await tx.delete(regulatoryZoneSectionsTable).where(eq(regulatoryZoneSectionsTable.id, id));
+      await tx.update(regulatoryZoneSectionsTable)
+        .set({
+          reviewStatus: "rejected",
+          reviewNotes: section.reviewedZoneCode
+            ? `Section supprimée manuellement (${section.reviewedZoneCode}).`
+            : "Section supprimée manuellement.",
+          reviewedBy: req.user!.userId,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(regulatoryZoneSectionsTable.id, id));
       await tx.delete(regulatoryUnitsTable).where(relatedUnitFilter);
       await tx.delete(urbanRulesTable).where(relatedUrbanRuleFilter);
     });
