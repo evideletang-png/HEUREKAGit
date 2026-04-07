@@ -27,6 +27,8 @@ export * from "./documentKnowledgeProfiles";
 export * from "./urbanRules";
 export * from "./urbanRuleConflicts";
 export * from "./regulatoryCalibrationZones";
+export * from "./regulatoryOverlays";
+export * from "./overlayDocumentBindings";
 export * from "./regulatoryThemeTaxonomy";
 export * from "./calibratedExcerpts";
 export * from "./indexedRegulatoryRules";

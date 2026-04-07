@@ -92,6 +92,13 @@
       "when": 1775572200000,
       "tag": "0012_assisted_regulatory_calibration",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1775579400000,
+      "tag": "0013_regulatory_overlays",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import {
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
 import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/schema/regulatoryCalibrationZones.js";
+import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regulatoryOverlays.js";
 import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
 import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urbanRuleConflicts.js";
 import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
@@ -40,6 +41,15 @@ export type PublishedIndexedRule = {
   id: string;
   zoneCode: string | null;
   zoneLabel: string | null;
+  overlayId: string | null;
+  overlayCode: string | null;
+  overlayLabel: string | null;
+  overlayType: string | null;
+  normativeEffect: string | null;
+  proceduralEffect: string | null;
+  applicabilityScope: string | null;
+  ruleAnchorType: string | null;
+  ruleAnchorLabel: string | null;
   ruleFamily: string;
   ruleTopic: string;
   ruleLabel: string;
@@ -144,6 +154,15 @@ function toPublishedIndexedRule(row: {
   id: string;
   zoneCode: string | null;
   zoneLabel: string | null;
+  overlayId: string | null;
+  overlayCode: string | null;
+  overlayLabel: string | null;
+  overlayType: string | null;
+  normativeEffect: string | null;
+  proceduralEffect: string | null;
+  applicabilityScope: string | null;
+  ruleAnchorType: string | null;
+  ruleAnchorLabel: string | null;
   articleCode: string;
   themeCode: string;
   ruleLabel: string;
@@ -163,11 +182,21 @@ function toPublishedIndexedRule(row: {
 }): PublishedIndexedRule {
   const ruleFamily = mapPublishedRuleFamily(row.themeCode, row.articleCode);
   const ruleValueType = mapPublishedRuleValueType(row.operator, row.valueNumeric, row.valueText);
+  const sourceArticle = row.articleCode && row.articleCode.toLowerCase() !== "manual" ? `Article ${row.articleCode}` : null;
 
   return {
     id: row.id,
     zoneCode: row.zoneCode,
     zoneLabel: row.zoneLabel,
+    overlayId: row.overlayId,
+    overlayCode: row.overlayCode,
+    overlayLabel: row.overlayLabel,
+    overlayType: row.overlayType,
+    normativeEffect: row.normativeEffect,
+    proceduralEffect: row.proceduralEffect,
+    applicabilityScope: row.applicabilityScope,
+    ruleAnchorType: row.ruleAnchorType,
+    ruleAnchorLabel: row.ruleAnchorLabel,
     ruleFamily,
     ruleTopic: row.themeCode,
     ruleLabel: row.ruleLabel,
@@ -181,7 +210,7 @@ function toPublishedIndexedRule(row: {
     ruleCondition: row.conditionText,
     ruleException: null,
     sourcePage: row.sourcePage ?? null,
-    sourceArticle: row.articleCode ? `Article ${row.articleCode}` : null,
+    sourceArticle,
     sourceExcerpt: truncateSourceExcerpt(row.sourceText),
     confidenceScore: row.confidenceScore ?? null,
     reviewStatus: row.status,
@@ -488,6 +517,15 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
     id: indexedRegulatoryRulesTable.id,
     zoneCode: regulatoryCalibrationZonesTable.zoneCode,
     zoneLabel: regulatoryCalibrationZonesTable.zoneLabel,
+    overlayId: indexedRegulatoryRulesTable.overlayId,
+    overlayCode: regulatoryOverlaysTable.overlayCode,
+    overlayLabel: regulatoryOverlaysTable.overlayLabel,
+    overlayType: sql<string | null>`coalesce(${indexedRegulatoryRulesTable.overlayType}, ${regulatoryOverlaysTable.overlayType})`,
+    normativeEffect: indexedRegulatoryRulesTable.normativeEffect,
+    proceduralEffect: indexedRegulatoryRulesTable.proceduralEffect,
+    applicabilityScope: indexedRegulatoryRulesTable.applicabilityScope,
+    ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
+    ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
     articleCode: indexedRegulatoryRulesTable.articleCode,
     themeCode: indexedRegulatoryRulesTable.themeCode,
     ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
@@ -508,6 +546,7 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
   })
     .from(indexedRegulatoryRulesTable)
     .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
+    .leftJoin(regulatoryOverlaysTable, eq(indexedRegulatoryRulesTable.overlayId, regulatoryOverlaysTable.id))
     .leftJoin(townHallDocumentsTable, eq(indexedRegulatoryRulesTable.documentId, townHallDocumentsTable.id))
     .where(and(
       or(
@@ -585,6 +624,12 @@ export function buildParsedRulesFromUrbanRules(rules: StructuredUrbanRuleSource[
       source_page: rule.sourcePage,
       source_excerpt: rule.sourceExcerpt,
       review_status: rule.reviewStatus,
+      overlay_code: "overlayCode" in rule ? rule.overlayCode : null,
+      overlay_type: "overlayType" in rule ? rule.overlayType : null,
+      normative_effect: "normativeEffect" in rule ? rule.normativeEffect : null,
+      procedural_effect: "proceduralEffect" in rule ? rule.proceduralEffect : null,
+      rule_anchor_type: "ruleAnchorType" in rule ? rule.ruleAnchorType : null,
+      rule_anchor_label: "ruleAnchorLabel" in rule ? rule.ruleAnchorLabel : null,
     },
   }));
 }
@@ -623,6 +668,12 @@ export function buildArticlesFromUrbanRules(rules: StructuredUrbanRuleSource[]) 
       unit: rule.ruleUnit,
       condition: rule.ruleCondition,
       exception: rule.ruleException,
+      overlay_code: "overlayCode" in rule ? rule.overlayCode : null,
+      overlay_type: "overlayType" in rule ? rule.overlayType : null,
+      normative_effect: "normativeEffect" in rule ? rule.normativeEffect : null,
+      procedural_effect: "proceduralEffect" in rule ? rule.proceduralEffect : null,
+      rule_anchor_type: "ruleAnchorType" in rule ? rule.ruleAnchorType : null,
+      rule_anchor_label: "ruleAnchorLabel" in rule ? rule.ruleAnchorLabel : null,
     },
   }));
 }

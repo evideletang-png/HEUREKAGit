@@ -4,11 +4,13 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { townHallDocumentsTable } from "./townHallDocuments";
 import { calibratedExcerptsTable } from "./calibratedExcerpts";
 import { regulatoryCalibrationZonesTable } from "./regulatoryCalibrationZones";
+import { regulatoryOverlaysTable } from "./regulatoryOverlays";
 
 export const indexedRegulatoryRulesTable = pgTable("indexed_regulatory_rules", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   communeId: text("commune_id").notNull(),
-  zoneId: uuid("zone_id").references(() => regulatoryCalibrationZonesTable.id, { onDelete: "restrict" }).notNull(),
+  zoneId: uuid("zone_id").references(() => regulatoryCalibrationZonesTable.id, { onDelete: "restrict" }),
+  overlayId: uuid("overlay_id").references(() => regulatoryOverlaysTable.id, { onDelete: "restrict" }),
   documentId: uuid("document_id").references(() => townHallDocumentsTable.id, { onDelete: "cascade" }).notNull(),
   excerptId: uuid("excerpt_id").references(() => calibratedExcerptsTable.id, { onDelete: "cascade" }).notNull(),
   articleCode: text("article_code").notNull(),
@@ -21,6 +23,13 @@ export const indexedRegulatoryRulesTable = pgTable("indexed_regulatory_rules", {
   conditionText: text("condition_text"),
   interpretationNote: text("interpretation_note"),
   scopeType: text("scope_type").notNull().default("zone"),
+  overlayType: text("overlay_type"),
+  normativeEffect: text("normative_effect").notNull().default("primary"),
+  proceduralEffect: text("procedural_effect").notNull().default("none"),
+  applicabilityScope: text("applicability_scope").notNull().default("main_zone"),
+  ruleAnchorType: text("rule_anchor_type").notNull().default("article"),
+  ruleAnchorLabel: text("rule_anchor_label"),
+  conflictResolutionStatus: text("conflict_resolution_status").notNull().default("none"),
   sourceText: text("source_text").notNull(),
   sourcePage: integer("source_page").notNull(),
   sourcePageEnd: integer("source_page_end"),
@@ -39,6 +48,7 @@ export const indexedRegulatoryRulesTable = pgTable("indexed_regulatory_rules", {
 }, (table) => ({
   communeIdx: index("indexed_regulatory_rules_commune_idx").on(table.communeId),
   zoneIdx: index("indexed_regulatory_rules_zone_idx").on(table.zoneId),
+  overlayIdx: index("indexed_regulatory_rules_overlay_idx").on(table.overlayId),
   excerptIdx: index("indexed_regulatory_rules_excerpt_idx").on(table.excerptId),
   themeIdx: index("indexed_regulatory_rules_theme_idx").on(table.themeCode),
   statusIdx: index("indexed_regulatory_rules_status_idx").on(table.status),

@@ -24,6 +24,8 @@ import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urba
 import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
 import { regulatoryZoneSectionsTable } from "../../../../packages/db/src/schema/regulatoryZoneSections.js";
 import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/schema/regulatoryCalibrationZones.js";
+import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regulatoryOverlays.js";
+import { overlayDocumentBindingsTable } from "../../../../packages/db/src/schema/overlayDocumentBindings.js";
 import { regulatoryThemeTaxonomyTable } from "../../../../packages/db/src/schema/regulatoryThemeTaxonomy.js";
 import { calibratedExcerptsTable } from "../../../../packages/db/src/schema/calibratedExcerpts.js";
 import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
@@ -39,9 +41,15 @@ import { persistDocumentKnowledgeProfile } from "../services/documentKnowledgeSe
 import { persistUrbanRulesForDocument } from "../services/urbanRuleExtractionService.js";
 import {
   REGULATORY_ARTICLE_REFERENCE,
+  REGULATORY_NORMATIVE_EFFECTS,
+  REGULATORY_OVERLAY_TYPES,
+  REGULATORY_PROCEDURAL_EFFECTS,
+  REGULATORY_RULE_ANCHOR_TYPES,
+  REGULATORY_STRUCTURE_MODES,
   buildCalibrationSuggestionsForDocument,
   ensureRegulatoryThemeTaxonomySeed,
   listDocumentCalibrationData,
+  listCommuneRegulatoryOverlays,
   listPublishedRulesForCommune,
   recordRegulatoryValidationHistory,
   recomputeIndexedRuleConflicts,
@@ -204,6 +212,9 @@ async function purgeMunicipalityStructuredKnowledge(args: {
       .from(regulatoryCalibrationZonesTable)
       .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.municipalityAliases)),
   ]);
+  const overlays = await db.select({ id: regulatoryOverlaysTable.id })
+    .from(regulatoryOverlaysTable)
+    .where(buildMunicipalityAliasFilter(regulatoryOverlaysTable.communeId, args.municipalityAliases));
 
   const baseDocIds = Array.from(new Set([
     ...baseDocs.map((doc) => doc.id),
@@ -213,6 +224,7 @@ async function purgeMunicipalityStructuredKnowledge(args: {
     ...urbanRuleBaseDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
   ]));
   const calibrationZoneIds = calibrationZones.map((zone) => zone.id);
+  const overlayIds = overlays.map((overlay) => overlay.id);
 
   const excerpts = await db.select({ id: calibratedExcerptsTable.id })
     .from(calibratedExcerptsTable)
@@ -220,6 +232,7 @@ async function purgeMunicipalityStructuredKnowledge(args: {
       buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, args.municipalityAliases),
       args.townHallDocumentIds.length > 0 ? inArray(calibratedExcerptsTable.documentId, args.townHallDocumentIds) : null,
       calibrationZoneIds.length > 0 ? inArray(calibratedExcerptsTable.zoneId, calibrationZoneIds) : null,
+      overlayIds.length > 0 ? inArray(calibratedExcerptsTable.overlayId, overlayIds) : null,
     ]));
   const excerptIds = excerpts.map((excerpt) => excerpt.id);
 
@@ -229,6 +242,7 @@ async function purgeMunicipalityStructuredKnowledge(args: {
       buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, args.municipalityAliases),
       args.townHallDocumentIds.length > 0 ? inArray(indexedRegulatoryRulesTable.documentId, args.townHallDocumentIds) : null,
       calibrationZoneIds.length > 0 ? inArray(indexedRegulatoryRulesTable.zoneId, calibrationZoneIds) : null,
+      overlayIds.length > 0 ? inArray(indexedRegulatoryRulesTable.overlayId, overlayIds) : null,
       excerptIds.length > 0 ? inArray(indexedRegulatoryRulesTable.excerptId, excerptIds) : null,
     ]));
   const indexedRuleIds = indexedRules.map((rule) => rule.id);
@@ -258,11 +272,20 @@ async function purgeMunicipalityStructuredKnowledge(args: {
       ]))
       .returning({ id: regulatoryRuleConflictsTable.id });
 
+    const deletedOverlayBindings = await tx.delete(overlayDocumentBindingsTable)
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(overlayDocumentBindingsTable.communeId, args.municipalityAliases),
+        overlayIds.length > 0 ? inArray(overlayDocumentBindingsTable.overlayId, overlayIds) : null,
+        args.townHallDocumentIds.length > 0 ? inArray(overlayDocumentBindingsTable.documentId, args.townHallDocumentIds) : null,
+      ]))
+      .returning({ id: overlayDocumentBindingsTable.id });
+
     const deletedIndexedRules = await tx.delete(indexedRegulatoryRulesTable)
       .where(buildDeleteScopeFilter([
         buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, args.municipalityAliases),
         args.townHallDocumentIds.length > 0 ? inArray(indexedRegulatoryRulesTable.documentId, args.townHallDocumentIds) : null,
         calibrationZoneIds.length > 0 ? inArray(indexedRegulatoryRulesTable.zoneId, calibrationZoneIds) : null,
+        overlayIds.length > 0 ? inArray(indexedRegulatoryRulesTable.overlayId, overlayIds) : null,
         excerptIds.length > 0 ? inArray(indexedRegulatoryRulesTable.excerptId, excerptIds) : null,
       ]))
       .returning({ id: indexedRegulatoryRulesTable.id });
@@ -272,6 +295,7 @@ async function purgeMunicipalityStructuredKnowledge(args: {
         buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, args.municipalityAliases),
         args.townHallDocumentIds.length > 0 ? inArray(calibratedExcerptsTable.documentId, args.townHallDocumentIds) : null,
         calibrationZoneIds.length > 0 ? inArray(calibratedExcerptsTable.zoneId, calibrationZoneIds) : null,
+        overlayIds.length > 0 ? inArray(calibratedExcerptsTable.overlayId, overlayIds) : null,
       ]))
       .returning({ id: calibratedExcerptsTable.id });
 
@@ -281,6 +305,13 @@ async function purgeMunicipalityStructuredKnowledge(args: {
         calibrationZoneIds.length > 0 ? inArray(regulatoryCalibrationZonesTable.id, calibrationZoneIds) : null,
       ]))
       .returning({ id: regulatoryCalibrationZonesTable.id });
+
+    const deletedOverlays = await tx.delete(regulatoryOverlaysTable)
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(regulatoryOverlaysTable.communeId, args.municipalityAliases),
+        overlayIds.length > 0 ? inArray(regulatoryOverlaysTable.id, overlayIds) : null,
+      ]))
+      .returning({ id: regulatoryOverlaysTable.id });
 
     const deletedConflicts = await tx.delete(urbanRuleConflictsTable)
       .where(buildDeleteScopeFilter([
@@ -351,7 +382,9 @@ async function purgeMunicipalityStructuredKnowledge(args: {
       deletedCalibrationZones: deletedCalibrationZones.length,
       deletedExcerpts: deletedExcerpts.length,
       deletedIndexedRules: deletedIndexedRules.length,
+      deletedOverlayBindings: deletedOverlayBindings.length,
       deletedCalibrationConflicts: deletedCalibrationConflicts.length,
+      deletedOverlays: deletedOverlays.length,
       deletedValidationHistory: deletedValidationHistory.length,
       deletedZoneSections: deletedSections.length,
       deletedUnits: deletedUnits.length,
@@ -385,6 +418,10 @@ async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
   ]));
 
   return db.transaction(async (tx) => {
+    const deletedOverlayBindings = await tx.delete(overlayDocumentBindingsTable)
+      .where(eq(overlayDocumentBindingsTable.documentId, docId))
+      .returning({ id: overlayDocumentBindingsTable.id });
+
     const deletedIndexedRules = await tx.delete(indexedRegulatoryRulesTable)
       .where(eq(indexedRegulatoryRulesTable.documentId, docId))
       .returning({ id: indexedRegulatoryRulesTable.id });
@@ -430,6 +467,7 @@ async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
       deletedRules: deletedRules.length,
       deletedEmbeddings: deletedEmbeddings.length,
       deletedBaseDocs: deletedBaseDocs.length,
+      deletedOverlayBindings: deletedOverlayBindings.length,
     };
   });
 }
@@ -784,7 +822,7 @@ async function resolveCommuneAliases(commune: string) {
 
 async function safeRecordRegulatoryValidationHistory(args: {
   communeId: string;
-  entityType: "zone" | "excerpt" | "rule" | "conflict";
+  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict";
   entityId: string;
   fromStatus?: string | null;
   toStatus?: string | null;
@@ -2599,6 +2637,11 @@ router.get("/regulatory-calibration/themes", async (_req: AuthRequest, res) => {
         sortOrder: theme.sortOrder,
       })),
       articleReference: REGULATORY_ARTICLE_REFERENCE,
+      overlayTypes: REGULATORY_OVERLAY_TYPES,
+      normativeEffects: REGULATORY_NORMATIVE_EFFECTS,
+      proceduralEffects: REGULATORY_PROCEDURAL_EFFECTS,
+      structureModes: REGULATORY_STRUCTURE_MODES,
+      ruleAnchorTypes: REGULATORY_RULE_ANCHOR_TYPES,
     });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/themes GET]", err);
@@ -2613,13 +2656,19 @@ router.get("/regulatory-calibration/overview", async (req: AuthRequest, res) => 
 
     const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
 
-    const [documents, zones, excerpts, rules, conflicts] = await Promise.all([
+    const [documents, zones, overlays, bindings, excerpts, rules, conflicts] = await Promise.all([
       db.select({ id: townHallDocumentsTable.id })
         .from(townHallDocumentsTable)
         .where(eq(sql`lower(${townHallDocumentsTable.commune})`, access.targetCommune.toLowerCase())),
       db.select({ id: regulatoryCalibrationZonesTable.id })
         .from(regulatoryCalibrationZonesTable)
         .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases)),
+      db.select({ id: regulatoryOverlaysTable.id })
+        .from(regulatoryOverlaysTable)
+        .where(buildMunicipalityAliasFilter(regulatoryOverlaysTable.communeId, communeAliases)),
+      db.select({ id: overlayDocumentBindingsTable.id })
+        .from(overlayDocumentBindingsTable)
+        .where(buildMunicipalityAliasFilter(overlayDocumentBindingsTable.communeId, communeAliases)),
       db.select({ id: calibratedExcerptsTable.id, status: calibratedExcerptsTable.status })
         .from(calibratedExcerptsTable)
         .where(buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, communeAliases)),
@@ -2639,6 +2688,8 @@ router.get("/regulatory-calibration/overview", async (req: AuthRequest, res) => 
       summary: {
         documentCount: documents.length,
         zoneCount: zones.length,
+        overlayCount: overlays.length,
+        overlayBindingCount: bindings.length,
         excerptCount: excerpts.length,
         ruleCount: rules.length,
         publishedRuleCount: countByStatus(rules, "published"),
@@ -2867,6 +2918,250 @@ router.delete("/regulatory-calibration/zones/:id", async (req: AuthRequest, res)
   }
 });
 
+router.get("/regulatory-calibration/overlays", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+    const overlays = await listCommuneRegulatoryOverlays(communeAliases);
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: communeKey,
+      overlays: overlays.sort((left, right) => {
+        if ((left.priority || 0) !== (right.priority || 0)) return (left.priority || 0) - (right.priority || 0);
+        return left.overlayCode.localeCompare(right.overlayCode, "fr");
+      }),
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/overlays GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/overlays", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeKey, communeAliases } = await resolveCommuneAliases(access.targetCommune);
+    const overlayCode = normalizeConfiguredZoneCode(req.body.overlayCode);
+    const overlayType = typeof req.body.overlayType === "string" ? req.body.overlayType.trim() : "";
+    if (!overlayCode) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Code de couche invalide." });
+    }
+    if (!REGULATORY_OVERLAY_TYPES.includes(overlayType as typeof REGULATORY_OVERLAY_TYPES[number])) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Type de couche invalide." });
+    }
+
+    const existing = await db.select({ id: regulatoryOverlaysTable.id })
+      .from(regulatoryOverlaysTable)
+      .where(and(
+        buildMunicipalityAliasFilter(regulatoryOverlaysTable.communeId, communeAliases),
+        eq(regulatoryOverlaysTable.overlayCode, overlayCode),
+      ))
+      .limit(1);
+
+    const payload = {
+      overlayCode,
+      overlayLabel: typeof req.body.overlayLabel === "string" ? req.body.overlayLabel.trim() || null : null,
+      overlayType,
+      geometryRef: typeof req.body.geometryRef === "string" ? req.body.geometryRef.trim() || null : null,
+      guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
+      priority: Number.isFinite(Number(req.body.priority)) ? Number(req.body.priority) : 0,
+      status: typeof req.body.status === "string" && req.body.status.trim() ? req.body.status.trim() : "draft",
+      isActive: req.body.isActive === false ? false : true,
+    };
+
+    let overlay;
+    if (existing[0]) {
+      [overlay] = await db.update(regulatoryOverlaysTable)
+        .set({
+          ...payload,
+          updatedBy: req.user!.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(regulatoryOverlaysTable.id, existing[0].id))
+        .returning();
+      await safeRecordRegulatoryValidationHistory({
+        communeId: communeKey,
+        entityType: "overlay",
+        entityId: overlay.id,
+        action: "overlay_updated",
+        userId: req.user!.userId,
+        snapshot: overlay as Record<string, unknown>,
+      });
+    } else {
+      [overlay] = await db.insert(regulatoryOverlaysTable).values({
+        communeId: communeKey,
+        ...payload,
+        createdBy: req.user!.userId,
+        updatedBy: req.user!.userId,
+      }).returning();
+      await safeRecordRegulatoryValidationHistory({
+        communeId: communeKey,
+        entityType: "overlay",
+        entityId: overlay.id,
+        action: "overlay_created",
+        userId: req.user!.userId,
+        snapshot: overlay as Record<string, unknown>,
+      });
+    }
+
+    return res.json({ overlay });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/overlays POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de créer cette couche réglementaire." });
+  }
+});
+
+router.patch("/regulatory-calibration/overlays/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [overlay] = await db.select().from(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, id)).limit(1);
+    if (!overlay) return res.status(404).json({ error: "OVERLAY_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || overlay.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const nextType = typeof req.body.overlayType === "string" && req.body.overlayType.trim()
+      ? req.body.overlayType.trim()
+      : overlay.overlayType;
+    if (!REGULATORY_OVERLAY_TYPES.includes(nextType as typeof REGULATORY_OVERLAY_TYPES[number])) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Type de couche invalide." });
+    }
+
+    const [updated] = await db.update(regulatoryOverlaysTable)
+      .set({
+        overlayCode: normalizeConfiguredZoneCode(req.body.overlayCode) || overlay.overlayCode,
+        overlayLabel: req.body.overlayLabel === undefined ? overlay.overlayLabel : (typeof req.body.overlayLabel === "string" ? req.body.overlayLabel.trim() || null : null),
+        overlayType: nextType,
+        geometryRef: req.body.geometryRef === undefined ? overlay.geometryRef : (typeof req.body.geometryRef === "string" ? req.body.geometryRef.trim() || null : null),
+        guidanceNotes: req.body.guidanceNotes === undefined ? overlay.guidanceNotes : (typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null),
+        priority: req.body.priority === undefined ? overlay.priority : (Number.isFinite(Number(req.body.priority)) ? Number(req.body.priority) : overlay.priority),
+        status: req.body.status === undefined ? overlay.status : (typeof req.body.status === "string" && req.body.status.trim() ? req.body.status.trim() : overlay.status),
+        isActive: req.body.isActive === undefined ? overlay.isActive : !!req.body.isActive,
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(regulatoryOverlaysTable.id, id))
+      .returning();
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: updated.communeId,
+      entityType: "overlay",
+      entityId: updated.id,
+      action: "overlay_updated",
+      userId: req.user!.userId,
+      snapshot: updated as Record<string, unknown>,
+    });
+
+    return res.json({ overlay: updated });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/overlays PATCH]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de mettre à jour cette couche réglementaire." });
+  }
+});
+
+router.delete("/regulatory-calibration/overlays/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [overlay] = await db.select().from(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, id)).limit(1);
+    if (!overlay) return res.status(404).json({ error: "OVERLAY_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || overlay.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    await db.delete(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, id));
+    await safeRecordRegulatoryValidationHistory({
+      communeId: overlay.communeId,
+      entityType: "overlay",
+      entityId: overlay.id,
+      action: "overlay_deleted",
+      userId: req.user!.userId,
+      snapshot: overlay as Record<string, unknown>,
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/overlays DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Suppression de la couche réglementaire impossible." });
+  }
+});
+
+router.post("/regulatory-calibration/documents/:id/overlay-bindings", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [doc] = await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id)).limit(1);
+    if (!doc) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || doc.commune || undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const { communeKey } = await resolveCommuneAliases(access.targetCommune);
+
+    const overlayId = typeof req.body.overlayId === "string" ? req.body.overlayId.trim() : "";
+    if (!overlayId) return res.status(400).json({ error: "BAD_REQUEST", message: "Couche réglementaire obligatoire." });
+
+    const [overlay] = await db.select().from(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, overlayId)).limit(1);
+    if (!overlay || overlay.communeId !== communeKey) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Couche réglementaire invalide pour cette commune." });
+    }
+
+    const existing = await db.select({ id: overlayDocumentBindingsTable.id })
+      .from(overlayDocumentBindingsTable)
+      .where(and(eq(overlayDocumentBindingsTable.overlayId, overlayId), eq(overlayDocumentBindingsTable.documentId, id)))
+      .limit(1);
+
+    let binding;
+    if (existing[0]) {
+      [binding] = await db.update(overlayDocumentBindingsTable)
+        .set({
+          role: typeof req.body.role === "string" && req.body.role.trim() ? req.body.role.trim() : "supporting",
+          structureMode: typeof req.body.structureMode === "string" && req.body.structureMode.trim() ? req.body.structureMode.trim() : "mixed",
+          sourcePriority: Number.isFinite(Number(req.body.sourcePriority)) ? Number(req.body.sourcePriority) : 0,
+          isPrimary: !!req.body.isPrimary,
+          updatedBy: req.user!.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(overlayDocumentBindingsTable.id, existing[0].id))
+        .returning();
+      await safeRecordRegulatoryValidationHistory({
+        communeId: communeKey,
+        entityType: "binding",
+        entityId: binding.id,
+        action: "overlay_binding_updated",
+        userId: req.user!.userId,
+        snapshot: binding as Record<string, unknown>,
+      });
+    } else {
+      [binding] = await db.insert(overlayDocumentBindingsTable).values({
+        communeId: communeKey,
+        overlayId,
+        documentId: id,
+        role: typeof req.body.role === "string" && req.body.role.trim() ? req.body.role.trim() : "supporting",
+        structureMode: typeof req.body.structureMode === "string" && req.body.structureMode.trim() ? req.body.structureMode.trim() : "mixed",
+        sourcePriority: Number.isFinite(Number(req.body.sourcePriority)) ? Number(req.body.sourcePriority) : 0,
+        isPrimary: !!req.body.isPrimary,
+        createdBy: req.user!.userId,
+        updatedBy: req.user!.userId,
+      }).returning();
+      await safeRecordRegulatoryValidationHistory({
+        communeId: communeKey,
+        entityType: "binding",
+        entityId: binding.id,
+        action: "overlay_binding_created",
+        userId: req.user!.userId,
+        snapshot: binding as Record<string, unknown>,
+      });
+    }
+
+    return res.json({ binding });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/document-overlay-bindings POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
@@ -2887,6 +3182,7 @@ router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRe
     const calibrationData = await listDocumentCalibrationData({ communeAliases, documentId: id });
     const suggestions = await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: id });
     const zoneMap = new Map(calibrationData.zones.map((zone) => [zone.id, zone]));
+    const overlayMap = new Map(calibrationData.overlays.map((overlay) => [overlay.id, overlay]));
     const docAvailability = getTownHallDocumentAvailability(doc);
 
     return res.json({
@@ -2905,6 +3201,8 @@ router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRe
         rawTextLength: (doc.rawText || "").length,
       },
       zones: calibrationData.zones,
+      overlays: calibrationData.overlays,
+      bindings: calibrationData.bindings,
       themes: themes.map((theme) => ({
         code: theme.code,
         label: theme.label,
@@ -2915,7 +3213,8 @@ router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRe
       pages,
       excerpts: calibrationData.excerpts.map((excerpt) => ({
         ...excerpt,
-        zone: zoneMap.get(excerpt.zoneId) || null,
+        zone: excerpt.zoneId ? zoneMap.get(excerpt.zoneId) || null : null,
+        overlay: excerpt.overlayId ? overlayMap.get(excerpt.overlayId) || null : null,
         rules: calibrationData.rules.filter((rule) => rule.excerptId === excerpt.id),
       })),
       conflicts: calibrationData.conflicts,
@@ -2932,6 +3231,7 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
     const {
       commune,
       zoneId,
+      overlayId,
       documentId,
       articleCode,
       selectionLabel,
@@ -2948,13 +3248,22 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
     if (!access.ok) return res.status(access.status).json(access.error);
     const { communeKey } = await resolveCommuneAliases(access.targetCommune);
 
-    const [zone, doc] = await Promise.all([
-      db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, zoneId)).limit(1),
+    const [zone, overlay, doc] = await Promise.all([
+      zoneId ? db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, zoneId)).limit(1) : Promise.resolve([]),
+      overlayId ? db.select().from(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, overlayId)).limit(1) : Promise.resolve([]),
       db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, documentId)).limit(1),
     ]);
 
-    if (!zone[0]) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+    if (!zone[0] && !overlay[0]) return res.status(400).json({ error: "BAD_REQUEST", message: "Zone ou couche réglementaire obligatoire." });
+    if (zoneId && !zone[0]) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+    if (overlayId && !overlay[0]) return res.status(404).json({ error: "OVERLAY_NOT_FOUND" });
     if (!doc[0]) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
+    if (zone[0] && zone[0].communeId !== communeKey) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Zone invalide pour cette commune." });
+    }
+    if (overlay[0] && overlay[0].communeId !== communeKey) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Couche réglementaire invalide pour cette commune." });
+    }
     if (!sourceText || String(sourceText).trim().length < 8) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Sélection de texte obligatoire." });
     }
@@ -2964,7 +3273,8 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
 
     const [excerpt] = await db.insert(calibratedExcerptsTable).values({
       communeId: communeKey,
-      zoneId,
+      zoneId: zone[0]?.id || null,
+      overlayId: overlay[0]?.id || null,
       documentId,
       articleCode: typeof articleCode === "string" ? articleCode.trim() || null : null,
       selectionLabel: typeof selectionLabel === "string" ? selectionLabel.trim() || null : null,
@@ -3018,11 +3328,22 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       conditionText,
       interpretationNote,
       scopeType,
+      overlayType,
+      normativeEffect,
+      proceduralEffect,
+      applicabilityScope,
+      ruleAnchorType,
+      ruleAnchorLabel,
+      conflictResolutionStatus,
       confidenceScore,
       aiSuggested,
       validationNote,
       rawSuggestion,
     } = req.body || {};
+
+    const [excerptOverlay] = excerpt.overlayId
+      ? await db.select().from(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, excerpt.overlayId)).limit(1)
+      : [];
 
     if (!themeCode || typeof themeCode !== "string") {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Thème métier obligatoire." });
@@ -3034,9 +3355,10 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
     const [rule] = await db.insert(indexedRegulatoryRulesTable).values({
       communeId: excerpt.communeId,
       zoneId: excerpt.zoneId,
+      overlayId: excerpt.overlayId,
       documentId: excerpt.documentId,
       excerptId: excerpt.id,
-      articleCode: typeof articleCode === "string" && articleCode.trim() ? articleCode.trim() : excerpt.articleCode || "unknown",
+      articleCode: typeof articleCode === "string" && articleCode.trim() ? articleCode.trim() : excerpt.articleCode || "manual",
       themeCode: themeCode.trim(),
       ruleLabel: ruleLabel.trim(),
       operator: typeof operator === "string" ? operator.trim() || null : null,
@@ -3046,6 +3368,13 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       conditionText: typeof conditionText === "string" ? conditionText.trim() || null : null,
       interpretationNote: typeof interpretationNote === "string" ? interpretationNote.trim() || null : null,
       scopeType: typeof scopeType === "string" && scopeType.trim() ? scopeType.trim() : "zone",
+      overlayType: typeof overlayType === "string" && overlayType.trim() ? overlayType.trim() : excerptOverlay?.overlayType || null,
+      normativeEffect: typeof normativeEffect === "string" && normativeEffect.trim() ? normativeEffect.trim() : "primary",
+      proceduralEffect: typeof proceduralEffect === "string" && proceduralEffect.trim() ? proceduralEffect.trim() : "none",
+      applicabilityScope: typeof applicabilityScope === "string" && applicabilityScope.trim() ? applicabilityScope.trim() : "main_zone",
+      ruleAnchorType: typeof ruleAnchorType === "string" && ruleAnchorType.trim() ? ruleAnchorType.trim() : "article",
+      ruleAnchorLabel: typeof ruleAnchorLabel === "string" ? ruleAnchorLabel.trim() || null : null,
+      conflictResolutionStatus: typeof conflictResolutionStatus === "string" && conflictResolutionStatus.trim() ? conflictResolutionStatus.trim() : "none",
       sourceText: excerpt.sourceText,
       sourcePage: excerpt.sourcePage,
       sourcePageEnd: excerpt.sourcePageEnd,
@@ -3069,6 +3398,12 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       snapshot: rule as Record<string, unknown>,
     });
 
+    await recomputeIndexedRuleConflicts({
+      communeId: excerpt.communeId,
+      zoneId: rule.zoneId,
+      overlayId: rule.overlayId,
+    });
+
     return res.json({ rule });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/rules POST]", err);
@@ -3086,6 +3421,8 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
     if (!access.ok) return res.status(access.status).json(access.error);
 
     let nextZoneId = rule.zoneId;
+    let nextOverlayId = rule.overlayId;
+    let nextOverlayType = rule.overlayType;
     if (typeof req.body.zoneId === "string" && req.body.zoneId.trim()) {
       const requestedZoneId = req.body.zoneId.trim();
       const [targetZone] = await db.select()
@@ -3096,11 +3433,34 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
         return res.status(400).json({ error: "BAD_REQUEST", message: "Zone cible invalide pour cette commune." });
       }
       nextZoneId = targetZone.id;
+    } else if (req.body.zoneId === null || req.body.zoneId === "") {
+      nextZoneId = null;
+    }
+
+    if (typeof req.body.overlayId === "string" && req.body.overlayId.trim()) {
+      const requestedOverlayId = req.body.overlayId.trim();
+      const [targetOverlay] = await db.select()
+        .from(regulatoryOverlaysTable)
+        .where(eq(regulatoryOverlaysTable.id, requestedOverlayId))
+        .limit(1);
+      if (!targetOverlay || targetOverlay.communeId !== rule.communeId) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Couche cible invalide pour cette commune." });
+      }
+      nextOverlayId = targetOverlay.id;
+      nextOverlayType = targetOverlay.overlayType;
+    } else if (req.body.overlayId === null || req.body.overlayId === "") {
+      nextOverlayId = null;
+      nextOverlayType = null;
+    }
+
+    if (!nextZoneId && !nextOverlayId) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Zone ou couche réglementaire obligatoire." });
     }
 
     const [updated] = await db.update(indexedRegulatoryRulesTable)
       .set({
         zoneId: nextZoneId,
+        overlayId: nextOverlayId,
         articleCode: typeof req.body.articleCode === "string" && req.body.articleCode.trim() ? req.body.articleCode.trim() : rule.articleCode,
         themeCode: typeof req.body.themeCode === "string" && req.body.themeCode.trim() ? req.body.themeCode.trim() : rule.themeCode,
         ruleLabel: typeof req.body.ruleLabel === "string" && req.body.ruleLabel.trim() ? req.body.ruleLabel.trim() : rule.ruleLabel,
@@ -3111,6 +3471,13 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
         conditionText: req.body.conditionText === undefined ? rule.conditionText : (typeof req.body.conditionText === "string" ? req.body.conditionText.trim() || null : null),
         interpretationNote: req.body.interpretationNote === undefined ? rule.interpretationNote : (typeof req.body.interpretationNote === "string" ? req.body.interpretationNote.trim() || null : null),
         scopeType: req.body.scopeType === undefined ? rule.scopeType : (typeof req.body.scopeType === "string" && req.body.scopeType.trim() ? req.body.scopeType.trim() : rule.scopeType),
+        overlayType: req.body.overlayType === undefined ? nextOverlayType : (typeof req.body.overlayType === "string" ? req.body.overlayType.trim() || null : null),
+        normativeEffect: req.body.normativeEffect === undefined ? rule.normativeEffect : (typeof req.body.normativeEffect === "string" && req.body.normativeEffect.trim() ? req.body.normativeEffect.trim() : rule.normativeEffect),
+        proceduralEffect: req.body.proceduralEffect === undefined ? rule.proceduralEffect : (typeof req.body.proceduralEffect === "string" && req.body.proceduralEffect.trim() ? req.body.proceduralEffect.trim() : rule.proceduralEffect),
+        applicabilityScope: req.body.applicabilityScope === undefined ? rule.applicabilityScope : (typeof req.body.applicabilityScope === "string" && req.body.applicabilityScope.trim() ? req.body.applicabilityScope.trim() : rule.applicabilityScope),
+        ruleAnchorType: req.body.ruleAnchorType === undefined ? rule.ruleAnchorType : (typeof req.body.ruleAnchorType === "string" && req.body.ruleAnchorType.trim() ? req.body.ruleAnchorType.trim() : rule.ruleAnchorType),
+        ruleAnchorLabel: req.body.ruleAnchorLabel === undefined ? rule.ruleAnchorLabel : (typeof req.body.ruleAnchorLabel === "string" ? req.body.ruleAnchorLabel.trim() || null : null),
+        conflictResolutionStatus: req.body.conflictResolutionStatus === undefined ? rule.conflictResolutionStatus : (typeof req.body.conflictResolutionStatus === "string" && req.body.conflictResolutionStatus.trim() ? req.body.conflictResolutionStatus.trim() : rule.conflictResolutionStatus),
         validationNote: req.body.validationNote === undefined ? rule.validationNote : (typeof req.body.validationNote === "string" ? req.body.validationNote.trim() || null : null),
         updatedBy: req.user!.userId,
         updatedAt: new Date(),
@@ -3129,10 +3496,11 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
       snapshot: updated as Record<string, unknown>,
     });
 
-    await recomputeIndexedRuleConflicts({ communeId: updated.communeId, zoneId: rule.zoneId });
-    if (updated.zoneId !== rule.zoneId) {
-      await recomputeIndexedRuleConflicts({ communeId: updated.communeId, zoneId: updated.zoneId });
-    }
+    await recomputeIndexedRuleConflicts({
+      communeId: updated.communeId,
+      zoneId: updated.zoneId || rule.zoneId,
+      overlayId: updated.overlayId || rule.overlayId,
+    });
 
     return res.json({ rule: updated });
   } catch (err) {
@@ -3184,7 +3552,11 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
       snapshot: updated as Record<string, unknown>,
     });
 
-    await recomputeIndexedRuleConflicts({ communeId: updated.communeId, zoneId: updated.zoneId });
+    await recomputeIndexedRuleConflicts({
+      communeId: updated.communeId,
+      zoneId: updated.zoneId,
+      overlayId: updated.overlayId,
+    });
 
     return res.json({ rule: updated });
   } catch (err) {
@@ -3215,7 +3587,11 @@ router.delete("/regulatory-calibration/rules/:id", async (req: AuthRequest, res)
       snapshot: rule as Record<string, unknown>,
     });
 
-    await recomputeIndexedRuleConflicts({ communeId: rule.communeId, zoneId: rule.zoneId });
+    await recomputeIndexedRuleConflicts({
+      communeId: rule.communeId,
+      zoneId: rule.zoneId,
+      overlayId: rule.overlayId,
+    });
 
     return res.json({ deleted: true, ruleId: id });
   } catch (err) {
@@ -3239,6 +3615,7 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
       id: indexedRegulatoryRulesTable.id,
       communeId: indexedRegulatoryRulesTable.communeId,
       zoneId: indexedRegulatoryRulesTable.zoneId,
+      overlayId: indexedRegulatoryRulesTable.overlayId,
       articleCode: indexedRegulatoryRulesTable.articleCode,
       themeCode: indexedRegulatoryRulesTable.themeCode,
       ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
@@ -3250,16 +3627,27 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
       interpretationNote: indexedRegulatoryRulesTable.interpretationNote,
       sourceText: indexedRegulatoryRulesTable.sourceText,
       sourcePage: indexedRegulatoryRulesTable.sourcePage,
+      sourcePageEnd: indexedRegulatoryRulesTable.sourcePageEnd,
       confidenceScore: indexedRegulatoryRulesTable.confidenceScore,
       conflictFlag: indexedRegulatoryRulesTable.conflictFlag,
       status: indexedRegulatoryRulesTable.status,
       publishedAt: indexedRegulatoryRulesTable.publishedAt,
       zoneCode: regulatoryCalibrationZonesTable.zoneCode,
       zoneLabel: regulatoryCalibrationZonesTable.zoneLabel,
+      overlayCode: regulatoryOverlaysTable.overlayCode,
+      overlayLabel: regulatoryOverlaysTable.overlayLabel,
+      overlayType: sql<string | null>`coalesce(${indexedRegulatoryRulesTable.overlayType}, ${regulatoryOverlaysTable.overlayType})`,
+      normativeEffect: indexedRegulatoryRulesTable.normativeEffect,
+      proceduralEffect: indexedRegulatoryRulesTable.proceduralEffect,
+      applicabilityScope: indexedRegulatoryRulesTable.applicabilityScope,
+      ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
+      ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
+      conflictResolutionStatus: indexedRegulatoryRulesTable.conflictResolutionStatus,
       documentTitle: townHallDocumentsTable.title,
     })
       .from(indexedRegulatoryRulesTable)
       .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
+      .leftJoin(regulatoryOverlaysTable, eq(indexedRegulatoryRulesTable.overlayId, regulatoryOverlaysTable.id))
       .leftJoin(townHallDocumentsTable, eq(indexedRegulatoryRulesTable.documentId, townHallDocumentsTable.id))
       .where(
         and(

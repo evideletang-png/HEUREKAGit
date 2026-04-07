@@ -3,6 +3,8 @@ import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { calibratedExcerptsTable } from "../../../../packages/db/src/schema/calibratedExcerpts.js";
 import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
 import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/schema/regulatoryCalibrationZones.js";
+import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regulatoryOverlays.js";
+import { overlayDocumentBindingsTable } from "../../../../packages/db/src/schema/overlayDocumentBindings.js";
 import { regulatoryRuleConflictsTable } from "../../../../packages/db/src/schema/regulatoryRuleConflicts.js";
 import { regulatoryThemeTaxonomyTable } from "../../../../packages/db/src/schema/regulatoryThemeTaxonomy.js";
 import { regulatoryValidationHistoryTable } from "../../../../packages/db/src/schema/regulatoryValidationHistory.js";
@@ -53,6 +55,48 @@ export const REGULATORY_THEME_SEED = [
   ["acces_pompiers", "Accès pompiers", "Accès secours et sécurité incendie", "3"],
   ["eaux_pluviales", "Eaux pluviales", "Gestion des eaux pluviales", "4"],
   ["assainissement", "Assainissement", "Assainissement et eaux usées", "4"],
+] as const;
+
+export const REGULATORY_OVERLAY_TYPES = [
+  "SPR",
+  "PSMV",
+  "PVAP",
+  "PPRI",
+  "PPRT",
+  "ABF",
+  "servitude",
+] as const;
+
+export const REGULATORY_NORMATIVE_EFFECTS = [
+  "primary",
+  "additive",
+  "substitutive",
+  "restrictive",
+  "informative",
+] as const;
+
+export const REGULATORY_PROCEDURAL_EFFECTS = [
+  "none",
+  "abf_required",
+  "manual_review_required",
+  "special_authorization_possible",
+  "delay_extension_watch",
+] as const;
+
+export const REGULATORY_STRUCTURE_MODES = [
+  "articles_1_14",
+  "chapters_sections",
+  "prescriptions",
+  "mixed",
+] as const;
+
+export const REGULATORY_RULE_ANCHOR_TYPES = [
+  "article",
+  "chapter",
+  "section",
+  "prescription",
+  "legend",
+  "manual",
 ] as const;
 
 export type CalibrationPage = {
@@ -115,7 +159,7 @@ export async function ensureRegulatoryThemeTaxonomySeed() {
 
 export async function recordRegulatoryValidationHistory(args: {
   communeId: string;
-  entityType: "zone" | "excerpt" | "rule" | "conflict";
+  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict";
   entityId: string;
   fromStatus?: string | null;
   toStatus?: string | null;
@@ -139,17 +183,22 @@ export async function recordRegulatoryValidationHistory(args: {
 
 export function validateIndexedRuleForPublication(rule: {
   zoneId?: string | null;
+  overlayId?: string | null;
   documentId?: string | null;
   excerptId?: string | null;
   articleCode?: string | null;
+  ruleAnchorType?: string | null;
+  ruleAnchorLabel?: string | null;
   themeCode?: string | null;
   sourceText?: string | null;
   sourcePage?: number | null;
 }) {
-  if (!rule.zoneId) return { ok: false, message: "Zone obligatoire avant publication." };
+  const normalizedArticle = typeof rule.articleCode === "string" ? rule.articleCode.trim().toLowerCase() : "";
+  const hasArticle = normalizedArticle.length > 0 && normalizedArticle !== "manual";
+  if (!rule.zoneId && !rule.overlayId) return { ok: false, message: "Zone ou couche réglementaire obligatoire avant publication." };
   if (!rule.documentId) return { ok: false, message: "Document source obligatoire avant publication." };
   if (!rule.excerptId) return { ok: false, message: "Extrait calibré obligatoire avant publication." };
-  if (!rule.articleCode) return { ok: false, message: "Article obligatoire avant publication." };
+  if (!hasArticle && !rule.ruleAnchorLabel) return { ok: false, message: "Article ou ancre réglementaire obligatoire avant publication." };
   if (!rule.themeCode) return { ok: false, message: "Thème métier obligatoire avant publication." };
   if (!rule.sourceText || rule.sourceText.trim().length < 8) return { ok: false, message: "Texte source obligatoire avant publication." };
   if (!Number.isFinite(Number(rule.sourcePage)) || Number(rule.sourcePage) <= 0) {
@@ -163,7 +212,8 @@ function rulesConflict(
   right: typeof indexedRegulatoryRulesTable.$inferSelect,
 ) {
   if (left.themeCode !== right.themeCode) return false;
-  if (left.zoneId !== right.zoneId) return false;
+  if ((left.zoneId || null) !== (right.zoneId || null)) return false;
+  if ((left.overlayId || null) !== (right.overlayId || null)) return false;
   if (left.id === right.id) return false;
 
   const leftNumeric = left.valueNumeric;
@@ -181,10 +231,21 @@ function rulesConflict(
   return false;
 }
 
-export async function recomputeIndexedRuleConflicts(args: { communeId: string; zoneId?: string | null }) {
-  const ruleFilter = args.zoneId
-    ? and(eq(indexedRegulatoryRulesTable.communeId, args.communeId), eq(indexedRegulatoryRulesTable.zoneId, args.zoneId), ne(indexedRegulatoryRulesTable.status, "draft"))
-    : and(eq(indexedRegulatoryRulesTable.communeId, args.communeId), ne(indexedRegulatoryRulesTable.status, "draft"));
+export async function recomputeIndexedRuleConflicts(args: {
+  communeId: string;
+  zoneId?: string | null;
+  overlayId?: string | null;
+}) {
+  const shouldRecomputeWholeCommune = !!args.overlayId;
+  const scopeFilters = [
+    !shouldRecomputeWholeCommune && args.zoneId ? eq(indexedRegulatoryRulesTable.zoneId, args.zoneId) : null,
+  ].filter((value): value is Exclude<typeof value, null> => !!value);
+
+  const ruleFilter = and(
+    eq(indexedRegulatoryRulesTable.communeId, args.communeId),
+    ne(indexedRegulatoryRulesTable.status, "draft"),
+    scopeFilters.length > 0 ? or(...scopeFilters) : undefined,
+  );
 
   const rules = await db.select().from(indexedRegulatoryRulesTable).where(ruleFilter);
   const conflictPairs = new Map<string, typeof rules[number]>();
@@ -204,9 +265,11 @@ export async function recomputeIndexedRuleConflicts(args: { communeId: string; z
   }
 
   await db.delete(regulatoryRuleConflictsTable).where(
-    args.zoneId
-      ? and(eq(regulatoryRuleConflictsTable.communeId, args.communeId), eq(regulatoryRuleConflictsTable.zoneId, args.zoneId))
-      : eq(regulatoryRuleConflictsTable.communeId, args.communeId),
+    shouldRecomputeWholeCommune
+      ? eq(regulatoryRuleConflictsTable.communeId, args.communeId)
+      : args.zoneId
+        ? and(eq(regulatoryRuleConflictsTable.communeId, args.communeId), eq(regulatoryRuleConflictsTable.zoneId, args.zoneId))
+        : eq(regulatoryRuleConflictsTable.communeId, args.communeId),
   );
 
   if (rules.length > 0) {
@@ -231,7 +294,7 @@ export async function recomputeIndexedRuleConflicts(args: { communeId: string; z
           rightRuleId: rightId,
           themeCode: leftRule.themeCode,
           conflictType: "value_mismatch",
-          conflictSummary: `Conflit détecté sur ${leftRule.ruleLabel} pour cette zone.`,
+          conflictSummary: `Conflit détecté sur ${leftRule.ruleLabel} pour ${leftRule.overlayId ? "cette couche réglementaire" : "cette zone"}.`,
           status: "open",
           updatedAt: new Date(),
         };
@@ -285,6 +348,7 @@ export async function listPublishedRulesForCommune(communeId: string) {
   return db.select({
     id: indexedRegulatoryRulesTable.id,
     zoneId: indexedRegulatoryRulesTable.zoneId,
+    overlayId: indexedRegulatoryRulesTable.overlayId,
     articleCode: indexedRegulatoryRulesTable.articleCode,
     themeCode: indexedRegulatoryRulesTable.themeCode,
     ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
@@ -299,9 +363,18 @@ export async function listPublishedRulesForCommune(communeId: string) {
     publishedAt: indexedRegulatoryRulesTable.publishedAt,
     zoneCode: regulatoryCalibrationZonesTable.zoneCode,
     zoneLabel: regulatoryCalibrationZonesTable.zoneLabel,
+    overlayCode: regulatoryOverlaysTable.overlayCode,
+    overlayLabel: regulatoryOverlaysTable.overlayLabel,
+    overlayType: indexedRegulatoryRulesTable.overlayType,
+    normativeEffect: indexedRegulatoryRulesTable.normativeEffect,
+    proceduralEffect: indexedRegulatoryRulesTable.proceduralEffect,
+    applicabilityScope: indexedRegulatoryRulesTable.applicabilityScope,
+    ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
+    ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
   })
     .from(indexedRegulatoryRulesTable)
     .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
+    .leftJoin(regulatoryOverlaysTable, eq(indexedRegulatoryRulesTable.overlayId, regulatoryOverlaysTable.id))
     .where(and(eq(indexedRegulatoryRulesTable.communeId, communeId), eq(indexedRegulatoryRulesTable.status, "published")));
 }
 
@@ -316,13 +389,26 @@ export async function listCommuneCalibrationZones(communeAliases: string[]) {
     );
 }
 
+export async function listCommuneRegulatoryOverlays(communeAliases: string[]) {
+  return db.select()
+    .from(regulatoryOverlaysTable)
+    .where(
+      or(
+        inArray(regulatoryOverlaysTable.communeId, communeAliases),
+        ...communeAliases.map((alias) => eq(regulatoryOverlaysTable.communeId, alias)),
+      )!,
+    );
+}
+
 export async function listDocumentCalibrationData(args: { communeAliases: string[]; documentId: string }) {
-  const [zones, excerpts, rules, conflicts] = await Promise.all([
+  const [zones, overlays, bindings, excerpts, rules, conflicts] = await Promise.all([
     listCommuneCalibrationZones(args.communeAliases),
+    listCommuneRegulatoryOverlays(args.communeAliases),
+    db.select().from(overlayDocumentBindingsTable).where(eq(overlayDocumentBindingsTable.documentId, args.documentId)),
     db.select().from(calibratedExcerptsTable).where(eq(calibratedExcerptsTable.documentId, args.documentId)),
     db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.documentId, args.documentId)),
     db.select().from(regulatoryRuleConflictsTable).where(eq(regulatoryRuleConflictsTable.communeId, args.communeAliases[0] || "")),
   ]);
 
-  return { zones, excerpts, rules, conflicts };
+  return { zones, overlays, bindings, excerpts, rules, conflicts };
 }

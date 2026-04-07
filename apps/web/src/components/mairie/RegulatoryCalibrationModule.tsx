@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CheckCircle2, Eye, FilePenLine, FileText, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,11 +37,45 @@ type ZoneItem = {
   isActive: boolean;
 };
 
+type OverlayItem = {
+  id: string;
+  communeId: string;
+  overlayCode: string;
+  overlayLabel: string | null;
+  overlayType: string;
+  geometryRef: string | null;
+  guidanceNotes: string | null;
+  priority: number;
+  status: string;
+  isActive: boolean;
+};
+
+type OverlayBindingItem = {
+  id: string;
+  communeId: string;
+  overlayId: string;
+  documentId: string;
+  role: string;
+  structureMode: string;
+  sourcePriority: number;
+  isPrimary: boolean;
+};
+
 type ThemeItem = {
   code: string;
   label: string;
   description: string | null;
   articleHint: string | null;
+};
+
+type CalibrationThemePayload = {
+  themes: ThemeItem[];
+  articleReference: Array<{ code: string; label: string }>;
+  overlayTypes: string[];
+  normativeEffects: string[];
+  proceduralEffects: string[];
+  structureModes: string[];
+  ruleAnchorTypes: string[];
 };
 
 type WorkspaceData = {
@@ -60,12 +94,15 @@ type WorkspaceData = {
     rawTextLength: number;
   };
   zones: ZoneItem[];
+  overlays: OverlayItem[];
+  bindings: OverlayBindingItem[];
   themes: ThemeItem[];
   articleReference: Array<{ code: string; label: string }>;
   pages: Array<{ pageNumber: number; text: string; startOffset: number; endOffset: number }>;
   excerpts: Array<{
     id: string;
-    zoneId: string;
+    zoneId: string | null;
+    overlayId: string | null;
     articleCode: string | null;
     selectionLabel: string | null;
     sourceText: string;
@@ -74,6 +111,7 @@ type WorkspaceData = {
     status: string;
     aiSuggested: boolean;
     zone: ZoneItem | null;
+    overlay: OverlayItem | null;
     rules: Array<{
       id: string;
       articleCode: string;
@@ -86,6 +124,14 @@ type WorkspaceData = {
       conditionText: string | null;
       interpretationNote: string | null;
       scopeType: string;
+      overlayId: string | null;
+      overlayType: string | null;
+      normativeEffect: string;
+      proceduralEffect: string;
+      applicabilityScope: string;
+      ruleAnchorType: string;
+      ruleAnchorLabel: string | null;
+      conflictResolutionStatus: string;
       sourceText: string;
       sourcePage: number;
       confidenceScore: number | null;
@@ -114,6 +160,10 @@ type LibraryResponse = {
     zoneId: string | null;
     zoneCode: string | null;
     zoneLabel: string | null;
+    overlayId: string | null;
+    overlayCode: string | null;
+    overlayLabel: string | null;
+    overlayType: string | null;
     articleCode: string;
     themeCode: string;
     themeLabel: string;
@@ -126,10 +176,17 @@ type LibraryResponse = {
     interpretationNote: string | null;
     sourceText: string;
     sourcePage: number;
+    sourcePageEnd: number | null;
     confidenceScore: number | null;
     conflictFlag: boolean;
     status: string;
     publishedAt: string | null;
+    normativeEffect: string;
+    proceduralEffect: string;
+    applicabilityScope: string;
+    ruleAnchorType: string;
+    ruleAnchorLabel: string | null;
+    conflictResolutionStatus: string;
     documentTitle: string | null;
   }>;
   conflicts: Array<{ id: string; conflictSummary: string; status: string }>;
@@ -142,6 +199,8 @@ type OverviewResponse = {
   summary: {
     documentCount: number;
     zoneCount: number;
+    overlayCount: number;
+    overlayBindingCount: number;
     excerptCount: number;
     ruleCount: number;
     publishedRuleCount: number;
@@ -183,6 +242,43 @@ function getStatusBadge(status: string) {
   }
 }
 
+function getNormativeEffectLabel(effect: string | null | undefined) {
+  switch (effect) {
+    case "substitutive":
+      return "Substitutive";
+    case "additive":
+      return "Complémentaire";
+    case "restrictive":
+      return "Restrictive";
+    case "informative":
+      return "Informative";
+    default:
+      return "Principale";
+  }
+}
+
+function getProceduralEffectLabel(effect: string | null | undefined) {
+  switch (effect) {
+    case "abf_required":
+      return "Avis ABF requis";
+    case "manual_review_required":
+      return "Revue manuelle";
+    case "special_authorization_possible":
+      return "Autorisation spéciale";
+    case "delay_extension_watch":
+      return "Délais à surveiller";
+    default:
+      return "Sans effet procédural";
+  }
+}
+
+function getRuleTargetLabel(rule: Pick<LibraryResponse["rules"][number], "zoneCode" | "overlayCode" | "overlayType">) {
+  if (rule.zoneCode && rule.overlayCode) return `${rule.zoneCode} + ${rule.overlayCode}`;
+  if (rule.zoneCode) return rule.zoneCode;
+  if (rule.overlayCode) return `${rule.overlayType || "Overlay"} · ${rule.overlayCode}`;
+  return "Cible non définie";
+}
+
 function formatRuleValue(rule: LibraryResponse["rules"][number] | WorkspaceData["excerpts"][number]["rules"][number]) {
   const numeric = typeof rule.valueNumeric === "number" ? `${rule.operator || ""} ${rule.valueNumeric}${rule.unit ? ` ${rule.unit}` : ""}`.trim() : null;
   return numeric || rule.valueText || "Valeur non structurée";
@@ -191,6 +287,7 @@ function formatRuleValue(rule: LibraryResponse["rules"][number] | WorkspaceData[
 function buildRuleEditorDraft(rule: LibraryResponse["rules"][number]) {
   return {
     zoneId: rule.zoneId || "",
+    overlayId: rule.overlayId || "",
     articleCode: rule.articleCode || "",
     themeCode: rule.themeCode || "",
     ruleLabel: rule.ruleLabel || "",
@@ -200,6 +297,12 @@ function buildRuleEditorDraft(rule: LibraryResponse["rules"][number]) {
     unit: rule.unit || "",
     conditionText: rule.conditionText || "",
     interpretationNote: rule.interpretationNote || "",
+    normativeEffect: rule.normativeEffect || "primary",
+    proceduralEffect: rule.proceduralEffect || "none",
+    applicabilityScope: rule.applicabilityScope || "main_zone",
+    ruleAnchorType: rule.ruleAnchorType || "article",
+    ruleAnchorLabel: rule.ruleAnchorLabel || "",
+    conflictResolutionStatus: rule.conflictResolutionStatus || "none",
   };
 }
 
@@ -209,6 +312,37 @@ function buildZoneEditorDraft(zone: ZoneItem) {
     zoneLabel: zone.zoneLabel || "",
     parentZoneCode: zone.parentZoneCode || "",
     guidanceNotes: zone.guidanceNotes || "",
+  };
+}
+
+function buildOverlayEditorDraft(overlay: OverlayItem) {
+  return {
+    overlayCode: overlay.overlayCode || "",
+    overlayLabel: overlay.overlayLabel || "",
+    overlayType: overlay.overlayType || "SPR",
+    guidanceNotes: overlay.guidanceNotes || "",
+    geometryRef: overlay.geometryRef || "",
+    priority: String(overlay.priority ?? 0),
+    status: overlay.status || "draft",
+  };
+}
+
+function buildEmptyRuleDraft() {
+  return {
+    themeCode: "",
+    ruleLabel: "",
+    operator: "",
+    valueNumeric: "",
+    valueText: "",
+    unit: "",
+    conditionText: "",
+    interpretationNote: "",
+    normativeEffect: "primary",
+    proceduralEffect: "none",
+    applicabilityScope: "main_zone",
+    ruleAnchorType: "article",
+    ruleAnchorLabel: "",
+    conflictResolutionStatus: "none",
   };
 }
 
@@ -226,15 +360,37 @@ export function RegulatoryCalibrationModule({
   const [activeTab, setActiveTab] = useState("zones");
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [zoneForm, setZoneForm] = useState({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "" });
+  const [overlayForm, setOverlayForm] = useState({
+    overlayCode: "",
+    overlayLabel: "",
+    overlayType: "SPR",
+    guidanceNotes: "",
+    geometryRef: "",
+    priority: "0",
+    status: "draft",
+  });
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [zoneEditorDrafts, setZoneEditorDrafts] = useState<Record<string, ReturnType<typeof buildZoneEditorDraft>>>({});
+  const [editingOverlayId, setEditingOverlayId] = useState<string | null>(null);
+  const [overlayEditorDrafts, setOverlayEditorDrafts] = useState<Record<string, ReturnType<typeof buildOverlayEditorDraft>>>({});
   const [selectionZoneId, setSelectionZoneId] = useState("");
+  const [selectionOverlayId, setSelectionOverlayId] = useState("");
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
   const [pendingSelection, setPendingSelection] = useState<{ text: string; pageNumber: number } | null>(null);
   const [activeExcerptId, setActiveExcerptId] = useState<string | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleEditorDrafts, setRuleEditorDrafts] = useState<Record<string, ReturnType<typeof buildRuleEditorDraft>>>({});
+  const [documentOverlayDrafts, setDocumentOverlayDrafts] = useState<Record<string, {
+    overlayId: string;
+    role: string;
+    structureMode: string;
+    sourcePriority: string;
+    isPrimary: boolean;
+  }>>({});
+  const [libraryOverlayFilter, setLibraryOverlayFilter] = useState("all");
+  const [libraryNormativeFilter, setLibraryNormativeFilter] = useState("all");
+  const [libraryProceduralFilter, setLibraryProceduralFilter] = useState("all");
   const [ruleDrafts, setRuleDrafts] = useState<Record<string, {
     themeCode: string;
     ruleLabel: string;
@@ -244,9 +400,15 @@ export function RegulatoryCalibrationModule({
     unit: string;
     conditionText: string;
     interpretationNote: string;
+    normativeEffect: string;
+    proceduralEffect: string;
+    applicabilityScope: string;
+    ruleAnchorType: string;
+    ruleAnchorLabel: string;
+    conflictResolutionStatus: string;
   }>>({});
 
-  const { data: themesData, error: themesError } = useQuery<{ themes: ThemeItem[]; articleReference: Array<{ code: string; label: string }> }>({
+  const { data: themesData, error: themesError } = useQuery<CalibrationThemePayload>({
     queryKey: ["reg-calibration-themes"],
     queryFn: () => apiFetch("/api/mairie/regulatory-calibration/themes"),
     enabled: currentCommune !== "all",
@@ -261,6 +423,12 @@ export function RegulatoryCalibrationModule({
   const { data: zonesData, isLoading: loadingZones, error: zonesError } = useQuery<{ commune: string; communeId: string; zones: ZoneItem[] }>({
     queryKey: ["reg-calibration-zones", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/zones?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
+  const { data: overlaysData, isLoading: loadingOverlays, error: overlaysError } = useQuery<{ commune: string; communeId: string; overlays: OverlayItem[] }>({
+    queryKey: ["reg-calibration-overlays", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/overlays?commune=${encodeURIComponent(currentCommune)}`),
     enabled: currentCommune !== "all",
   });
 
@@ -285,6 +453,7 @@ export function RegulatoryCalibrationModule({
   const refreshCalibration = () => {
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-overview", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-zones", currentCommune] });
+    queryClient.invalidateQueries({ queryKey: ["reg-calibration-overlays", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-workspace", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-library", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["mairie-documents", currentCommune] });
@@ -318,6 +487,69 @@ export function RegulatoryCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const createOverlayMutation = useMutation({
+    mutationFn: async () => apiFetch("/api/mairie/regulatory-calibration/overlays", {
+      method: "POST",
+      body: JSON.stringify({
+        commune: currentCommune,
+        overlayCode: overlayForm.overlayCode,
+        overlayLabel: overlayForm.overlayLabel,
+        overlayType: overlayForm.overlayType,
+        guidanceNotes: overlayForm.guidanceNotes,
+        geometryRef: overlayForm.geometryRef,
+        priority: overlayForm.priority,
+        status: overlayForm.status,
+      }),
+    }),
+    onSuccess: () => {
+      setOverlayForm({
+        overlayCode: "",
+        overlayLabel: "",
+        overlayType: themesData?.overlayTypes?.[0] || "SPR",
+        guidanceNotes: "",
+        geometryRef: "",
+        priority: "0",
+        status: "draft",
+      });
+      refreshCalibration();
+      toast({ title: "Couche créée", description: "La couche réglementaire est disponible pour le calibrage." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateOverlayMutation = useMutation({
+    mutationFn: async ({ overlayId, draft }: { overlayId: string; draft: ReturnType<typeof buildOverlayEditorDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/overlays/${overlayId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        commune: currentCommune,
+        overlayCode: draft.overlayCode,
+        overlayLabel: draft.overlayLabel,
+        overlayType: draft.overlayType,
+        guidanceNotes: draft.guidanceNotes,
+        geometryRef: draft.geometryRef,
+        priority: draft.priority,
+        status: draft.status,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setEditingOverlayId((current) => (current === variables.overlayId ? null : current));
+      toast({ title: "Couche modifiée", description: "La couche réglementaire a été mise à jour." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteOverlayMutation = useMutation({
+    mutationFn: async (overlayId: string) => apiFetch(`/api/mairie/regulatory-calibration/overlays/${overlayId}?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "DELETE",
+    }),
+    onSuccess: () => {
+      refreshCalibration();
+      toast({ title: "Couche supprimée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const updateZoneMutation = useMutation({
     mutationFn: async ({ zoneId, draft }: { zoneId: string; draft: ReturnType<typeof buildZoneEditorDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/zones/${zoneId}`, {
       method: "PATCH",
@@ -342,9 +574,10 @@ export function RegulatoryCalibrationModule({
       method: "POST",
       body: JSON.stringify({
         commune: currentCommune,
-        zoneId: selectionZoneId,
+        zoneId: selectionZoneId || null,
+        overlayId: selectionOverlayId || null,
         documentId: selectedDocumentId,
-        articleCode: selectionArticleCode,
+        articleCode: selectionArticleCode || null,
         selectionLabel,
         sourceText: pendingSelection?.text,
         sourcePage: pendingSelection?.pageNumber,
@@ -354,6 +587,7 @@ export function RegulatoryCalibrationModule({
       refreshCalibration();
       setActiveExcerptId(payload.excerpt.id);
       setSelectionLabel("");
+      setSelectionArticleCode("");
       toast({ title: "Extrait calibré", description: "Tu peux maintenant créer une ou plusieurs règles depuis cet extrait." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -372,22 +606,19 @@ export function RegulatoryCalibrationModule({
         unit: draft.unit,
         conditionText: draft.conditionText,
         interpretationNote: draft.interpretationNote,
+        normativeEffect: draft.normativeEffect,
+        proceduralEffect: draft.proceduralEffect,
+        applicabilityScope: draft.applicabilityScope,
+        ruleAnchorType: draft.ruleAnchorType,
+        ruleAnchorLabel: draft.ruleAnchorLabel,
+        conflictResolutionStatus: draft.conflictResolutionStatus,
       }),
     }),
     onSuccess: (_payload, variables) => {
       refreshCalibration();
       setRuleDrafts((current) => ({
         ...current,
-        [variables.excerptId]: {
-          themeCode: "",
-          ruleLabel: "",
-          operator: "",
-          valueNumeric: "",
-          valueText: "",
-          unit: "",
-          conditionText: "",
-          interpretationNote: "",
-        },
+        [variables.excerptId]: buildEmptyRuleDraft(),
       }));
       toast({ title: "Règle créée", description: "La règle est enregistrée comme brouillon interne." });
     },
@@ -412,6 +643,7 @@ export function RegulatoryCalibrationModule({
       body: JSON.stringify({
         commune: currentCommune,
         zoneId: draft.zoneId,
+        overlayId: draft.overlayId,
         articleCode: draft.articleCode,
         themeCode: draft.themeCode,
         ruleLabel: draft.ruleLabel,
@@ -421,6 +653,12 @@ export function RegulatoryCalibrationModule({
         unit: draft.unit,
         conditionText: draft.conditionText,
         interpretationNote: draft.interpretationNote,
+        normativeEffect: draft.normativeEffect,
+        proceduralEffect: draft.proceduralEffect,
+        applicabilityScope: draft.applicabilityScope,
+        ruleAnchorType: draft.ruleAnchorType,
+        ruleAnchorLabel: draft.ruleAnchorLabel,
+        conflictResolutionStatus: draft.conflictResolutionStatus,
       }),
     }),
     onSuccess: (_payload, variables) => {
@@ -452,6 +690,35 @@ export function RegulatoryCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const bindDocumentOverlayMutation = useMutation({
+    mutationFn: async ({ documentId, draft }: { documentId: string; draft: NonNullable<typeof documentOverlayDrafts[string]> }) => apiFetch(`/api/mairie/regulatory-calibration/documents/${documentId}/overlay-bindings`, {
+      method: "POST",
+      body: JSON.stringify({
+        commune: currentCommune,
+        overlayId: draft.overlayId,
+        role: draft.role,
+        structureMode: draft.structureMode,
+        sourcePriority: draft.sourcePriority,
+        isPrimary: draft.isPrimary,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setDocumentOverlayDrafts((current) => ({
+        ...current,
+        [variables.documentId]: {
+          overlayId: "",
+          role: "supporting",
+          structureMode: themesData?.structureModes?.[0] || "mixed",
+          sourcePriority: "0",
+          isPrimary: false,
+        },
+      }));
+      toast({ title: "Document lié", description: "Le document est désormais rattaché à cette couche réglementaire." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const deleteDocumentMutation = useMutation({
     mutationFn: async (documentId: string) => apiFetch(`/api/mairie/documents/${documentId}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -462,12 +729,8 @@ export function RegulatoryCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const selectedDocument = useMemo(
-    () => documents.find((doc) => doc.id === selectedDocumentId) || null,
-    [documents, selectedDocumentId],
-  );
   const canEditCalibration = currentCommune !== "all";
-  const calibrationLoadError = overviewError || zonesError || themesError || libraryError || publishedError || (selectedDocumentId ? workspaceError : null);
+  const calibrationLoadError = overviewError || zonesError || overlaysError || themesError || libraryError || publishedError || (selectedDocumentId ? workspaceError : null);
   const calibrationLoadErrorMessage = calibrationLoadError instanceof Error
     ? calibrationLoadError.message
     : calibrationLoadError
@@ -475,6 +738,24 @@ export function RegulatoryCalibrationModule({
       : null;
 
   const activeRules = workspaceData?.excerpts.find((excerpt) => excerpt.id === activeExcerptId)?.rules || [];
+  const filteredLibraryRules = useMemo(() => {
+    const rules = libraryData?.rules || [];
+    return rules.filter((rule) => {
+      if (libraryOverlayFilter !== "all" && (rule.overlayId || "") !== libraryOverlayFilter) return false;
+      if (libraryNormativeFilter !== "all" && rule.normativeEffect !== libraryNormativeFilter) return false;
+      if (libraryProceduralFilter !== "all" && rule.proceduralEffect !== libraryProceduralFilter) return false;
+      return true;
+    });
+  }, [libraryData?.rules, libraryNormativeFilter, libraryOverlayFilter, libraryProceduralFilter]);
+
+  const publishedRuleGroups = useMemo(() => {
+    const rules = publishedData?.rules || [];
+    return {
+      main: rules.filter((rule) => !rule.overlayId && rule.normativeEffect === "primary"),
+      overlays: rules.filter((rule) => !!rule.overlayId || rule.normativeEffect !== "primary"),
+      procedural: rules.filter((rule) => rule.proceduralEffect !== "none"),
+    };
+  }, [publishedData?.rules]);
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -487,7 +768,7 @@ export function RegulatoryCalibrationModule({
       </TabsList>
 
       <Card className="border-primary/10 shadow-sm">
-        <CardContent className="grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-8">
+        <CardContent className="grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-10">
           <div className="rounded-xl border bg-muted/20 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Documents</div>
             <div className="mt-1 text-2xl font-bold">{overviewData?.summary.documentCount ?? 0}</div>
@@ -495,6 +776,14 @@ export function RegulatoryCalibrationModule({
           <div className="rounded-xl border bg-muted/20 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones</div>
             <div className="mt-1 text-2xl font-bold">{overviewData?.summary.zoneCount ?? 0}</div>
+          </div>
+          <div className="rounded-xl border bg-muted/20 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Overlays</div>
+            <div className="mt-1 text-2xl font-bold">{overviewData?.summary.overlayCount ?? 0}</div>
+          </div>
+          <div className="rounded-xl border bg-muted/20 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Liaisons</div>
+            <div className="mt-1 text-2xl font-bold">{overviewData?.summary.overlayBindingCount ?? 0}</div>
           </div>
           <div className="rounded-xl border bg-muted/20 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Extraits</div>
@@ -677,6 +966,189 @@ export function RegulatoryCalibrationModule({
             </div>
           </CardContent>
         </Card>
+
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><Layers3 className="w-4 h-4 text-primary" /> Couches réglementaires</CardTitle>
+            <CardDescription>Les SPR, PSMV, PVAP, PPRI, PPRT, ABF et servitudes se calibrent ici comme des overlays superposés au socle de zone.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-[340px,1fr]">
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+              <Input placeholder="Code overlay (ex : SPR-Centre, PPRI-R1)" value={overlayForm.overlayCode} onChange={(e) => setOverlayForm((v) => ({ ...v, overlayCode: e.target.value }))} />
+              <Input placeholder="Libellé optionnel" value={overlayForm.overlayLabel} onChange={(e) => setOverlayForm((v) => ({ ...v, overlayLabel: e.target.value }))} />
+              <Select value={overlayForm.overlayType} onValueChange={(value) => setOverlayForm((v) => ({ ...v, overlayType: value }))}>
+                <SelectTrigger><SelectValue placeholder="Type de couche" /></SelectTrigger>
+                <SelectContent>
+                  {(themesData?.overlayTypes || []).map((overlayType) => (
+                    <SelectItem key={overlayType} value={overlayType}>{overlayType}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input placeholder="Référence géométrique / périmètre" value={overlayForm.geometryRef} onChange={(e) => setOverlayForm((v) => ({ ...v, geometryRef: e.target.value }))} />
+              <div className="grid gap-3 md:grid-cols-2">
+                <Input placeholder="Priorité" value={overlayForm.priority} onChange={(e) => setOverlayForm((v) => ({ ...v, priority: e.target.value }))} />
+                <Input placeholder="Statut (draft, validated...)" value={overlayForm.status} onChange={(e) => setOverlayForm((v) => ({ ...v, status: e.target.value }))} />
+              </div>
+              <Textarea placeholder="Notes de guidage (périmètre, effet, pièces utiles)" value={overlayForm.guidanceNotes} onChange={(e) => setOverlayForm((v) => ({ ...v, guidanceNotes: e.target.value }))} />
+              <Button
+                className="w-full"
+                disabled={!canEditCalibration || !!calibrationLoadErrorMessage || loadingOverlays || createOverlayMutation.isPending || !overlayForm.overlayCode.trim()}
+                onClick={() => createOverlayMutation.mutate()}
+              >
+                {createOverlayMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Layers3 className="mr-2 h-4 w-4" />}
+                Ajouter la couche
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {loadingOverlays ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Lecture des couches…</div>
+              ) : (overlaysData?.overlays || []).length > 0 ? (
+                overlaysData!.overlays.map((overlay) => (
+                  <div key={overlay.id} className="rounded-xl border bg-background p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{overlay.overlayCode}</Badge>
+                          <Badge variant="secondary">{overlay.overlayType}</Badge>
+                          <Badge variant="outline" className={getStatusBadge(overlay.status).className}>{getStatusBadge(overlay.status).label}</Badge>
+                        </div>
+                        <p className="font-medium">{overlay.overlayLabel || overlay.overlayCode}</p>
+                        {overlay.geometryRef && <p className="text-sm text-muted-foreground">Périmètre : {overlay.geometryRef}</p>}
+                        {overlay.guidanceNotes && <p className="text-sm text-muted-foreground">{overlay.guidanceNotes}</p>}
+                        {editingOverlayId === overlay.id && (
+                          <div className="mt-3 space-y-3 rounded-xl border bg-muted/10 p-3">
+                            <Input
+                              placeholder="Code overlay"
+                              value={overlayEditorDrafts[overlay.id]?.overlayCode || ""}
+                              onChange={(e) => setOverlayEditorDrafts((current) => ({
+                                ...current,
+                                [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), overlayCode: e.target.value },
+                              }))}
+                            />
+                            <Input
+                              placeholder="Libellé"
+                              value={overlayEditorDrafts[overlay.id]?.overlayLabel || ""}
+                              onChange={(e) => setOverlayEditorDrafts((current) => ({
+                                ...current,
+                                [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), overlayLabel: e.target.value },
+                              }))}
+                            />
+                            <Select
+                              value={overlayEditorDrafts[overlay.id]?.overlayType || overlay.overlayType}
+                              onValueChange={(value) => setOverlayEditorDrafts((current) => ({
+                                ...current,
+                                [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), overlayType: value },
+                              }))}
+                            >
+                              <SelectTrigger><SelectValue placeholder="Type de couche" /></SelectTrigger>
+                              <SelectContent>
+                                {(themesData?.overlayTypes || []).map((overlayType) => (
+                                  <SelectItem key={overlayType} value={overlayType}>{overlayType}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              placeholder="Référence géométrique"
+                              value={overlayEditorDrafts[overlay.id]?.geometryRef || ""}
+                              onChange={(e) => setOverlayEditorDrafts((current) => ({
+                                ...current,
+                                [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), geometryRef: e.target.value },
+                              }))}
+                            />
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <Input
+                                placeholder="Priorité"
+                                value={overlayEditorDrafts[overlay.id]?.priority || ""}
+                                onChange={(e) => setOverlayEditorDrafts((current) => ({
+                                  ...current,
+                                  [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), priority: e.target.value },
+                                }))}
+                              />
+                              <Input
+                                placeholder="Statut"
+                                value={overlayEditorDrafts[overlay.id]?.status || ""}
+                                onChange={(e) => setOverlayEditorDrafts((current) => ({
+                                  ...current,
+                                  [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), status: e.target.value },
+                                }))}
+                              />
+                            </div>
+                            <Textarea
+                              placeholder="Notes de guidage"
+                              value={overlayEditorDrafts[overlay.id]?.guidanceNotes || ""}
+                              onChange={(e) => setOverlayEditorDrafts((current) => ({
+                                ...current,
+                                [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), guidanceNotes: e.target.value },
+                              }))}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                disabled={updateOverlayMutation.isPending || !(overlayEditorDrafts[overlay.id]?.overlayCode || "").trim()}
+                                onClick={() => updateOverlayMutation.mutate({ overlayId: overlay.id, draft: overlayEditorDrafts[overlay.id] || buildOverlayEditorDraft(overlay) })}
+                              >
+                                {updateOverlayMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
+                                Enregistrer
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingOverlayId(null);
+                                  setOverlayEditorDrafts((current) => {
+                                    const next = { ...current };
+                                    delete next[overlay.id];
+                                    return next;
+                                  });
+                                }}
+                              >
+                                Annuler
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={updateOverlayMutation.isPending || deleteOverlayMutation.isPending}
+                          onClick={() => {
+                            if (editingOverlayId === overlay.id) {
+                              setEditingOverlayId(null);
+                              return;
+                            }
+                            setOverlayEditorDrafts((current) => ({ ...current, [overlay.id]: buildOverlayEditorDraft(overlay) }));
+                            setEditingOverlayId(overlay.id);
+                          }}
+                        >
+                          <FilePenLine className="mr-2 h-3.5 w-3.5" />
+                          {editingOverlayId === overlay.id ? "Fermer" : "Modifier"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-destructive/20 text-destructive hover:bg-destructive/5"
+                          disabled={deleteOverlayMutation.isPending}
+                          onClick={() => {
+                            if (!window.confirm(`Supprimer la couche ${overlay.overlayCode} ?`)) return;
+                            deleteOverlayMutation.mutate(overlay.id);
+                          }}
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" />
+                          Supprimer
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">Aucune couche réglementaire configurée pour cette commune.</div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </TabsContent>
 
       <TabsContent value="documents" className="space-y-4">
@@ -691,29 +1163,111 @@ export function RegulatoryCalibrationModule({
             ) : documents.length > 0 ? (
               documents.map((doc) => (
                 <div key={doc.id} className="rounded-xl border bg-background p-4">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="space-y-1">
-                      <p className="font-medium">{doc.title}</p>
-                      <p className="text-xs text-muted-foreground">{doc.category} › {doc.subCategory} › {doc.documentType}</p>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="space-y-1">
+                        <p className="font-medium">{doc.title}</p>
+                        <p className="text-xs text-muted-foreground">{doc.category} › {doc.subCategory} › {doc.documentType}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {doc.textQualityLabel && <Badge variant="outline">{doc.textQualityLabel}</Badge>}
+                          {doc.availabilityStatus && <Badge variant="secondary">{doc.availabilityStatus}</Badge>}
+                        </div>
+                      </div>
                       <div className="flex flex-wrap gap-2">
-                        {doc.textQualityLabel && <Badge variant="outline">{doc.textQualityLabel}</Badge>}
-                        {doc.availabilityStatus && <Badge variant="secondary">{doc.availabilityStatus}</Badge>}
+                        <Button variant="outline" size="sm" onClick={() => { setSelectedDocumentId(doc.id); setActiveTab("calibration"); }}>
+                          <ScrollText className="mr-2 h-3.5 w-3.5" /> Calibrer
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={resegmentDocumentMutation.isPending} onClick={() => resegmentDocumentMutation.mutate(doc.id)}>
+                          {resegmentDocumentMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
+                          Re-segmenter
+                        </Button>
+                        <Button variant="outline" size="sm" className="border-destructive/20 text-destructive hover:bg-destructive/5" onClick={() => {
+                          if (!window.confirm(`Supprimer ${doc.title} ?`)) return;
+                          deleteDocumentMutation.mutate(doc.id);
+                        }}>
+                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Supprimer
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" size="sm" onClick={() => { setSelectedDocumentId(doc.id); setActiveTab("calibration"); }}>
-                        <ScrollText className="mr-2 h-3.5 w-3.5" /> Calibrer
-                      </Button>
-                      <Button variant="outline" size="sm" disabled={resegmentDocumentMutation.isPending} onClick={() => resegmentDocumentMutation.mutate(doc.id)}>
-                        {resegmentDocumentMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
-                        Re-segmenter
-                      </Button>
-                      <Button variant="outline" size="sm" className="border-destructive/20 text-destructive hover:bg-destructive/5" onClick={() => {
-                        if (!window.confirm(`Supprimer ${doc.title} ?`)) return;
-                        deleteDocumentMutation.mutate(doc.id);
-                      }}>
-                        <Trash2 className="mr-2 h-3.5 w-3.5" /> Supprimer
-                      </Button>
+
+                    <div className="rounded-xl border bg-muted/10 p-3">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                        <Layers3 className="h-4 w-4 text-primary" />
+                        Rattacher ce document à une couche réglementaire
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <Select
+                          value={documentOverlayDrafts[doc.id]?.overlayId || ""}
+                          onValueChange={(value) => setDocumentOverlayDrafts((current) => ({
+                            ...current,
+                            [doc.id]: {
+                              overlayId: value,
+                              role: current[doc.id]?.role || "supporting",
+                              structureMode: current[doc.id]?.structureMode || themesData?.structureModes?.[0] || "mixed",
+                              sourcePriority: current[doc.id]?.sourcePriority || "0",
+                              isPrimary: current[doc.id]?.isPrimary || false,
+                            },
+                          }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Choisir une couche" /></SelectTrigger>
+                          <SelectContent>
+                            {(overlaysData?.overlays || []).map((overlay) => (
+                              <SelectItem key={overlay.id} value={overlay.id}>{overlay.overlayCode} · {overlay.overlayType}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          placeholder="Rôle (primary, supporting...)"
+                          value={documentOverlayDrafts[doc.id]?.role || "supporting"}
+                          onChange={(e) => setDocumentOverlayDrafts((current) => ({
+                            ...current,
+                            [doc.id]: {
+                              overlayId: current[doc.id]?.overlayId || "",
+                              role: e.target.value,
+                              structureMode: current[doc.id]?.structureMode || themesData?.structureModes?.[0] || "mixed",
+                              sourcePriority: current[doc.id]?.sourcePriority || "0",
+                              isPrimary: current[doc.id]?.isPrimary || false,
+                            },
+                          }))}
+                        />
+                        <Select
+                          value={documentOverlayDrafts[doc.id]?.structureMode || themesData?.structureModes?.[0] || "mixed"}
+                          onValueChange={(value) => setDocumentOverlayDrafts((current) => ({
+                            ...current,
+                            [doc.id]: {
+                              overlayId: current[doc.id]?.overlayId || "",
+                              role: current[doc.id]?.role || "supporting",
+                              structureMode: value,
+                              sourcePriority: current[doc.id]?.sourcePriority || "0",
+                              isPrimary: current[doc.id]?.isPrimary || false,
+                            },
+                          }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Structure documentaire" /></SelectTrigger>
+                          <SelectContent>
+                            {(themesData?.structureModes || []).map((mode) => (
+                              <SelectItem key={mode} value={mode}>{mode}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          disabled={bindDocumentOverlayMutation.isPending || !(documentOverlayDrafts[doc.id]?.overlayId)}
+                          onClick={() => bindDocumentOverlayMutation.mutate({
+                            documentId: doc.id,
+                            draft: documentOverlayDrafts[doc.id] || {
+                              overlayId: "",
+                              role: "supporting",
+                              structureMode: themesData?.structureModes?.[0] || "mixed",
+                              sourcePriority: "0",
+                              isPrimary: false,
+                            },
+                          })}
+                        >
+                          {bindDocumentOverlayMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Layers3 className="mr-2 h-3.5 w-3.5" />}
+                          Lier au document
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -763,28 +1317,60 @@ export function RegulatoryCalibrationModule({
                         </div>
                         <Badge variant="outline">{workspaceData.document.documentType || "document"}</Badge>
                       </div>
+                      <div className="mt-3 space-y-2 rounded-xl border bg-muted/10 p-3">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Layers3 className="h-4 w-4 text-primary" />
+                          Couches liées au document
+                        </div>
+                        {workspaceData.bindings.length > 0 ? workspaceData.bindings.map((binding) => {
+                          const overlay = workspaceData.overlays.find((item) => item.id === binding.overlayId);
+                          return (
+                            <div key={binding.id} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline">{overlay?.overlayCode || "Couche"}</Badge>
+                                <Badge variant="secondary">{overlay?.overlayType || "Overlay"}</Badge>
+                                <Badge variant="outline">{binding.structureMode}</Badge>
+                                {binding.isPrimary && <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Primaire</Badge>}
+                              </div>
+                            </div>
+                          );
+                        }) : (
+                          <p className="text-xs text-muted-foreground">Aucune couche encore rattachée à ce document.</p>
+                        )}
+                      </div>
                     </div>
 
                     <div className="rounded-xl border bg-background p-4 space-y-3">
                       <div>
                         <p className="text-sm font-semibold">Sélection courante</p>
-                        <p className="text-xs text-muted-foreground">Sélectionne du texte dans les pages ci-dessous, puis crée un extrait calibré.</p>
+                        <p className="text-xs text-muted-foreground">Sélectionne du texte dans les pages ci-dessous, puis rattache-le à une zone, une couche réglementaire ou les deux.</p>
                       </div>
                       <div className="rounded-lg border bg-muted/20 p-3 text-sm min-h-[120px]">
                         {pendingSelection ? pendingSelection.text : "Aucune sélection active"}
                       </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <Select value={selectionZoneId} onValueChange={setSelectionZoneId}>
-                          <SelectTrigger><SelectValue placeholder="Zone" /></SelectTrigger>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <Select value={selectionZoneId || "__none_zone__"} onValueChange={(value) => setSelectionZoneId(value === "__none_zone__" ? "" : value)}>
+                          <SelectTrigger><SelectValue placeholder="Zone PLU (optionnelle)" /></SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="__none_zone__">Aucune zone</SelectItem>
                             {workspaceData.zones.map((zone) => (
                               <SelectItem key={zone.id} value={zone.id}>{zone.zoneCode}{zone.zoneLabel ? ` · ${zone.zoneLabel}` : ""}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        <Select value={selectionArticleCode} onValueChange={setSelectionArticleCode}>
-                          <SelectTrigger><SelectValue placeholder="Article" /></SelectTrigger>
+                        <Select value={selectionOverlayId || "__none_overlay__"} onValueChange={(value) => setSelectionOverlayId(value === "__none_overlay__" ? "" : value)}>
+                          <SelectTrigger><SelectValue placeholder="Overlay (optionnel)" /></SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="__none_overlay__">Aucun overlay</SelectItem>
+                            {workspaceData.overlays.map((overlay) => (
+                              <SelectItem key={overlay.id} value={overlay.id}>{overlay.overlayCode} · {overlay.overlayType}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={selectionArticleCode || "__none_article__"} onValueChange={(value) => setSelectionArticleCode(value === "__none_article__" ? "" : value)}>
+                          <SelectTrigger><SelectValue placeholder="Article PLU (optionnel)" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none_article__">Aucun article</SelectItem>
                             {(themesData?.articleReference || workspaceData.articleReference).map((article) => (
                               <SelectItem key={article.code} value={article.code}>{article.label}</SelectItem>
                             ))}
@@ -794,7 +1380,7 @@ export function RegulatoryCalibrationModule({
                       <Input placeholder="Libellé d’extrait (optionnel)" value={selectionLabel} onChange={(e) => setSelectionLabel(e.target.value)} />
                       <Button
                         className="w-full"
-                        disabled={createExcerptMutation.isPending || !pendingSelection || !selectionZoneId || !selectionArticleCode}
+                        disabled={createExcerptMutation.isPending || !pendingSelection || !(selectionZoneId && selectionZoneId !== "__none_zone__") && !(selectionOverlayId && selectionOverlayId !== "__none_overlay__")}
                         onClick={() => createExcerptMutation.mutate()}
                       >
                         {createExcerptMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
@@ -844,6 +1430,10 @@ export function RegulatoryCalibrationModule({
                             <div className="flex items-center justify-between gap-2">
                               <div>
                                 <p className="font-medium">{excerpt.selectionLabel || `${excerpt.zone?.zoneCode || "Zone"} · Art. ${excerpt.articleCode || "?"}`}</p>
+                                <div className="mt-1 flex flex-wrap gap-2">
+                                  {excerpt.zone && <Badge variant="outline">{excerpt.zone.zoneCode}</Badge>}
+                                  {excerpt.overlay && <Badge variant="secondary">{excerpt.overlay.overlayCode} · {excerpt.overlay.overlayType}</Badge>}
+                                </div>
                                 <p className="text-xs text-muted-foreground">Page {excerpt.sourcePage}{excerpt.sourcePageEnd && excerpt.sourcePageEnd !== excerpt.sourcePage ? ` à ${excerpt.sourcePageEnd}` : ""}</p>
                               </div>
                               <Button variant="outline" size="sm" onClick={() => setActiveExcerptId(excerpt.id)}>Règles</Button>
@@ -861,20 +1451,15 @@ export function RegulatoryCalibrationModule({
                       {!activeExcerptId ? (
                         <p className="mt-2 text-sm text-muted-foreground">Choisis un extrait calibré pour créer une règle structurée.</p>
                       ) : (
-                        <div className="mt-3 space-y-3">
-                          <Select value={ruleDrafts[activeExcerptId]?.themeCode || ""} onValueChange={(value) => setRuleDrafts((current) => ({
-                            ...current,
-                            [activeExcerptId]: {
-                              themeCode: value,
-                              ruleLabel: current[activeExcerptId]?.ruleLabel || "",
-                              operator: current[activeExcerptId]?.operator || "",
-                              valueNumeric: current[activeExcerptId]?.valueNumeric || "",
-                              valueText: current[activeExcerptId]?.valueText || "",
-                              unit: current[activeExcerptId]?.unit || "",
-                              conditionText: current[activeExcerptId]?.conditionText || "",
-                              interpretationNote: current[activeExcerptId]?.interpretationNote || "",
-                            },
-                          }))}>
+                          <div className="mt-3 space-y-3">
+                            <Select value={ruleDrafts[activeExcerptId]?.themeCode || ""} onValueChange={(value) => setRuleDrafts((current) => ({
+                              ...current,
+                              [activeExcerptId]: {
+                                ...buildEmptyRuleDraft(),
+                                ...(current[activeExcerptId] || {}),
+                                themeCode: value,
+                              },
+                            }))}>
                             <SelectTrigger><SelectValue placeholder="Thème métier" /></SelectTrigger>
                             <SelectContent>
                               {(themesData?.themes || workspaceData.themes).map((theme) => (
@@ -882,35 +1467,84 @@ export function RegulatoryCalibrationModule({
                               ))}
                             </SelectContent>
                           </Select>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Select value={ruleDrafts[activeExcerptId]?.normativeEffect || "primary"} onValueChange={(value) => setRuleDrafts((current) => ({
+                              ...current,
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), normativeEffect: value },
+                            }))}>
+                              <SelectTrigger><SelectValue placeholder="Effet normatif" /></SelectTrigger>
+                              <SelectContent>
+                                {(themesData?.normativeEffects || []).map((effect) => (
+                                  <SelectItem key={effect} value={effect}>{getNormativeEffectLabel(effect)}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Select value={ruleDrafts[activeExcerptId]?.proceduralEffect || "none"} onValueChange={(value) => setRuleDrafts((current) => ({
+                              ...current,
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), proceduralEffect: value },
+                            }))}>
+                              <SelectTrigger><SelectValue placeholder="Effet procédural" /></SelectTrigger>
+                              <SelectContent>
+                                {(themesData?.proceduralEffects || []).map((effect) => (
+                                  <SelectItem key={effect} value={effect}>{getProceduralEffectLabel(effect)}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <Input placeholder="Portée (main_zone, overlay...)" value={ruleDrafts[activeExcerptId]?.applicabilityScope || "main_zone"} onChange={(e) => setRuleDrafts((current) => ({
+                              ...current,
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), applicabilityScope: e.target.value },
+                            }))} />
+                            <Select value={ruleDrafts[activeExcerptId]?.ruleAnchorType || "article"} onValueChange={(value) => setRuleDrafts((current) => ({
+                              ...current,
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), ruleAnchorType: value },
+                            }))}>
+                              <SelectTrigger><SelectValue placeholder="Type d’ancre" /></SelectTrigger>
+                              <SelectContent>
+                                {(themesData?.ruleAnchorTypes || []).map((anchorType) => (
+                                  <SelectItem key={anchorType} value={anchorType}>{anchorType}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Input placeholder="Ancre réglementaire (chapitre, prescription, légende...)" value={ruleDrafts[activeExcerptId]?.ruleAnchorLabel || ""} onChange={(e) => setRuleDrafts((current) => ({
+                            ...current,
+                            [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), ruleAnchorLabel: e.target.value },
+                          }))} />
+                          <Input placeholder="Statut de résolution de conflit (none, pending...)" value={ruleDrafts[activeExcerptId]?.conflictResolutionStatus || "none"} onChange={(e) => setRuleDrafts((current) => ({
+                            ...current,
+                            [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), conflictResolutionStatus: e.target.value },
+                          }))} />
                           <Input placeholder="Libellé de règle" value={ruleDrafts[activeExcerptId]?.ruleLabel || ""} onChange={(e) => setRuleDrafts((current) => ({
                             ...current,
-                            [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: e.target.value, operator: current[activeExcerptId]?.operator || "", valueNumeric: current[activeExcerptId]?.valueNumeric || "", valueText: current[activeExcerptId]?.valueText || "", unit: current[activeExcerptId]?.unit || "", conditionText: current[activeExcerptId]?.conditionText || "", interpretationNote: current[activeExcerptId]?.interpretationNote || "" },
+                            [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), ruleLabel: e.target.value },
                           }))} />
                           <div className="grid gap-3 md:grid-cols-3">
                             <Input placeholder="Opérateur" value={ruleDrafts[activeExcerptId]?.operator || ""} onChange={(e) => setRuleDrafts((current) => ({
                               ...current,
-                              [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: current[activeExcerptId]?.ruleLabel || "", operator: e.target.value, valueNumeric: current[activeExcerptId]?.valueNumeric || "", valueText: current[activeExcerptId]?.valueText || "", unit: current[activeExcerptId]?.unit || "", conditionText: current[activeExcerptId]?.conditionText || "", interpretationNote: current[activeExcerptId]?.interpretationNote || "" },
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), operator: e.target.value },
                             }))} />
                             <Input placeholder="Valeur numérique" value={ruleDrafts[activeExcerptId]?.valueNumeric || ""} onChange={(e) => setRuleDrafts((current) => ({
                               ...current,
-                              [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: current[activeExcerptId]?.ruleLabel || "", operator: current[activeExcerptId]?.operator || "", valueNumeric: e.target.value, valueText: current[activeExcerptId]?.valueText || "", unit: current[activeExcerptId]?.unit || "", conditionText: current[activeExcerptId]?.conditionText || "", interpretationNote: current[activeExcerptId]?.interpretationNote || "" },
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), valueNumeric: e.target.value },
                             }))} />
                             <Input placeholder="Unité" value={ruleDrafts[activeExcerptId]?.unit || ""} onChange={(e) => setRuleDrafts((current) => ({
                               ...current,
-                              [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: current[activeExcerptId]?.ruleLabel || "", operator: current[activeExcerptId]?.operator || "", valueNumeric: current[activeExcerptId]?.valueNumeric || "", valueText: current[activeExcerptId]?.valueText || "", unit: e.target.value, conditionText: current[activeExcerptId]?.conditionText || "", interpretationNote: current[activeExcerptId]?.interpretationNote || "" },
+                              [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), unit: e.target.value },
                             }))} />
                           </div>
                           <Input placeholder="Valeur texte (si non numérique)" value={ruleDrafts[activeExcerptId]?.valueText || ""} onChange={(e) => setRuleDrafts((current) => ({
                             ...current,
-                            [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: current[activeExcerptId]?.ruleLabel || "", operator: current[activeExcerptId]?.operator || "", valueNumeric: current[activeExcerptId]?.valueNumeric || "", valueText: e.target.value, unit: current[activeExcerptId]?.unit || "", conditionText: current[activeExcerptId]?.conditionText || "", interpretationNote: current[activeExcerptId]?.interpretationNote || "" },
+                            [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), valueText: e.target.value },
                           }))} />
                           <Textarea placeholder="Condition / exception" value={ruleDrafts[activeExcerptId]?.conditionText || ""} onChange={(e) => setRuleDrafts((current) => ({
                             ...current,
-                            [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: current[activeExcerptId]?.ruleLabel || "", operator: current[activeExcerptId]?.operator || "", valueNumeric: current[activeExcerptId]?.valueNumeric || "", valueText: current[activeExcerptId]?.valueText || "", unit: current[activeExcerptId]?.unit || "", conditionText: e.target.value, interpretationNote: current[activeExcerptId]?.interpretationNote || "" },
+                            [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), conditionText: e.target.value },
                           }))} />
                           <Textarea placeholder="Note d’interprétation" value={ruleDrafts[activeExcerptId]?.interpretationNote || ""} onChange={(e) => setRuleDrafts((current) => ({
                             ...current,
-                            [activeExcerptId]: { ...current[activeExcerptId], themeCode: current[activeExcerptId]?.themeCode || "", ruleLabel: current[activeExcerptId]?.ruleLabel || "", operator: current[activeExcerptId]?.operator || "", valueNumeric: current[activeExcerptId]?.valueNumeric || "", valueText: current[activeExcerptId]?.valueText || "", unit: current[activeExcerptId]?.unit || "", conditionText: current[activeExcerptId]?.conditionText || "", interpretationNote: e.target.value },
+                            [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), interpretationNote: e.target.value },
                           }))} />
                           <Button
                             className="w-full"
@@ -929,6 +1563,11 @@ export function RegulatoryCalibrationModule({
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="font-medium">{rule.ruleLabel}</p>
                                     <Badge variant="outline" className={getStatusBadge(rule.status).className}>{getStatusBadge(rule.status).label}</Badge>
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap gap-2">
+                                    <Badge variant="secondary">{getNormativeEffectLabel(rule.normativeEffect)}</Badge>
+                                    {rule.proceduralEffect !== "none" && <Badge variant="outline">{getProceduralEffectLabel(rule.proceduralEffect)}</Badge>}
+                                    {rule.ruleAnchorLabel && <Badge variant="outline">{rule.ruleAnchorType} · {rule.ruleAnchorLabel}</Badge>}
                                   </div>
                                   <p className="mt-1 text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
                                 </div>
@@ -977,38 +1616,92 @@ export function RegulatoryCalibrationModule({
             <CardDescription>Le travail interne reste ici. Les brouillons n’alimentent pas le back mairie tant qu’ils ne sont pas publiés.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {libraryData?.rules.length ? libraryData.rules.map((rule) => (
+            <div className="grid gap-3 md:grid-cols-3">
+              <Select value={libraryOverlayFilter} onValueChange={setLibraryOverlayFilter}>
+                <SelectTrigger><SelectValue placeholder="Filtrer par couche" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes les couches</SelectItem>
+                  {(overlaysData?.overlays || []).map((overlay) => (
+                    <SelectItem key={overlay.id} value={overlay.id}>{overlay.overlayCode} · {overlay.overlayType}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={libraryNormativeFilter} onValueChange={setLibraryNormativeFilter}>
+                <SelectTrigger><SelectValue placeholder="Effet normatif" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les effets normatifs</SelectItem>
+                  {(themesData?.normativeEffects || []).map((effect) => (
+                    <SelectItem key={effect} value={effect}>{getNormativeEffectLabel(effect)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={libraryProceduralFilter} onValueChange={setLibraryProceduralFilter}>
+                <SelectTrigger><SelectValue placeholder="Effet procédural" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les effets procéduraux</SelectItem>
+                  {(themesData?.proceduralEffects || []).map((effect) => (
+                    <SelectItem key={effect} value={effect}>{getProceduralEffectLabel(effect)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {filteredLibraryRules.length ? filteredLibraryRules.map((rule) => (
               <div key={rule.id} className="rounded-xl border bg-background p-4">
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{rule.zoneCode || "Zone ?"}</Badge>
+                      <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{getRuleTargetLabel(rule)}</Badge>
+                      {rule.overlayType && <Badge variant="outline">{rule.overlayType}</Badge>}
                       <Badge variant="secondary">{rule.themeLabel}</Badge>
-                      <Badge variant="outline">Art. {rule.articleCode}</Badge>
+                      {rule.articleCode && rule.articleCode !== "manual" && <Badge variant="outline">Art. {rule.articleCode}</Badge>}
+                      {rule.ruleAnchorLabel && <Badge variant="outline">{rule.ruleAnchorType} · {rule.ruleAnchorLabel}</Badge>}
+                      <Badge variant="outline">{getNormativeEffectLabel(rule.normativeEffect)}</Badge>
+                      {rule.proceduralEffect !== "none" && <Badge variant="outline">{getProceduralEffectLabel(rule.proceduralEffect)}</Badge>}
                       <Badge variant="outline" className={getStatusBadge(rule.status).className}>{getStatusBadge(rule.status).label}</Badge>
                       {rule.conflictFlag && <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">Conflit</Badge>}
                     </div>
                     <p className="font-medium">{rule.ruleLabel}</p>
                     <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
-                    <p className="text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {rule.documentTitle} · page {rule.sourcePage}{rule.sourcePageEnd && rule.sourcePageEnd !== rule.sourcePage ? ` à ${rule.sourcePageEnd}` : ""}
+                    </p>
                     <div className="rounded-lg bg-muted/20 px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
                     {editingRuleId === rule.id && (
                       <div className="space-y-3 rounded-xl border bg-muted/10 p-3">
-                        <div className="grid gap-3 md:grid-cols-3">
+                        <div className="grid gap-3 md:grid-cols-2">
                           <Select
-                            value={ruleEditorDrafts[rule.id]?.zoneId || ""}
+                            value={ruleEditorDrafts[rule.id]?.zoneId || "__none_zone__"}
                             onValueChange={(value) => setRuleEditorDrafts((current) => ({
                               ...current,
-                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), zoneId: value },
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), zoneId: value === "__none_zone__" ? "" : value },
                             }))}
                           >
                             <SelectTrigger><SelectValue placeholder="Zone" /></SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="__none_zone__">Aucune zone</SelectItem>
                               {(zonesData?.zones || []).map((zone) => (
                                 <SelectItem key={zone.id} value={zone.id}>{zone.zoneCode}{zone.zoneLabel ? ` · ${zone.zoneLabel}` : ""}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.overlayId || "__none_overlay__"}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), overlayId: value === "__none_overlay__" ? "" : value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Couche réglementaire" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none_overlay__">Aucune couche</SelectItem>
+                              {(overlaysData?.overlays || []).map((overlay) => (
+                                <SelectItem key={overlay.id} value={overlay.id}>{overlay.overlayCode} · {overlay.overlayType}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-3">
                           <Select
                             value={ruleEditorDrafts[rule.id]?.themeCode || ""}
                             onValueChange={(value) => setRuleEditorDrafts((current) => ({
@@ -1032,11 +1725,82 @@ export function RegulatoryCalibrationModule({
                           >
                             <SelectTrigger><SelectValue placeholder="Article" /></SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="manual">Pas d’article PLU</SelectItem>
                               {(themesData?.articleReference || []).map((article) => (
                                 <SelectItem key={article.code} value={article.code}>{article.label}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.normativeEffect || "primary"}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), normativeEffect: value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Effet normatif" /></SelectTrigger>
+                            <SelectContent>
+                              {(themesData?.normativeEffects || []).map((effect) => (
+                                <SelectItem key={effect} value={effect}>{getNormativeEffectLabel(effect)}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.proceduralEffect || "none"}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), proceduralEffect: value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Effet procédural" /></SelectTrigger>
+                            <SelectContent>
+                              {(themesData?.proceduralEffects || []).map((effect) => (
+                                <SelectItem key={effect} value={effect}>{getProceduralEffectLabel(effect)}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <Input
+                            placeholder="Portée"
+                            value={ruleEditorDrafts[rule.id]?.applicabilityScope || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), applicabilityScope: e.target.value },
+                            }))}
+                          />
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.ruleAnchorType || "article"}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), ruleAnchorType: value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Type d’ancre" /></SelectTrigger>
+                            <SelectContent>
+                              {(themesData?.ruleAnchorTypes || []).map((anchorType) => (
+                                <SelectItem key={anchorType} value={anchorType}>{anchorType}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            placeholder="Ancre réglementaire"
+                            value={ruleEditorDrafts[rule.id]?.ruleAnchorLabel || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), ruleAnchorLabel: e.target.value },
+                            }))}
+                          />
+                          <Input
+                            placeholder="Statut résolution conflit"
+                            value={ruleEditorDrafts[rule.id]?.conflictResolutionStatus || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), conflictResolutionStatus: e.target.value },
+                            }))}
+                          />
                         </div>
                         <Input
                           placeholder="Libellé de règle"
@@ -1099,7 +1863,16 @@ export function RegulatoryCalibrationModule({
                         <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
-                            disabled={updateRuleMutation.isPending || !(ruleEditorDrafts[rule.id]?.zoneId) || !(ruleEditorDrafts[rule.id]?.themeCode) || !(ruleEditorDrafts[rule.id]?.articleCode) || !(ruleEditorDrafts[rule.id]?.ruleLabel?.trim())}
+                            disabled={
+                              updateRuleMutation.isPending
+                              || !((ruleEditorDrafts[rule.id]?.zoneId || "").trim() || (ruleEditorDrafts[rule.id]?.overlayId || "").trim())
+                              || !(ruleEditorDrafts[rule.id]?.themeCode)
+                              || !(
+                                ((ruleEditorDrafts[rule.id]?.articleCode || "").trim() && (ruleEditorDrafts[rule.id]?.articleCode || "").trim() !== "manual")
+                                || (ruleEditorDrafts[rule.id]?.ruleAnchorLabel || "").trim()
+                              )
+                              || !(ruleEditorDrafts[rule.id]?.ruleLabel?.trim())
+                            }
                             onClick={() => updateRuleMutation.mutate({ ruleId: rule.id, draft: ruleEditorDrafts[rule.id] || buildRuleEditorDraft(rule) })}
                           >
                             {updateRuleMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
@@ -1191,22 +1964,79 @@ export function RegulatoryCalibrationModule({
         <Card className="border-emerald-200 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> Back mairie lecture seule</CardTitle>
-            <CardDescription>Seules les règles publiées apparaissent ici. Les brouillons et validations en cours restent invisibles.</CardDescription>
+            <CardDescription>Seules les règles publiées apparaissent ici, séparées entre socle de zone, couches superposées et effets procéduraux.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {publishedData?.rules.length ? publishedData.rules.map((rule) => (
-              <div key={rule.id} className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="bg-background">{rule.zoneCode || "Zone ?"}</Badge>
-                  <Badge variant="secondary">{rule.themeLabel}</Badge>
-                  <Badge variant="outline">Art. {rule.articleCode}</Badge>
+            {publishedData?.rules.length ? (
+              <>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                    <MapPin className="h-4 w-4" />
+                    Socle réglementaire principal
+                  </div>
+                  {publishedRuleGroups.main.length ? publishedRuleGroups.main.map((rule) => (
+                    <div key={rule.id} className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="bg-background">{rule.zoneCode || "Zone ?"}</Badge>
+                        <Badge variant="secondary">{rule.themeLabel}</Badge>
+                        {rule.articleCode && rule.articleCode !== "manual" && <Badge variant="outline">Art. {rule.articleCode}</Badge>}
+                      </div>
+                      <p className="mt-2 font-medium">{rule.ruleLabel}</p>
+                      <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
+                      <div className="mt-2 rounded-lg bg-background px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
+                    </div>
+                  )) : (
+                    <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">Aucune règle principale publiée.</div>
+                  )}
                 </div>
-                <p className="mt-2 font-medium">{rule.ruleLabel}</p>
-                <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
-                <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
-                <div className="mt-2 rounded-lg bg-background px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
-              </div>
-            )) : (
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+                    <Layers3 className="h-4 w-4" />
+                    Contraintes superposées
+                  </div>
+                  {publishedRuleGroups.overlays.length ? publishedRuleGroups.overlays.map((rule) => (
+                    <div key={rule.id} className="rounded-xl border bg-background p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{getRuleTargetLabel(rule)}</Badge>
+                        {rule.overlayType && <Badge variant="secondary">{rule.overlayType}</Badge>}
+                        <Badge variant="outline">{getNormativeEffectLabel(rule.normativeEffect)}</Badge>
+                        {rule.articleCode && rule.articleCode !== "manual" && <Badge variant="outline">Art. {rule.articleCode}</Badge>}
+                        {rule.ruleAnchorLabel && <Badge variant="outline">{rule.ruleAnchorType} · {rule.ruleAnchorLabel}</Badge>}
+                      </div>
+                      <p className="mt-2 font-medium">{rule.ruleLabel}</p>
+                      <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
+                      <div className="mt-2 rounded-lg bg-muted/20 px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
+                    </div>
+                  )) : (
+                    <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">Aucune couche superposée publiée.</div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-amber-700">
+                    <AlertTriangle className="h-4 w-4" />
+                    Effets procéduraux
+                  </div>
+                  {publishedRuleGroups.procedural.length ? publishedRuleGroups.procedural.map((rule) => (
+                    <div key={rule.id} className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{getRuleTargetLabel(rule)}</Badge>
+                        <Badge variant="outline">{getProceduralEffectLabel(rule.proceduralEffect)}</Badge>
+                        {rule.overlayType && <Badge variant="secondary">{rule.overlayType}</Badge>}
+                      </div>
+                      <p className="mt-2 font-medium">{rule.ruleLabel}</p>
+                      <p className="text-sm text-muted-foreground">{rule.interpretationNote || rule.valueText || "Prescription procédurale publiée."}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
+                    </div>
+                  )) : (
+                    <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">Aucun effet procédural publié.</div>
+                  )}
+                </div>
+              </>
+            ) : (
               <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">Aucune règle publiée pour le back mairie.</div>
             )}
           </CardContent>
