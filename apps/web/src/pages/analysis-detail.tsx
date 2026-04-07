@@ -614,7 +614,7 @@ export default function AnalysisDetailPage() {
   // confidence score is stored as 0-1, display as percentage
   const confidencePct = analysis.confidenceScore != null ? Math.round(analysis.confidenceScore * 100) : null;
   const buildabilityConfidencePct = buildability?.confidenceScore != null ? Math.round(buildability.confidenceScore * 100) : null;
-  const buildabilitySourceDetails = useMemo<BuildabilitySourceDetails>(() => {
+  const buildabilitySourceDetails: BuildabilitySourceDetails = (() => {
     if (!buildability?.sourceDetailsJson) return {};
     try {
       const raw = typeof buildability.sourceDetailsJson === "string"
@@ -624,7 +624,7 @@ export default function AnalysisDetailPage() {
     } catch {
       return {};
     }
-  }, [buildability?.sourceDetailsJson]);
+  })();
 
   // Formatting polygon data for Leaflet — handles both Polygon and MultiPolygon
   function extractFirstRing(geom: { type?: string; coordinates?: unknown }): number[][] | null {
