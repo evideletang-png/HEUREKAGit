@@ -6,6 +6,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
 import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/schema/regulatoryCalibrationZones.js";
 import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regulatoryOverlays.js";
+import { ruleRelationsTable } from "../../../../packages/db/src/schema/ruleRelations.js";
 import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
 import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urbanRuleConflicts.js";
 import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
@@ -50,6 +51,24 @@ export type PublishedIndexedRule = {
   applicabilityScope: string | null;
   ruleAnchorType: string | null;
   ruleAnchorLabel: string | null;
+  isRelationalRule: boolean;
+  requiresCrossDocumentResolution: boolean;
+  resolutionStatus: string | null;
+  linkedRuleCount: number;
+  relations: Array<{
+    id: string;
+    relationType: string;
+    relationScope: string;
+    conditionText: string | null;
+    priorityNote: string | null;
+    targetRuleId: string | null;
+    targetRuleLabel: string | null;
+    targetRuleStatus: string | null;
+    targetDocumentId: string | null;
+    targetDocumentName: string | null;
+    targetZoneCode: string | null;
+    targetOverlayCode: string | null;
+  }>;
   ruleFamily: string;
   ruleTopic: string;
   ruleLabel: string;
@@ -163,6 +182,11 @@ function toPublishedIndexedRule(row: {
   applicabilityScope: string | null;
   ruleAnchorType: string | null;
   ruleAnchorLabel: string | null;
+  isRelationalRule: boolean;
+  requiresCrossDocumentResolution: boolean;
+  resolutionStatus: string | null;
+  linkedRuleCount: number;
+  relations: PublishedIndexedRule["relations"];
   articleCode: string;
   themeCode: string;
   ruleLabel: string;
@@ -197,6 +221,11 @@ function toPublishedIndexedRule(row: {
     applicabilityScope: row.applicabilityScope,
     ruleAnchorType: row.ruleAnchorType,
     ruleAnchorLabel: row.ruleAnchorLabel,
+    isRelationalRule: row.isRelationalRule,
+    requiresCrossDocumentResolution: row.requiresCrossDocumentResolution,
+    resolutionStatus: row.resolutionStatus,
+    linkedRuleCount: row.linkedRuleCount,
+    relations: row.relations,
     ruleFamily,
     ruleTopic: row.themeCode,
     ruleLabel: row.ruleLabel,
@@ -526,6 +555,10 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
     applicabilityScope: indexedRegulatoryRulesTable.applicabilityScope,
     ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
     ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
+    isRelationalRule: indexedRegulatoryRulesTable.isRelationalRule,
+    requiresCrossDocumentResolution: indexedRegulatoryRulesTable.requiresCrossDocumentResolution,
+    resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
+    linkedRuleCount: indexedRegulatoryRulesTable.linkedRuleCount,
     articleCode: indexedRegulatoryRulesTable.articleCode,
     themeCode: indexedRegulatoryRulesTable.themeCode,
     ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
@@ -564,10 +597,64 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
       desc(indexedRegulatoryRulesTable.publishedAt),
       desc(indexedRegulatoryRulesTable.updatedAt),
     );
+  const ruleIds = rows.map((row) => row.id);
+  const relationRows = ruleIds.length > 0
+    ? await db.select().from(ruleRelationsTable).where(inArray(ruleRelationsTable.sourceRuleId, ruleIds))
+    : [];
+  const targetRuleIds = Array.from(new Set(relationRows.map((relation) => relation.targetRuleId).filter((value): value is string => !!value)));
+  const targetDocIds = Array.from(new Set(relationRows.map((relation) => relation.targetDocumentId).filter((value): value is string => !!value)));
+
+  const [targetRules, targetDocs] = await Promise.all([
+    targetRuleIds.length > 0
+      ? db.select({
+          id: indexedRegulatoryRulesTable.id,
+          ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
+          status: indexedRegulatoryRulesTable.status,
+          zoneCode: regulatoryCalibrationZonesTable.zoneCode,
+          overlayCode: regulatoryOverlaysTable.overlayCode,
+          documentId: indexedRegulatoryRulesTable.documentId,
+        })
+          .from(indexedRegulatoryRulesTable)
+          .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
+          .leftJoin(regulatoryOverlaysTable, eq(indexedRegulatoryRulesTable.overlayId, regulatoryOverlaysTable.id))
+          .where(inArray(indexedRegulatoryRulesTable.id, targetRuleIds))
+      : Promise.resolve([]),
+    targetDocIds.length > 0
+      ? db.select({
+          id: townHallDocumentsTable.id,
+          title: townHallDocumentsTable.title,
+          fileName: townHallDocumentsTable.fileName,
+        }).from(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, targetDocIds))
+      : Promise.resolve([]),
+  ]);
+
+  const targetRuleMap = new Map(targetRules.map((rule) => [rule.id, rule]));
+  const targetDocMap = new Map(targetDocs.map((doc) => [doc.id, doc.title || doc.fileName || null]));
+  const relationMap = new Map<string, PublishedIndexedRule["relations"]>();
+  for (const relation of relationRows) {
+    const targetRule = relation.targetRuleId ? targetRuleMap.get(relation.targetRuleId) || null : null;
+    const existing = relationMap.get(relation.sourceRuleId) || [];
+    existing.push({
+      id: relation.id,
+      relationType: relation.relationType,
+      relationScope: relation.relationScope,
+      conditionText: relation.conditionText,
+      priorityNote: relation.priorityNote,
+      targetRuleId: relation.targetRuleId || null,
+      targetRuleLabel: targetRule?.ruleLabel || null,
+      targetRuleStatus: targetRule?.status || null,
+      targetDocumentId: relation.targetDocumentId || null,
+      targetDocumentName: relation.targetDocumentId ? targetDocMap.get(relation.targetDocumentId) || null : null,
+      targetZoneCode: targetRule?.zoneCode || null,
+      targetOverlayCode: targetRule?.overlayCode || null,
+    });
+    relationMap.set(relation.sourceRuleId, existing);
+  }
 
   return rows.map((row) => toPublishedIndexedRule({
     ...row,
     documentName: row.documentName || row.documentFileName || null,
+    relations: relationMap.get(row.id) || [],
   }));
 }
 
@@ -630,6 +717,11 @@ export function buildParsedRulesFromUrbanRules(rules: StructuredUrbanRuleSource[
       procedural_effect: "proceduralEffect" in rule ? rule.proceduralEffect : null,
       rule_anchor_type: "ruleAnchorType" in rule ? rule.ruleAnchorType : null,
       rule_anchor_label: "ruleAnchorLabel" in rule ? rule.ruleAnchorLabel : null,
+      is_relational_rule: "isRelationalRule" in rule ? rule.isRelationalRule : false,
+      requires_cross_document_resolution: "requiresCrossDocumentResolution" in rule ? rule.requiresCrossDocumentResolution : false,
+      resolution_status: "resolutionStatus" in rule ? rule.resolutionStatus : null,
+      linked_rule_count: "linkedRuleCount" in rule ? rule.linkedRuleCount : 0,
+      relations: "relations" in rule ? rule.relations : [],
     },
   }));
 }
@@ -674,6 +766,11 @@ export function buildArticlesFromUrbanRules(rules: StructuredUrbanRuleSource[]) 
       procedural_effect: "proceduralEffect" in rule ? rule.proceduralEffect : null,
       rule_anchor_type: "ruleAnchorType" in rule ? rule.ruleAnchorType : null,
       rule_anchor_label: "ruleAnchorLabel" in rule ? rule.ruleAnchorLabel : null,
+      is_relational_rule: "isRelationalRule" in rule ? rule.isRelationalRule : false,
+      requires_cross_document_resolution: "requiresCrossDocumentResolution" in rule ? rule.requiresCrossDocumentResolution : false,
+      resolution_status: "resolutionStatus" in rule ? rule.resolutionStatus : null,
+      linked_rule_count: "linkedRuleCount" in rule ? rule.linkedRuleCount : 0,
+      relations: "relations" in rule ? rule.relations : [],
     },
   }));
 }

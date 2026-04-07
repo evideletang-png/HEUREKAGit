@@ -161,6 +161,9 @@ type BuildabilitySourceDetail = {
   sourceExcerpt: string | null;
   reviewStatus: string | null;
   confidenceScore: number | null;
+  resolutionStatus: string | null;
+  linkedRuleCount: number;
+  requiresCrossDocumentResolution: boolean;
 };
 
 type BuildabilitySourceMeta = {
@@ -170,6 +173,9 @@ type BuildabilitySourceMeta = {
   coveredFieldCount: number;
   publishedCoveredFieldCount: number;
   explicitFieldCount: number;
+  relationalRuleCount: number;
+  unresolvedRelationalRuleCount: number;
+  partialRelationalRuleCount: number;
 };
 
 type BuildabilitySourceDetails = Partial<Record<
@@ -257,6 +263,7 @@ function formatBuildabilitySourceDetail(sourceDetail?: BuildabilitySourceDetail 
     sourceDetail.zoneCode ? `Zone ${sourceDetail.zoneCode}` : null,
     sourceDetail.sourceArticle,
     sourceDetail.sourcePage != null ? `p. ${sourceDetail.sourcePage}` : null,
+    sourceDetail.requiresCrossDocumentResolution ? "lien documentaire" : null,
   ].filter(Boolean);
 
   if (parts.length === 0) return null;
@@ -267,7 +274,12 @@ function formatBuildabilityConfidenceHint(meta?: BuildabilitySourceMeta) {
   if (!meta) return "Confiance calculée à partir des variables réglementaires retrouvées.";
 
   if (meta.structuredRuleSource === "published_calibration") {
-    return `${meta.publishedCoveredFieldCount}/${meta.explicitFieldCount} variables clés sont couvertes par des règles publiées.`;
+    const relationHint = meta.unresolvedRelationalRuleCount > 0
+      ? ` ${meta.unresolvedRelationalRuleCount} dependance(s) documentaire(s) restent non resolue(s).`
+      : meta.partialRelationalRuleCount > 0
+        ? ` ${meta.partialRelationalRuleCount} dependance(s) documentaire(s) restent partielles.`
+        : "";
+    return `${meta.publishedCoveredFieldCount}/${meta.explicitFieldCount} variables clés sont couvertes par des règles publiées.${relationHint}`;
   }
 
   if (meta.structuredRuleSource === "structured_urban_rules") {

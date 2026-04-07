@@ -55,6 +55,9 @@ type BuildabilitySourceDetail = {
   sourceExcerpt: string | null;
   reviewStatus: string | null;
   confidenceScore: number | null;
+  resolutionStatus: string | null;
+  linkedRuleCount: number;
+  requiresCrossDocumentResolution: boolean;
 };
 
 type BuildabilitySourceMeta = {
@@ -64,6 +67,9 @@ type BuildabilitySourceMeta = {
   coveredFieldCount: number;
   publishedCoveredFieldCount: number;
   explicitFieldCount: number;
+  relationalRuleCount: number;
+  unresolvedRelationalRuleCount: number;
+  partialRelationalRuleCount: number;
 };
 
 type BuildabilitySourceDetails = {
@@ -155,6 +161,9 @@ async function buildBuildabilitySourceDetails(
       sourceExcerpt: rule.sourceExcerpt ?? null,
       reviewStatus: rule.reviewStatus ?? null,
       confidenceScore: typeof rule.confidenceScore === "number" ? rule.confidenceScore : null,
+      resolutionStatus: "resolutionStatus" in rule ? rule.resolutionStatus ?? null : null,
+      linkedRuleCount: "linkedRuleCount" in rule ? Number(rule.linkedRuleCount || 0) : 0,
+      requiresCrossDocumentResolution: "requiresCrossDocumentResolution" in rule ? !!rule.requiresCrossDocumentResolution : false,
     };
   };
 
@@ -179,6 +188,9 @@ async function buildBuildabilitySourceDetails(
   ];
   const coveredFieldCount = explicitFields.filter(Boolean).length;
   const publishedCoveredFieldCount = explicitFields.filter((detail) => detail?.reviewStatus === "published").length;
+  const relationalRuleCount = rules.filter((rule) => "isRelationalRule" in rule && !!rule.isRelationalRule).length;
+  const unresolvedRelationalRuleCount = rules.filter((rule) => "resolutionStatus" in rule && rule.resolutionStatus === "unresolved").length;
+  const partialRelationalRuleCount = rules.filter((rule) => "resolutionStatus" in rule && rule.resolutionStatus === "partial").length;
 
   return {
     ...details,
@@ -189,6 +201,9 @@ async function buildBuildabilitySourceDetails(
       coveredFieldCount,
       publishedCoveredFieldCount,
       explicitFieldCount: explicitFields.length,
+      relationalRuleCount,
+      unresolvedRelationalRuleCount,
+      partialRelationalRuleCount,
     },
   };
 }
@@ -1025,9 +1040,20 @@ export async function orchestrateDossierAnalysis(
       const publishedCoverageScore = sourceDetails.meta.explicitFieldCount > 0
         ? sourceDetails.meta.publishedCoveredFieldCount / sourceDetails.meta.explicitFieldCount
         : 0;
-      const computedConfidenceScore = structuredRuleLoad.source === "published_calibration"
+      const baseConfidenceScore = structuredRuleLoad.source === "published_calibration"
         ? Math.round(((coverageScore * 0.7) + (publishedCoverageScore * 0.3)) * 100) / 100
         : Math.round(((coverageScore * 0.7) + (provenanceScore * 0.3)) * 100) / 100;
+      const relationPenaltyFactor = sourceDetails.meta.unresolvedRelationalRuleCount > 0
+        ? 0.65
+        : sourceDetails.meta.partialRelationalRuleCount > 0
+          ? 0.85
+          : 1;
+      const computedConfidenceScore = Math.round(baseConfidenceScore * relationPenaltyFactor * 100) / 100;
+      if (sourceDetails.meta.unresolvedRelationalRuleCount > 0) {
+        assumptions.push(`${sourceDetails.meta.unresolvedRelationalRuleCount} regle(s) relationnelle(s) restent non resolue(s) dans des documents lies.`);
+      } else if (sourceDetails.meta.partialRelationalRuleCount > 0) {
+        assumptions.push(`${sourceDetails.meta.partialRelationalRuleCount} regle(s) relationnelle(s) restent partiellement resolue(s) et demandent une verification.`);
+      }
 
       const buildabilityData = {
         analysisId,

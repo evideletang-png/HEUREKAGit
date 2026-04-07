@@ -5,10 +5,12 @@ import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/
 import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/schema/regulatoryCalibrationZones.js";
 import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regulatoryOverlays.js";
 import { overlayDocumentBindingsTable } from "../../../../packages/db/src/schema/overlayDocumentBindings.js";
+import { ruleRelationsTable } from "../../../../packages/db/src/schema/ruleRelations.js";
 import { regulatoryRuleConflictsTable } from "../../../../packages/db/src/schema/regulatoryRuleConflicts.js";
 import { regulatoryThemeTaxonomyTable } from "../../../../packages/db/src/schema/regulatoryThemeTaxonomy.js";
 import { regulatoryValidationHistoryTable } from "../../../../packages/db/src/schema/regulatoryValidationHistory.js";
 import { regulatoryZoneSectionsTable } from "../../../../packages/db/src/schema/regulatoryZoneSections.js";
+import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
 import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
 import { normalizeExtractedText } from "./textQualityService.js";
 
@@ -99,6 +101,47 @@ export const REGULATORY_RULE_ANCHOR_TYPES = [
   "manual",
 ] as const;
 
+export const REGULATORY_RELATION_TYPES = [
+  "references",
+  "depends_on",
+  "complements",
+  "restricts",
+  "substitutes",
+  "procedural_dependency",
+  "cross_checks_with",
+  "exception_to",
+  "derived_from",
+] as const;
+
+export const REGULATORY_RELATION_RESOLUTION_STATUSES = [
+  "standalone",
+  "complete",
+  "partial",
+  "unresolved",
+] as const;
+
+const RELATION_SIGNAL_PATTERNS: Array<{
+  relationType: typeof REGULATORY_RELATION_TYPES[number];
+  label: string;
+  pattern: RegExp;
+}> = [
+  { relationType: "depends_on", label: "Sous réserve de", pattern: /\bsous réserve de\b/i },
+  { relationType: "depends_on", label: "À condition de respecter", pattern: /\bà condition de respecter\b/i },
+  { relationType: "references", label: "Conformément à", pattern: /\bconformément à\b/i },
+  { relationType: "restricts", label: "Sauf dispositions de", pattern: /\bsauf dispositions de\b/i },
+  { relationType: "procedural_dependency", label: "En application de", pattern: /\ben application de\b/i },
+  { relationType: "procedural_dependency", label: "Avis requis", pattern: /\bavis\b.{0,20}\brequis\b/i },
+];
+
+const CRITICAL_RELATION_TYPES = new Set<string>([
+  "depends_on",
+  "restricts",
+  "substitutes",
+  "procedural_dependency",
+  "exception_to",
+  "cross_checks_with",
+]);
+
 export type CalibrationPage = {
   pageNumber: number;
   text: string;
@@ -157,9 +200,25 @@ export async function ensureRegulatoryThemeTaxonomySeed() {
   return db.select().from(regulatoryThemeTaxonomyTable).where(eq(regulatoryThemeTaxonomyTable.isActive, true));
 }
 
+export function detectRuleRelationSignals(text: string | null | undefined) {
+  const normalized = normalizeExtractedText(text || "");
+  if (!normalized) return [];
+
+  return RELATION_SIGNAL_PATTERNS.flatMap((entry) => {
+    const match = normalized.match(entry.pattern);
+    if (!match) return [];
+    return [{
+      relationType: entry.relationType,
+      label: entry.label,
+      matchedText: match[0],
+      conditionText: normalized.length > 220 ? `${normalized.slice(0, 217)}...` : normalized,
+    }];
+  });
+}
+
 export async function recordRegulatoryValidationHistory(args: {
   communeId: string;
-  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict";
+  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict" | "relation";
   entityId: string;
   fromStatus?: string | null;
   toStatus?: string | null;
@@ -179,6 +238,93 @@ export async function recordRegulatoryValidationHistory(args: {
     userId: args.userId || null,
     snapshot: args.snapshot || {},
   });
+}
+
+export async function recomputeIndexedRuleRelationResolution(args: {
+  communeId: string;
+  ruleIds?: string[];
+}) {
+  const rules = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.communeId, args.communeId));
+  if (rules.length === 0) return;
+
+  const scopeRuleIds = args.ruleIds?.length
+    ? new Set(args.ruleIds)
+    : null;
+
+  const relations = await db.select().from(ruleRelationsTable).where(
+    or(
+      inArray(ruleRelationsTable.sourceRuleId, rules.map((rule) => rule.id)),
+      inArray(ruleRelationsTable.targetRuleId, rules.map((rule) => rule.id)),
+    )!,
+  );
+
+  const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
+  const relationsBySource = new Map<string, typeof relations>();
+  for (const relation of relations) {
+    const existing = relationsBySource.get(relation.sourceRuleId) || [];
+    existing.push(relation);
+    relationsBySource.set(relation.sourceRuleId, existing);
+  }
+
+  const updates = rules
+    .filter((rule) => !scopeRuleIds || scopeRuleIds.has(rule.id))
+    .map((rule) => {
+      const outgoing = relationsBySource.get(rule.id) || [];
+      if (outgoing.length === 0) {
+        return {
+          id: rule.id,
+          isRelationalRule: false,
+          requiresCrossDocumentResolution: false,
+          resolutionStatus: "standalone",
+          linkedRuleCount: 0,
+        };
+      }
+
+      let resolvedCount = 0;
+      let unresolvedCritical = 0;
+      let requiresCrossDocumentResolution = false;
+
+      for (const relation of outgoing) {
+        const targetRule = relation.targetRuleId ? rulesById.get(relation.targetRuleId) : null;
+        const hasTargetDocument = !!relation.targetDocumentId;
+        const relationResolved = !!targetRule || (hasTargetDocument && !CRITICAL_RELATION_TYPES.has(relation.relationType));
+        const isCritical = CRITICAL_RELATION_TYPES.has(relation.relationType);
+
+        if (relation.sourceDocumentId !== relation.targetDocumentId || isCritical) {
+          requiresCrossDocumentResolution = true;
+        }
+
+        if (relationResolved) {
+          resolvedCount += 1;
+        } else if (isCritical) {
+          unresolvedCritical += 1;
+        }
+      }
+
+      const resolutionStatus = unresolvedCritical > 0
+        ? "unresolved"
+        : (resolvedCount === outgoing.length ? "complete" : "partial");
+
+      return {
+        id: rule.id,
+        isRelationalRule: true,
+        requiresCrossDocumentResolution,
+        resolutionStatus,
+        linkedRuleCount: outgoing.length,
+      };
+    });
+
+  for (const update of updates) {
+    await db.update(indexedRegulatoryRulesTable)
+      .set({
+        isRelationalRule: update.isRelationalRule,
+        requiresCrossDocumentResolution: update.requiresCrossDocumentResolution,
+        resolutionStatus: update.resolutionStatus,
+        linkedRuleCount: update.linkedRuleCount,
+        updatedAt: new Date(),
+      })
+      .where(eq(indexedRegulatoryRulesTable.id, update.id));
+  }
 }
 
 export function validateIndexedRuleForPublication(rule: {
@@ -371,6 +517,10 @@ export async function listPublishedRulesForCommune(communeId: string) {
     applicabilityScope: indexedRegulatoryRulesTable.applicabilityScope,
     ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
     ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
+    isRelationalRule: indexedRegulatoryRulesTable.isRelationalRule,
+    requiresCrossDocumentResolution: indexedRegulatoryRulesTable.requiresCrossDocumentResolution,
+    resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
+    linkedRuleCount: indexedRegulatoryRulesTable.linkedRuleCount,
   })
     .from(indexedRegulatoryRulesTable)
     .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
@@ -410,5 +560,15 @@ export async function listDocumentCalibrationData(args: { communeAliases: string
     db.select().from(regulatoryRuleConflictsTable).where(eq(regulatoryRuleConflictsTable.communeId, args.communeAliases[0] || "")),
   ]);
 
-  return { zones, overlays, bindings, excerpts, rules, conflicts };
+  const ruleIds = rules.map((rule) => rule.id);
+  const relations = ruleIds.length > 0
+    ? await db.select().from(ruleRelationsTable).where(
+        or(
+          inArray(ruleRelationsTable.sourceRuleId, ruleIds),
+          inArray(ruleRelationsTable.targetRuleId, ruleIds),
+        )!,
+      )
+    : [];
+
+  return { zones, overlays, bindings, excerpts, rules, conflicts, relations };
 }

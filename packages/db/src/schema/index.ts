@@ -32,5 +32,6 @@ export * from "./overlayDocumentBindings";
 export * from "./regulatoryThemeTaxonomy";
 export * from "./calibratedExcerpts";
 export * from "./indexedRegulatoryRules";
+export * from "./ruleRelations";
 export * from "./regulatoryValidationHistory";
 export * from "./regulatoryRuleConflicts";

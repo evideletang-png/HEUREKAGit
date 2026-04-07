@@ -74,8 +74,30 @@ type CalibrationThemePayload = {
   overlayTypes: string[];
   normativeEffects: string[];
   proceduralEffects: string[];
+  relationTypes: string[];
+  relationResolutionStatuses: string[];
   structureModes: string[];
   ruleAnchorTypes: string[];
+};
+
+type RuleRelationItem = {
+  id: string;
+  sourceRuleId: string;
+  targetRuleId: string | null;
+  sourceDocumentId: string;
+  targetDocumentId: string | null;
+  relationType: string;
+  relationScope: string;
+  conditionText: string | null;
+  priorityNote: string | null;
+  sourceRuleLabel: string;
+  sourceRuleStatus: string | null;
+  sourceResolutionStatus: string | null;
+  targetRuleLabel: string | null;
+  targetRuleStatus: string | null;
+  targetRuleTarget: string | null;
+  sourceDocumentLabel: string | null;
+  targetDocumentLabel: string | null;
 };
 
 type WorkspaceData = {
@@ -137,8 +159,19 @@ type WorkspaceData = {
       confidenceScore: number | null;
       conflictFlag: boolean;
       status: string;
+      isRelationalRule: boolean;
+      requiresCrossDocumentResolution: boolean;
+      resolutionStatus: string;
+      linkedRuleCount: number;
+    }>;
+    relationSignals: Array<{
+      relationType: string;
+      label: string;
+      matchedText: string;
+      conditionText: string;
     }>;
   }>;
+  relations: RuleRelationItem[];
   aiSuggestions: {
     sections: Array<{ id: string; zoneCode: string; heading: string; startPage: number | null; endPage: number | null; sourceText: string }>;
     rules: Array<{ id: string; zoneCode: string | null; articleCode: string | null; themeCode: string; label: string; sourceText: string; sourcePage: number | null; confidenceScore: number | null }>;
@@ -153,6 +186,7 @@ type LibraryResponse = {
     ruleCount: number;
     publishedCount: number;
     conflictCount: number;
+    relationCount: number;
     historyCount: number;
   };
   rules: Array<{
@@ -187,8 +221,13 @@ type LibraryResponse = {
     ruleAnchorType: string;
     ruleAnchorLabel: string | null;
     conflictResolutionStatus: string;
+    isRelationalRule: boolean;
+    requiresCrossDocumentResolution: boolean;
+    resolutionStatus: string;
+    linkedRuleCount: number;
     documentTitle: string | null;
   }>;
+  relations: RuleRelationItem[];
   conflicts: Array<{ id: string; conflictSummary: string; status: string }>;
   history: Array<{ id: string; entityType: string; action: string; fromStatus: string | null; toStatus: string | null; createdAt: string }>;
 };
@@ -272,6 +311,54 @@ function getProceduralEffectLabel(effect: string | null | undefined) {
   }
 }
 
+function getRelationTypeLabel(type: string | null | undefined) {
+  switch (type) {
+    case "depends_on":
+      return "Depend de";
+    case "complements":
+      return "Complete";
+    case "restricts":
+      return "Restreint";
+    case "substitutes":
+      return "Se substitue a";
+    case "procedural_dependency":
+      return "Dependance procedurale";
+    case "cross_checks_with":
+      return "A croiser avec";
+    case "exception_to":
+      return "Exception a";
+    case "derived_from":
+      return "Derive de";
+    default:
+      return "Reference";
+  }
+}
+
+function getRelationResolutionLabel(status: string | null | undefined) {
+  switch (status) {
+    case "complete":
+      return "Complet";
+    case "partial":
+      return "Partiel";
+    case "unresolved":
+      return "Non resolu";
+    default:
+      return "Autonome";
+  }
+}
+
+function detectRelationSignalsFromText(text: string) {
+  const patterns = [
+    { relationType: "depends_on", label: "Sous reserve de", pattern: /\bsous réserve de\b/i },
+    { relationType: "depends_on", label: "A condition de respecter", pattern: /\bà condition de respecter\b/i },
+    { relationType: "references", label: "Conformement a", pattern: /\bconformément à\b/i },
+    { relationType: "restricts", label: "Sauf dispositions de", pattern: /\bsauf dispositions de\b/i },
+    { relationType: "procedural_dependency", label: "En application de", pattern: /\ben application de\b/i },
+  ];
+
+  return patterns.flatMap((entry) => entry.pattern.test(text) ? [{ relationType: entry.relationType, label: entry.label }] : []);
+}
+
 function getRuleTargetLabel(rule: Pick<LibraryResponse["rules"][number], "zoneCode" | "overlayCode" | "overlayType">) {
   if (rule.zoneCode && rule.overlayCode) return `${rule.zoneCode} + ${rule.overlayCode}`;
   if (rule.zoneCode) return rule.zoneCode;
@@ -346,6 +433,17 @@ function buildEmptyRuleDraft() {
   };
 }
 
+function buildEmptyRelationDraft() {
+  return {
+    targetRuleId: "",
+    targetDocumentId: "",
+    relationType: "references",
+    relationScope: "rule",
+    conditionText: "",
+    priorityNote: "",
+  };
+}
+
 export function RegulatoryCalibrationModule({
   currentCommune,
   documents,
@@ -381,6 +479,8 @@ export function RegulatoryCalibrationModule({
   const [activeExcerptId, setActiveExcerptId] = useState<string | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleEditorDrafts, setRuleEditorDrafts] = useState<Record<string, ReturnType<typeof buildRuleEditorDraft>>>({});
+  const [editingRelationId, setEditingRelationId] = useState<string | null>(null);
+  const [relationDrafts, setRelationDrafts] = useState<Record<string, ReturnType<typeof buildEmptyRelationDraft>>>({});
   const [documentOverlayDrafts, setDocumentOverlayDrafts] = useState<Record<string, {
     overlayId: string;
     role: string;
@@ -681,6 +781,63 @@ export function RegulatoryCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const createRelationMutation = useMutation({
+    mutationFn: async ({ ruleId, draft }: { ruleId: string; draft: ReturnType<typeof buildEmptyRelationDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/rules/${ruleId}/relations`, {
+      method: "POST",
+      body: JSON.stringify({
+        commune: currentCommune,
+        targetRuleId: draft.targetRuleId || null,
+        targetDocumentId: draft.targetDocumentId || null,
+        relationType: draft.relationType,
+        relationScope: draft.relationScope,
+        conditionText: draft.conditionText,
+        priorityNote: draft.priorityNote,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setRelationDrafts((current) => ({
+        ...current,
+        [variables.ruleId]: buildEmptyRelationDraft(),
+      }));
+      toast({ title: "Lien cree", description: "La relation entre regles est maintenant tracee." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateRelationMutation = useMutation({
+    mutationFn: async ({ relationId, draft }: { relationId: string; draft: ReturnType<typeof buildEmptyRelationDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/rule-relations/${relationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        commune: currentCommune,
+        targetRuleId: draft.targetRuleId || null,
+        targetDocumentId: draft.targetDocumentId || null,
+        relationType: draft.relationType,
+        relationScope: draft.relationScope,
+        conditionText: draft.conditionText,
+        priorityNote: draft.priorityNote,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setEditingRelationId((current) => (current === variables.relationId ? null : current));
+      toast({ title: "Lien modifie", description: "La relation a ete mise a jour." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteRelationMutation = useMutation({
+    mutationFn: async (relationId: string) => apiFetch(`/api/mairie/regulatory-calibration/rule-relations/${relationId}?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "DELETE",
+    }),
+    onSuccess: (_payload, relationId) => {
+      refreshCalibration();
+      setEditingRelationId((current) => (current === relationId ? null : current));
+      toast({ title: "Lien supprime", description: "La relation a ete retiree du graphe reglementaire." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const resegmentDocumentMutation = useMutation({
     mutationFn: async (documentId: string) => apiFetch(`/api/mairie/documents/${documentId}/resegment?commune=${encodeURIComponent(currentCommune)}`, { method: "POST" }),
     onSuccess: () => {
@@ -737,7 +894,26 @@ export function RegulatoryCalibrationModule({
       ? "Le module de calibration n'a pas pu être chargé."
       : null;
 
-  const activeRules = workspaceData?.excerpts.find((excerpt) => excerpt.id === activeExcerptId)?.rules || [];
+  const activeExcerpt = workspaceData?.excerpts.find((excerpt) => excerpt.id === activeExcerptId) || null;
+  const activeRules = activeExcerpt?.rules || [];
+  const workspaceRelationsBySource = useMemo(() => {
+    const map = new Map<string, RuleRelationItem[]>();
+    for (const relation of workspaceData?.relations || []) {
+      const existing = map.get(relation.sourceRuleId) || [];
+      existing.push(relation);
+      map.set(relation.sourceRuleId, existing);
+    }
+    return map;
+  }, [workspaceData?.relations]);
+  const libraryRelationsBySource = useMemo(() => {
+    const map = new Map<string, RuleRelationItem[]>();
+    for (const relation of libraryData?.relations || []) {
+      const existing = map.get(relation.sourceRuleId) || [];
+      existing.push(relation);
+      map.set(relation.sourceRuleId, existing);
+    }
+    return map;
+  }, [libraryData?.relations]);
   const filteredLibraryRules = useMemo(() => {
     const rules = libraryData?.rules || [];
     return rules.filter((rule) => {
@@ -747,6 +923,12 @@ export function RegulatoryCalibrationModule({
       return true;
     });
   }, [libraryData?.rules, libraryNormativeFilter, libraryOverlayFilter, libraryProceduralFilter]);
+  const relationRuleCandidates = useMemo(() => {
+    const rules = libraryData?.rules || [];
+    return rules
+      .slice()
+      .sort((left, right) => left.ruleLabel.localeCompare(right.ruleLabel, "fr"));
+  }, [libraryData?.rules]);
 
   const publishedRuleGroups = useMemo(() => {
     const rules = publishedData?.rules || [];
@@ -1348,6 +1530,18 @@ export function RegulatoryCalibrationModule({
                       <div className="rounded-lg border bg-muted/20 p-3 text-sm min-h-[120px]">
                         {pendingSelection ? pendingSelection.text : "Aucune sélection active"}
                       </div>
+                      {pendingSelection && detectRelationSignalsFromText(pendingSelection.text).length > 0 && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Renvois détectés</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {detectRelationSignalsFromText(pendingSelection.text).map((signal, index) => (
+                              <Badge key={`${signal.relationType}-${index}`} variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                                {getRelationTypeLabel(signal.relationType)} · {signal.label}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="grid gap-3 md:grid-cols-3">
                         <Select value={selectionZoneId || "__none_zone__"} onValueChange={(value) => setSelectionZoneId(value === "__none_zone__" ? "" : value)}>
                           <SelectTrigger><SelectValue placeholder="Zone PLU (optionnelle)" /></SelectTrigger>
@@ -1433,6 +1627,11 @@ export function RegulatoryCalibrationModule({
                                 <div className="mt-1 flex flex-wrap gap-2">
                                   {excerpt.zone && <Badge variant="outline">{excerpt.zone.zoneCode}</Badge>}
                                   {excerpt.overlay && <Badge variant="secondary">{excerpt.overlay.overlayCode} · {excerpt.overlay.overlayType}</Badge>}
+                                  {excerpt.relationSignals.length > 0 && (
+                                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                                      {excerpt.relationSignals.length} renvoi(s) detecte(s)
+                                    </Badge>
+                                  )}
                                 </div>
                                 <p className="text-xs text-muted-foreground">Page {excerpt.sourcePage}{excerpt.sourcePageEnd && excerpt.sourcePageEnd !== excerpt.sourcePage ? ` à ${excerpt.sourcePageEnd}` : ""}</p>
                               </div>
@@ -1568,8 +1767,257 @@ export function RegulatoryCalibrationModule({
                                     <Badge variant="secondary">{getNormativeEffectLabel(rule.normativeEffect)}</Badge>
                                     {rule.proceduralEffect !== "none" && <Badge variant="outline">{getProceduralEffectLabel(rule.proceduralEffect)}</Badge>}
                                     {rule.ruleAnchorLabel && <Badge variant="outline">{rule.ruleAnchorType} · {rule.ruleAnchorLabel}</Badge>}
+                                    {rule.isRelationalRule && (
+                                      <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">
+                                        {getRelationResolutionLabel(rule.resolutionStatus)} · {rule.linkedRuleCount} lien(s)
+                                      </Badge>
+                                    )}
                                   </div>
                                   <p className="mt-1 text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
+                                  {activeExcerpt?.relationSignals.length ? (
+                                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Indices de renvoi dans l’extrait</p>
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {activeExcerpt.relationSignals.map((signal, index) => (
+                                          <Badge key={`${signal.relationType}-${index}`} variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                                            {getRelationTypeLabel(signal.relationType)}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                  {(workspaceRelationsBySource.get(rule.id) || []).length > 0 && (
+                                    <div className="mt-3 space-y-2">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Liens existants</p>
+                                      {(workspaceRelationsBySource.get(rule.id) || []).map((relation) => (
+                                        <div key={relation.id} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <Badge variant="outline">{getRelationTypeLabel(relation.relationType)}</Badge>
+                                            <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">
+                                              {getRelationResolutionLabel(relation.sourceResolutionStatus)}
+                                            </Badge>
+                                            {relation.targetRuleTarget && <Badge variant="secondary">{relation.targetRuleTarget}</Badge>}
+                                          </div>
+                                          <p className="mt-2 text-foreground/90">
+                                            {relation.targetRuleLabel || relation.targetDocumentLabel || "Cible a preciser"}
+                                          </p>
+                                          {(relation.conditionText || relation.priorityNote) && (
+                                            <p className="mt-1 text-muted-foreground">
+                                              {[relation.conditionText, relation.priorityNote].filter(Boolean).join(" · ")}
+                                            </p>
+                                          )}
+                                          <div className="mt-2 flex flex-wrap gap-2">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => {
+                                                if (editingRelationId === relation.id) {
+                                                  setEditingRelationId(null);
+                                                  return;
+                                                }
+                                                setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: {
+                                                    targetRuleId: relation.targetRuleId || "",
+                                                    targetDocumentId: relation.targetDocumentId || "",
+                                                    relationType: relation.relationType,
+                                                    relationScope: relation.relationScope,
+                                                    conditionText: relation.conditionText || "",
+                                                    priorityNote: relation.priorityNote || "",
+                                                  },
+                                                }));
+                                                setEditingRelationId(relation.id);
+                                              }}
+                                            >
+                                              <FilePenLine className="mr-2 h-3.5 w-3.5" />
+                                              {editingRelationId === relation.id ? "Fermer" : "Modifier"}
+                                            </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="border-destructive/20 text-destructive hover:bg-destructive/5"
+                                              onClick={() => {
+                                                if (!window.confirm("Supprimer ce lien reglementaire ?")) return;
+                                                deleteRelationMutation.mutate(relation.id);
+                                              }}
+                                            >
+                                              <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                              Supprimer
+                                            </Button>
+                                          </div>
+                                          {editingRelationId === relation.id && (
+                                            <div className="mt-3 grid gap-3 rounded-lg border bg-muted/10 p-3">
+                                              <Select
+                                                value={relationDrafts[relation.id]?.relationType || relation.relationType}
+                                                onValueChange={(value) => setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: { ...buildEmptyRelationDraft(), ...(current[relation.id] || {}), relationType: value, targetRuleId: relation.targetRuleId || "", targetDocumentId: relation.targetDocumentId || "" },
+                                                }))}
+                                              >
+                                                <SelectTrigger><SelectValue placeholder="Type de lien" /></SelectTrigger>
+                                                <SelectContent>
+                                                  {(themesData?.relationTypes || []).map((relationType) => (
+                                                    <SelectItem key={relationType} value={relationType}>{getRelationTypeLabel(relationType)}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                              <Select
+                                                value={relationDrafts[relation.id]?.targetRuleId || "__none_target_rule__"}
+                                                onValueChange={(value) => setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: { ...buildEmptyRelationDraft(), ...(current[relation.id] || {}), targetRuleId: value === "__none_target_rule__" ? "" : value },
+                                                }))}
+                                              >
+                                                <SelectTrigger><SelectValue placeholder="Règle cible" /></SelectTrigger>
+                                                <SelectContent>
+                                                  <SelectItem value="__none_target_rule__">Aucune règle cible</SelectItem>
+                                                  {relationRuleCandidates.filter((candidate) => candidate.id !== rule.id).map((candidate) => (
+                                                    <SelectItem key={candidate.id} value={candidate.id}>
+                                                      {getRuleTargetLabel(candidate)} · {candidate.ruleLabel}
+                                                    </SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                              <Select
+                                                value={relationDrafts[relation.id]?.targetDocumentId || "__none_target_doc__"}
+                                                onValueChange={(value) => setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: { ...buildEmptyRelationDraft(), ...(current[relation.id] || {}), targetDocumentId: value === "__none_target_doc__" ? "" : value },
+                                                }))}
+                                              >
+                                                <SelectTrigger><SelectValue placeholder="Document cible" /></SelectTrigger>
+                                                <SelectContent>
+                                                  <SelectItem value="__none_target_doc__">Aucun document cible</SelectItem>
+                                                  {documents.map((document) => (
+                                                    <SelectItem key={document.id} value={document.id}>{document.title}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                              <Input
+                                                placeholder="Portee du lien"
+                                                value={relationDrafts[relation.id]?.relationScope || relation.relationScope}
+                                                onChange={(e) => setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: { ...buildEmptyRelationDraft(), ...(current[relation.id] || {}), relationScope: e.target.value },
+                                                }))}
+                                              />
+                                              <Textarea
+                                                placeholder="Condition du lien"
+                                                value={relationDrafts[relation.id]?.conditionText || ""}
+                                                onChange={(e) => setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: { ...buildEmptyRelationDraft(), ...(current[relation.id] || {}), conditionText: e.target.value },
+                                                }))}
+                                              />
+                                              <Textarea
+                                                placeholder="Note de priorite"
+                                                value={relationDrafts[relation.id]?.priorityNote || ""}
+                                                onChange={(e) => setRelationDrafts((current) => ({
+                                                  ...current,
+                                                  [relation.id]: { ...buildEmptyRelationDraft(), ...(current[relation.id] || {}), priorityNote: e.target.value },
+                                                }))}
+                                              />
+                                              <Button
+                                                size="sm"
+                                                disabled={updateRelationMutation.isPending}
+                                                onClick={() => updateRelationMutation.mutate({
+                                                  relationId: relation.id,
+                                                  draft: relationDrafts[relation.id] || buildEmptyRelationDraft(),
+                                                })}
+                                              >
+                                                {updateRelationMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
+                                                Enregistrer le lien
+                                              </Button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="mt-3 grid gap-3 rounded-lg border bg-background p-3">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ajouter un lien a cette règle</p>
+                                    <Select
+                                      value={relationDrafts[rule.id]?.relationType || "references"}
+                                      onValueChange={(value) => setRelationDrafts((current) => ({
+                                        ...current,
+                                        [rule.id]: { ...buildEmptyRelationDraft(), ...(current[rule.id] || {}), relationType: value },
+                                      }))}
+                                    >
+                                      <SelectTrigger><SelectValue placeholder="Type de lien" /></SelectTrigger>
+                                      <SelectContent>
+                                        {(themesData?.relationTypes || []).map((relationType) => (
+                                          <SelectItem key={relationType} value={relationType}>{getRelationTypeLabel(relationType)}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Select
+                                      value={relationDrafts[rule.id]?.targetRuleId || "__none_target_rule__"}
+                                      onValueChange={(value) => setRelationDrafts((current) => ({
+                                        ...current,
+                                        [rule.id]: { ...buildEmptyRelationDraft(), ...(current[rule.id] || {}), targetRuleId: value === "__none_target_rule__" ? "" : value },
+                                      }))}
+                                    >
+                                      <SelectTrigger><SelectValue placeholder="Lier a une autre regle" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none_target_rule__">Aucune règle cible</SelectItem>
+                                        {relationRuleCandidates.filter((candidate) => candidate.id !== rule.id).map((candidate) => (
+                                          <SelectItem key={candidate.id} value={candidate.id}>
+                                            {getRuleTargetLabel(candidate)} · {candidate.ruleLabel}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Select
+                                      value={relationDrafts[rule.id]?.targetDocumentId || "__none_target_doc__"}
+                                      onValueChange={(value) => setRelationDrafts((current) => ({
+                                        ...current,
+                                        [rule.id]: { ...buildEmptyRelationDraft(), ...(current[rule.id] || {}), targetDocumentId: value === "__none_target_doc__" ? "" : value },
+                                      }))}
+                                    >
+                                      <SelectTrigger><SelectValue placeholder="Ou a un document cible" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none_target_doc__">Aucun document cible</SelectItem>
+                                        {documents.map((document) => (
+                                          <SelectItem key={document.id} value={document.id}>{document.title}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Input
+                                      placeholder="Portee du lien"
+                                      value={relationDrafts[rule.id]?.relationScope || "rule"}
+                                      onChange={(e) => setRelationDrafts((current) => ({
+                                        ...current,
+                                        [rule.id]: { ...buildEmptyRelationDraft(), ...(current[rule.id] || {}), relationScope: e.target.value },
+                                      }))}
+                                    />
+                                    <Textarea
+                                      placeholder="Condition du lien"
+                                      value={relationDrafts[rule.id]?.conditionText || ""}
+                                      onChange={(e) => setRelationDrafts((current) => ({
+                                        ...current,
+                                        [rule.id]: { ...buildEmptyRelationDraft(), ...(current[rule.id] || {}), conditionText: e.target.value },
+                                      }))}
+                                    />
+                                    <Textarea
+                                      placeholder="Note de priorite"
+                                      value={relationDrafts[rule.id]?.priorityNote || ""}
+                                      onChange={(e) => setRelationDrafts((current) => ({
+                                        ...current,
+                                        [rule.id]: { ...buildEmptyRelationDraft(), ...(current[rule.id] || {}), priorityNote: e.target.value },
+                                      }))}
+                                    />
+                                    <Button
+                                      size="sm"
+                                      disabled={createRelationMutation.isPending || (!(relationDrafts[rule.id]?.targetRuleId) && !(relationDrafts[rule.id]?.targetDocumentId))}
+                                      onClick={() => createRelationMutation.mutate({
+                                        ruleId: rule.id,
+                                        draft: relationDrafts[rule.id] || buildEmptyRelationDraft(),
+                                      })}
+                                    >
+                                      {createRelationMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-2 h-3.5 w-3.5" />}
+                                      Creer le lien
+                                    </Button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1659,6 +2107,11 @@ export function RegulatoryCalibrationModule({
                       <Badge variant="outline">{getNormativeEffectLabel(rule.normativeEffect)}</Badge>
                       {rule.proceduralEffect !== "none" && <Badge variant="outline">{getProceduralEffectLabel(rule.proceduralEffect)}</Badge>}
                       <Badge variant="outline" className={getStatusBadge(rule.status).className}>{getStatusBadge(rule.status).label}</Badge>
+                      {rule.isRelationalRule && (
+                        <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">
+                          {getRelationResolutionLabel(rule.resolutionStatus)} · {rule.linkedRuleCount} lien(s)
+                        </Badge>
+                      )}
                       {rule.conflictFlag && <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">Conflit</Badge>}
                     </div>
                     <p className="font-medium">{rule.ruleLabel}</p>
@@ -1667,6 +2120,26 @@ export function RegulatoryCalibrationModule({
                       {rule.documentTitle} · page {rule.sourcePage}{rule.sourcePageEnd && rule.sourcePageEnd !== rule.sourcePage ? ` à ${rule.sourcePageEnd}` : ""}
                     </p>
                     <div className="rounded-lg bg-muted/20 px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
+                    {(libraryRelationsBySource.get(rule.id) || []).length > 0 && (
+                      <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Relations tracees</p>
+                        {(libraryRelationsBySource.get(rule.id) || []).map((relation) => (
+                          <div key={relation.id} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline">{getRelationTypeLabel(relation.relationType)}</Badge>
+                              <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">
+                                {getRelationResolutionLabel(rule.resolutionStatus)}
+                              </Badge>
+                              {relation.targetRuleTarget && <Badge variant="secondary">{relation.targetRuleTarget}</Badge>}
+                            </div>
+                            <p className="mt-2 text-foreground/90">{relation.targetRuleLabel || relation.targetDocumentLabel || "Cible a preciser"}</p>
+                            {(relation.conditionText || relation.priorityNote) && (
+                              <p className="mt-1 text-muted-foreground">{[relation.conditionText, relation.priorityNote].filter(Boolean).join(" · ")}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {editingRuleId === rule.id && (
                       <div className="space-y-3 rounded-xl border bg-muted/10 p-3">
                         <div className="grid gap-3 md:grid-cols-2">
@@ -1980,11 +2453,25 @@ export function RegulatoryCalibrationModule({
                         <Badge variant="outline" className="bg-background">{rule.zoneCode || "Zone ?"}</Badge>
                         <Badge variant="secondary">{rule.themeLabel}</Badge>
                         {rule.articleCode && rule.articleCode !== "manual" && <Badge variant="outline">Art. {rule.articleCode}</Badge>}
+                        {rule.isRelationalRule && <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">{getRelationResolutionLabel(rule.resolutionStatus)}</Badge>}
                       </div>
                       <p className="mt-2 font-medium">{rule.ruleLabel}</p>
                       <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
                       <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
                       <div className="mt-2 rounded-lg bg-background px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
+                      {(publishedData?.relations || []).filter((relation) => relation.sourceRuleId === rule.id).length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {(publishedData?.relations || []).filter((relation) => relation.sourceRuleId === rule.id).map((relation) => (
+                            <div key={relation.id} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline">{getRelationTypeLabel(relation.relationType)}</Badge>
+                                <Badge variant="secondary">{relation.targetRuleLabel || relation.targetDocumentLabel || "Cible a preciser"}</Badge>
+                              </div>
+                              {(relation.conditionText || relation.priorityNote) && <p className="mt-1 text-muted-foreground">{[relation.conditionText, relation.priorityNote].filter(Boolean).join(" · ")}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )) : (
                     <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">Aucune règle principale publiée.</div>
@@ -2002,6 +2489,7 @@ export function RegulatoryCalibrationModule({
                         <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{getRuleTargetLabel(rule)}</Badge>
                         {rule.overlayType && <Badge variant="secondary">{rule.overlayType}</Badge>}
                         <Badge variant="outline">{getNormativeEffectLabel(rule.normativeEffect)}</Badge>
+                        {rule.isRelationalRule && <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">{getRelationResolutionLabel(rule.resolutionStatus)}</Badge>}
                         {rule.articleCode && rule.articleCode !== "manual" && <Badge variant="outline">Art. {rule.articleCode}</Badge>}
                         {rule.ruleAnchorLabel && <Badge variant="outline">{rule.ruleAnchorType} · {rule.ruleAnchorLabel}</Badge>}
                       </div>
@@ -2009,6 +2497,19 @@ export function RegulatoryCalibrationModule({
                       <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
                       <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
                       <div className="mt-2 rounded-lg bg-muted/20 px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
+                      {(publishedData?.relations || []).filter((relation) => relation.sourceRuleId === rule.id).length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {(publishedData?.relations || []).filter((relation) => relation.sourceRuleId === rule.id).map((relation) => (
+                            <div key={relation.id} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline">{getRelationTypeLabel(relation.relationType)}</Badge>
+                                <Badge variant="secondary">{relation.targetRuleLabel || relation.targetDocumentLabel || "Cible a preciser"}</Badge>
+                              </div>
+                              {(relation.conditionText || relation.priorityNote) && <p className="mt-1 text-muted-foreground">{[relation.conditionText, relation.priorityNote].filter(Boolean).join(" · ")}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )) : (
                     <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">Aucune couche superposée publiée.</div>
@@ -2026,10 +2527,24 @@ export function RegulatoryCalibrationModule({
                         <Badge variant="outline">{getRuleTargetLabel(rule)}</Badge>
                         <Badge variant="outline">{getProceduralEffectLabel(rule.proceduralEffect)}</Badge>
                         {rule.overlayType && <Badge variant="secondary">{rule.overlayType}</Badge>}
+                        {rule.isRelationalRule && <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800">{getRelationResolutionLabel(rule.resolutionStatus)}</Badge>}
                       </div>
                       <p className="mt-2 font-medium">{rule.ruleLabel}</p>
                       <p className="text-sm text-muted-foreground">{rule.interpretationNote || rule.valueText || "Prescription procédurale publiée."}</p>
                       <p className="mt-2 text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
+                      {(publishedData?.relations || []).filter((relation) => relation.sourceRuleId === rule.id).length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {(publishedData?.relations || []).filter((relation) => relation.sourceRuleId === rule.id).map((relation) => (
+                            <div key={relation.id} className="rounded-lg border bg-background px-3 py-2 text-xs">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline">{getRelationTypeLabel(relation.relationType)}</Badge>
+                                <Badge variant="secondary">{relation.targetRuleLabel || relation.targetDocumentLabel || "Cible a preciser"}</Badge>
+                              </div>
+                              {(relation.conditionText || relation.priorityNote) && <p className="mt-1 text-muted-foreground">{[relation.conditionText, relation.priorityNote].filter(Boolean).join(" · ")}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )) : (
                     <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">Aucun effet procédural publié.</div>

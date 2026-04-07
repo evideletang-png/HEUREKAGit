@@ -29,6 +29,7 @@ import { overlayDocumentBindingsTable } from "../../../../packages/db/src/schema
 import { regulatoryThemeTaxonomyTable } from "../../../../packages/db/src/schema/regulatoryThemeTaxonomy.js";
 import { calibratedExcerptsTable } from "../../../../packages/db/src/schema/calibratedExcerpts.js";
 import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
+import { ruleRelationsTable } from "../../../../packages/db/src/schema/ruleRelations.js";
 import { regulatoryValidationHistoryTable } from "../../../../packages/db/src/schema/regulatoryValidationHistory.js";
 import { regulatoryRuleConflictsTable } from "../../../../packages/db/src/schema/regulatoryRuleConflicts.js";
 import { createHash } from "crypto";
@@ -44,15 +45,19 @@ import {
   REGULATORY_NORMATIVE_EFFECTS,
   REGULATORY_OVERLAY_TYPES,
   REGULATORY_PROCEDURAL_EFFECTS,
+  REGULATORY_RELATION_RESOLUTION_STATUSES,
+  REGULATORY_RELATION_TYPES,
   REGULATORY_RULE_ANCHOR_TYPES,
   REGULATORY_STRUCTURE_MODES,
   buildCalibrationSuggestionsForDocument,
+  detectRuleRelationSignals,
   ensureRegulatoryThemeTaxonomySeed,
   listDocumentCalibrationData,
   listCommuneRegulatoryOverlays,
   listPublishedRulesForCommune,
   recordRegulatoryValidationHistory,
   recomputeIndexedRuleConflicts,
+  recomputeIndexedRuleRelationResolution,
   splitDocumentIntoCalibrationPages,
   validateIndexedRuleForPublication,
 } from "../services/regulatoryCalibrationService.js";
@@ -175,6 +180,71 @@ function buildDeleteScopeFilter(clauses: Array<any>) {
   if (validClauses.length === 0) return sql`FALSE`;
   if (validClauses.length === 1) return validClauses[0];
   return or(...validClauses)!;
+}
+
+async function hydrateRuleRelations(relations: Array<typeof ruleRelationsTable.$inferSelect>) {
+  if (relations.length === 0) return [];
+
+  const sourceRuleIds = Array.from(new Set(relations.map((relation) => relation.sourceRuleId)));
+  const targetRuleIds = Array.from(new Set(relations.map((relation) => relation.targetRuleId).filter((value): value is string => !!value)));
+  const docIds = Array.from(new Set([
+    ...relations.map((relation) => relation.sourceDocumentId),
+    ...relations.map((relation) => relation.targetDocumentId).filter((value): value is string => !!value),
+  ]));
+
+  const [rules, docs, zones, overlays] = await Promise.all([
+    db.select({
+      id: indexedRegulatoryRulesTable.id,
+      ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
+      status: indexedRegulatoryRulesTable.status,
+      resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
+      zoneId: indexedRegulatoryRulesTable.zoneId,
+      overlayId: indexedRegulatoryRulesTable.overlayId,
+    })
+      .from(indexedRegulatoryRulesTable)
+      .where(inArray(indexedRegulatoryRulesTable.id, Array.from(new Set([...sourceRuleIds, ...targetRuleIds])))),
+    docIds.length > 0
+      ? db.select({
+          id: townHallDocumentsTable.id,
+          title: townHallDocumentsTable.title,
+          fileName: townHallDocumentsTable.fileName,
+        }).from(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, docIds))
+      : Promise.resolve([]),
+    db.select({
+      id: regulatoryCalibrationZonesTable.id,
+      zoneCode: regulatoryCalibrationZonesTable.zoneCode,
+    }).from(regulatoryCalibrationZonesTable),
+    db.select({
+      id: regulatoryOverlaysTable.id,
+      overlayCode: regulatoryOverlaysTable.overlayCode,
+      overlayType: regulatoryOverlaysTable.overlayType,
+    }).from(regulatoryOverlaysTable),
+  ]);
+
+  const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
+  const docMap = new Map(docs.map((doc) => [doc.id, doc.title || doc.fileName || "Document"]));
+  const zoneMap = new Map(zones.map((zone) => [zone.id, zone.zoneCode]));
+  const overlayMap = new Map(overlays.map((overlay) => [overlay.id, `${overlay.overlayCode}${overlay.overlayType ? ` · ${overlay.overlayType}` : ""}`]));
+
+  return relations.map((relation) => {
+    const sourceRule = ruleMap.get(relation.sourceRuleId) || null;
+    const targetRule = relation.targetRuleId ? ruleMap.get(relation.targetRuleId) || null : null;
+    return {
+      ...relation,
+      sourceRuleLabel: sourceRule?.ruleLabel || "Règle source",
+      sourceRuleStatus: sourceRule?.status || null,
+      sourceResolutionStatus: sourceRule?.resolutionStatus || null,
+      targetRuleLabel: targetRule?.ruleLabel || null,
+      targetRuleStatus: targetRule?.status || null,
+      targetRuleTarget: targetRule?.zoneId
+        ? zoneMap.get(targetRule.zoneId) || null
+        : targetRule?.overlayId
+          ? overlayMap.get(targetRule.overlayId) || null
+          : null,
+      sourceDocumentLabel: docMap.get(relation.sourceDocumentId) || null,
+      targetDocumentLabel: relation.targetDocumentId ? docMap.get(relation.targetDocumentId) || null : null,
+    };
+  });
 }
 
 async function purgeMunicipalityStructuredKnowledge(args: {
@@ -822,7 +892,7 @@ async function resolveCommuneAliases(commune: string) {
 
 async function safeRecordRegulatoryValidationHistory(args: {
   communeId: string;
-  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict";
+  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict" | "relation";
   entityId: string;
   fromStatus?: string | null;
   toStatus?: string | null;
@@ -2640,6 +2710,8 @@ router.get("/regulatory-calibration/themes", async (_req: AuthRequest, res) => {
       overlayTypes: REGULATORY_OVERLAY_TYPES,
       normativeEffects: REGULATORY_NORMATIVE_EFFECTS,
       proceduralEffects: REGULATORY_PROCEDURAL_EFFECTS,
+      relationTypes: REGULATORY_RELATION_TYPES,
+      relationResolutionStatuses: REGULATORY_RELATION_RESOLUTION_STATUSES,
       structureModes: REGULATORY_STRUCTURE_MODES,
       ruleAnchorTypes: REGULATORY_RULE_ANCHOR_TYPES,
     });
@@ -3184,6 +3256,7 @@ router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRe
     const zoneMap = new Map(calibrationData.zones.map((zone) => [zone.id, zone]));
     const overlayMap = new Map(calibrationData.overlays.map((overlay) => [overlay.id, overlay]));
     const docAvailability = getTownHallDocumentAvailability(doc);
+    const relations = await hydrateRuleRelations(calibrationData.relations || []);
 
     return res.json({
       commune: access.targetCommune,
@@ -3216,7 +3289,9 @@ router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRe
         zone: excerpt.zoneId ? zoneMap.get(excerpt.zoneId) || null : null,
         overlay: excerpt.overlayId ? overlayMap.get(excerpt.overlayId) || null : null,
         rules: calibrationData.rules.filter((rule) => rule.excerptId === excerpt.id),
+        relationSignals: detectRuleRelationSignals(excerpt.sourceText),
       })),
+      relations,
       conflicts: calibrationData.conflicts,
       aiSuggestions: suggestions,
     });
@@ -3403,6 +3478,7 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       zoneId: rule.zoneId,
       overlayId: rule.overlayId,
     });
+    await recomputeIndexedRuleRelationResolution({ communeId: excerpt.communeId });
 
     return res.json({ rule });
   } catch (err) {
@@ -3501,6 +3577,7 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
       zoneId: updated.zoneId || rule.zoneId,
       overlayId: updated.overlayId || rule.overlayId,
     });
+    await recomputeIndexedRuleRelationResolution({ communeId: updated.communeId });
 
     return res.json({ rule: updated });
   } catch (err) {
@@ -3557,6 +3634,7 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
       zoneId: updated.zoneId,
       overlayId: updated.overlayId,
     });
+    await recomputeIndexedRuleRelationResolution({ communeId: updated.communeId });
 
     return res.json({ rule: updated });
   } catch (err) {
@@ -3592,11 +3670,199 @@ router.delete("/regulatory-calibration/rules/:id", async (req: AuthRequest, res)
       zoneId: rule.zoneId,
       overlayId: rule.overlayId,
     });
+    await recomputeIndexedRuleRelationResolution({ communeId: rule.communeId });
 
     return res.json({ deleted: true, ruleId: id });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/rules DELETE]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Suppression de la règle impossible." });
+  }
+});
+
+router.post("/regulatory-calibration/rules/:id/relations", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [sourceRule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, id)).limit(1);
+    if (!sourceRule) return res.status(404).json({ error: "RULE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || sourceRule.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const { communeAliases } = await resolveCommuneAliases(access.targetCommune);
+
+    const relationType = typeof req.body.relationType === "string" ? req.body.relationType.trim() : "";
+    const relationScope = typeof req.body.relationScope === "string" && req.body.relationScope.trim() ? req.body.relationScope.trim() : "rule";
+    const targetRuleId = typeof req.body.targetRuleId === "string" && req.body.targetRuleId.trim() ? req.body.targetRuleId.trim() : null;
+    let targetDocumentId = typeof req.body.targetDocumentId === "string" && req.body.targetDocumentId.trim() ? req.body.targetDocumentId.trim() : null;
+
+    if (!REGULATORY_RELATION_TYPES.includes(relationType as typeof REGULATORY_RELATION_TYPES[number])) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Type de relation invalide." });
+    }
+    if (!targetRuleId && !targetDocumentId) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Règle cible ou document cible obligatoire." });
+    }
+
+    let targetRule: typeof indexedRegulatoryRulesTable.$inferSelect | null = null;
+    if (targetRuleId) {
+      const [loadedTargetRule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, targetRuleId)).limit(1);
+      if (!loadedTargetRule || loadedTargetRule.communeId !== sourceRule.communeId) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Règle cible invalide pour cette commune." });
+      }
+      if (loadedTargetRule.id === sourceRule.id) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Une règle ne peut pas se lier à elle-même." });
+      }
+      targetRule = loadedTargetRule;
+      targetDocumentId = loadedTargetRule.documentId;
+    }
+
+    if (targetDocumentId) {
+      const [targetDocument] = await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, targetDocumentId)).limit(1);
+      if (!targetDocument || !communeAliases.some((alias) => alias.trim().toLowerCase() === String(targetDocument.commune || "").trim().toLowerCase())) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Document cible invalide pour cette commune." });
+      }
+    }
+
+    const [relation] = await db.insert(ruleRelationsTable).values({
+      sourceRuleId: sourceRule.id,
+      targetRuleId,
+      sourceDocumentId: sourceRule.documentId,
+      targetDocumentId,
+      relationType,
+      relationScope,
+      conditionText: typeof req.body.conditionText === "string" ? req.body.conditionText.trim() || null : null,
+      priorityNote: typeof req.body.priorityNote === "string" ? req.body.priorityNote.trim() || null : null,
+      updatedAt: new Date(),
+    }).returning();
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: sourceRule.communeId,
+      entityType: "relation",
+      entityId: relation.id,
+      action: "relation_created",
+      userId: req.user!.userId,
+      snapshot: relation as Record<string, unknown>,
+    });
+
+    await recomputeIndexedRuleRelationResolution({ communeId: sourceRule.communeId });
+
+    return res.json({ relation });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rule-relations POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Création de la relation impossible." });
+  }
+});
+
+router.patch("/regulatory-calibration/rule-relations/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [relation] = await db.select().from(ruleRelationsTable).where(eq(ruleRelationsTable.id, id)).limit(1);
+    if (!relation) return res.status(404).json({ error: "RULE_RELATION_NOT_FOUND" });
+
+    const [sourceRule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, relation.sourceRuleId)).limit(1);
+    if (!sourceRule) return res.status(404).json({ error: "RULE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || sourceRule.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const { communeAliases } = await resolveCommuneAliases(access.targetCommune);
+
+    const nextRelationType = typeof req.body.relationType === "string" && req.body.relationType.trim()
+      ? req.body.relationType.trim()
+      : relation.relationType;
+    if (!REGULATORY_RELATION_TYPES.includes(nextRelationType as typeof REGULATORY_RELATION_TYPES[number])) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Type de relation invalide." });
+    }
+
+    let nextTargetRuleId = relation.targetRuleId;
+    let nextTargetDocumentId = relation.targetDocumentId;
+    if (typeof req.body.targetRuleId === "string" && req.body.targetRuleId.trim()) {
+      const requestedTargetRuleId = req.body.targetRuleId.trim();
+      const [targetRule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, requestedTargetRuleId)).limit(1);
+      if (!targetRule || targetRule.communeId !== sourceRule.communeId) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Règle cible invalide pour cette commune." });
+      }
+      if (targetRule.id === sourceRule.id) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Une règle ne peut pas se lier à elle-même." });
+      }
+      nextTargetRuleId = targetRule.id;
+      nextTargetDocumentId = targetRule.documentId;
+    } else if (req.body.targetRuleId === null || req.body.targetRuleId === "") {
+      nextTargetRuleId = null;
+    }
+
+    if (typeof req.body.targetDocumentId === "string" && req.body.targetDocumentId.trim()) {
+      const requestedTargetDocumentId = req.body.targetDocumentId.trim();
+      const [targetDocument] = await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, requestedTargetDocumentId)).limit(1);
+      if (!targetDocument || !communeAliases.some((alias) => alias.trim().toLowerCase() === String(targetDocument.commune || "").trim().toLowerCase())) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Document cible invalide pour cette commune." });
+      }
+      nextTargetDocumentId = requestedTargetDocumentId;
+    } else if ((req.body.targetDocumentId === null || req.body.targetDocumentId === "") && !nextTargetRuleId) {
+      nextTargetDocumentId = null;
+    }
+
+    if (!nextTargetRuleId && !nextTargetDocumentId) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Règle cible ou document cible obligatoire." });
+    }
+
+    const [updated] = await db.update(ruleRelationsTable)
+      .set({
+        targetRuleId: nextTargetRuleId,
+        targetDocumentId: nextTargetDocumentId,
+        relationType: nextRelationType,
+        relationScope: typeof req.body.relationScope === "string" && req.body.relationScope.trim() ? req.body.relationScope.trim() : relation.relationScope,
+        conditionText: req.body.conditionText === undefined ? relation.conditionText : (typeof req.body.conditionText === "string" ? req.body.conditionText.trim() || null : null),
+        priorityNote: req.body.priorityNote === undefined ? relation.priorityNote : (typeof req.body.priorityNote === "string" ? req.body.priorityNote.trim() || null : null),
+        updatedAt: new Date(),
+      })
+      .where(eq(ruleRelationsTable.id, id))
+      .returning();
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: sourceRule.communeId,
+      entityType: "relation",
+      entityId: updated.id,
+      action: "relation_updated",
+      userId: req.user!.userId,
+      snapshot: updated as Record<string, unknown>,
+    });
+
+    await recomputeIndexedRuleRelationResolution({ communeId: sourceRule.communeId });
+
+    return res.json({ relation: updated });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rule-relations PATCH]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Modification de la relation impossible." });
+  }
+});
+
+router.delete("/regulatory-calibration/rule-relations/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [relation] = await db.select().from(ruleRelationsTable).where(eq(ruleRelationsTable.id, id)).limit(1);
+    if (!relation) return res.status(404).json({ error: "RULE_RELATION_NOT_FOUND" });
+
+    const [sourceRule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, relation.sourceRuleId)).limit(1);
+    if (!sourceRule) return res.status(404).json({ error: "RULE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || sourceRule.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    await db.delete(ruleRelationsTable).where(eq(ruleRelationsTable.id, id));
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: sourceRule.communeId,
+      entityType: "relation",
+      entityId: relation.id,
+      action: "relation_deleted",
+      userId: req.user!.userId,
+      snapshot: relation as Record<string, unknown>,
+    });
+
+    await recomputeIndexedRuleRelationResolution({ communeId: sourceRule.communeId });
+
+    return res.json({ deleted: true, relationId: id });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rule-relations DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Suppression de la relation impossible." });
   }
 });
 
@@ -3643,6 +3909,10 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
       ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
       ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
       conflictResolutionStatus: indexedRegulatoryRulesTable.conflictResolutionStatus,
+      isRelationalRule: indexedRegulatoryRulesTable.isRelationalRule,
+      requiresCrossDocumentResolution: indexedRegulatoryRulesTable.requiresCrossDocumentResolution,
+      resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
+      linkedRuleCount: indexedRegulatoryRulesTable.linkedRuleCount,
       documentTitle: townHallDocumentsTable.title,
     })
       .from(indexedRegulatoryRulesTable)
@@ -3669,6 +3939,16 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
         .orderBy(desc(regulatoryValidationHistoryTable.createdAt))
         .limit(40),
     ]);
+    const relations = await hydrateRuleRelations(
+      rules.length > 0
+        ? await db.select().from(ruleRelationsTable).where(
+            or(
+              inArray(ruleRelationsTable.sourceRuleId, rules.map((rule) => rule.id)),
+              inArray(ruleRelationsTable.targetRuleId, rules.map((rule) => rule.id)),
+            )!,
+          )
+        : [],
+    );
 
     return res.json({
       commune: access.targetCommune,
@@ -3678,12 +3958,14 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
         ruleCount: rules.length,
         publishedCount: rules.filter((rule) => rule.status === "published").length,
         conflictCount: conflicts.filter((conflict) => conflict.status === "open").length,
+        relationCount: relations.length,
         historyCount: history.length,
       },
       rules: rules.map((rule) => ({
         ...rule,
         themeLabel: themeMap.get(rule.themeCode)?.label || rule.themeCode,
       })),
+      relations,
       conflicts,
       history,
     });
