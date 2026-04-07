@@ -34,7 +34,7 @@ import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
 import { generateGlobalSynthesis, type ExtractedDocumentData } from "../services/pluAnalysis.js";
 import { persistRegulatoryUnitsForDocument } from "../services/regulatoryUnitService.js";
-import { persistRegulatoryZoneSectionsForDocument } from "../services/regulatoryZoneSectionService.js";
+import { extractRegulatoryZoneSections, persistRegulatoryZoneSectionsForDocument } from "../services/regulatoryZoneSectionService.js";
 import { persistDocumentKnowledgeProfile } from "../services/documentKnowledgeService.js";
 import { persistUrbanRulesForDocument } from "../services/urbanRuleExtractionService.js";
 import {
@@ -448,6 +448,164 @@ function deriveParentZoneCode(zoneCode: string | null): string | null {
   // such as 1AU / 2AU. Other parent relationships stay user-configurable.
   const withoutNumericPrefix = normalized.replace(/^\d+/, "");
   return withoutNumericPrefix && withoutNumericPrefix !== normalized ? withoutNumericPrefix : null;
+}
+
+function isLikelyPluZoneCode(raw: unknown, options?: { allowSingleLetter?: boolean }) {
+  const normalized = normalizeConfiguredZoneCode(raw);
+  if (!normalized) return null;
+
+  const blockedCodes = new Set([
+    "PLU",
+    "PADD",
+    "OAP",
+    "ABF",
+    "PPRI",
+    "PPRT",
+    "SPR",
+    "AVAP",
+    "RNU",
+    "SUP",
+    "EBC",
+    "ER",
+  ]);
+
+  if (blockedCodes.has(normalized)) return null;
+  if (/^(ART|ANN|PAGE|PLAN|CARTE|ZONE)\b/.test(normalized)) return null;
+  if (/^\d{1,2}AU[A-Z0-9-]*$/.test(normalized)) return normalized;
+  if (/^[UNA][A-Z0-9-]{1,4}$/.test(normalized)) return normalized;
+  if (options?.allowSingleLetter && /^(?:U|A|N)$/.test(normalized)) return normalized;
+  return null;
+}
+
+function extractCalibrationZoneCodes(rawText: string) {
+  if (!rawText || rawText.trim().length < 80) return [];
+
+  const detected = new Set<string>();
+  const addZoneCode = (raw: unknown, options?: { allowSingleLetter?: boolean }) => {
+    const zoneCode = isLikelyPluZoneCode(raw, options);
+    if (zoneCode) detected.add(zoneCode);
+  };
+
+  for (const section of extractRegulatoryZoneSections(rawText)) {
+    addZoneCode(section.zoneCode, { allowSingleLetter: true });
+  }
+
+  const explicitZonePatterns = [
+    /\br[ée]glement\s+de\s+la\s+zone\s+([A-Z0-9-]+)/gi,
+    /\bdispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Z0-9-]+)/gi,
+    /\bzone\s+([A-Z0-9-]+)/gi,
+  ];
+
+  for (const pattern of explicitZonePatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(rawText)) !== null) {
+      addZoneCode(match[1], { allowSingleLetter: true });
+    }
+  }
+
+  for (const line of rawText.replace(/\r\n?/g, "\n").split("\n")) {
+    const trimmed = line.trim().replace(/\s+/g, " ");
+    if (!trimmed || trimmed.length > 36) continue;
+
+    const prefixedMatch = trimmed.match(/^zone\s+([A-Z0-9-]+)$/i);
+    if (prefixedMatch?.[1]) {
+      addZoneCode(prefixedMatch[1], { allowSingleLetter: true });
+      continue;
+    }
+
+    if (!/^[A-Z0-9 -]+$/.test(trimmed.toUpperCase())) continue;
+    addZoneCode(trimmed, { allowSingleLetter: true });
+  }
+
+  return Array.from(detected.values()).sort((left, right) => left.localeCompare(right, "fr"));
+}
+
+async function ensureCalibrationZonesForCommune(args: {
+  communeKey: string;
+  communeAliases: string[];
+  rawText: string;
+  sourceName?: string | null;
+  userId?: string | null;
+}) {
+  const zoneCodes = extractCalibrationZoneCodes(args.rawText);
+  if (zoneCodes.length === 0) {
+    return { detected: 0, created: 0 };
+  }
+
+  const [existingZones, deletedZones] = await Promise.all([
+    db.select({
+      id: regulatoryCalibrationZonesTable.id,
+      zoneCode: regulatoryCalibrationZonesTable.zoneCode,
+      displayOrder: regulatoryCalibrationZonesTable.displayOrder,
+    })
+      .from(regulatoryCalibrationZonesTable)
+      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.communeAliases)),
+    db.select({
+      snapshot: regulatoryValidationHistoryTable.snapshot,
+    })
+      .from(regulatoryValidationHistoryTable)
+      .where(
+        and(
+          buildMunicipalityAliasFilter(regulatoryValidationHistoryTable.communeId, args.communeAliases),
+          eq(regulatoryValidationHistoryTable.entityType, "zone"),
+          eq(regulatoryValidationHistoryTable.action, "zone_deleted"),
+        ),
+      ),
+  ]);
+
+  const existingZoneCodes = new Set(
+    existingZones
+      .map((zone) => normalizeConfiguredZoneCode(zone.zoneCode))
+      .filter((zoneCode): zoneCode is string => !!zoneCode),
+  );
+  const deletedZoneCodes = new Set(
+    deletedZones
+      .map((entry) => normalizeConfiguredZoneCode((entry.snapshot as Record<string, unknown> | null | undefined)?.zoneCode))
+      .filter((zoneCode): zoneCode is string => !!zoneCode),
+  );
+
+  const nextDisplayOrder = existingZones.reduce((maxOrder, zone) => Math.max(maxOrder, zone.displayOrder || 0), 0) + 1;
+  const zonesToCreate = zoneCodes
+    .filter((zoneCode) => !existingZoneCodes.has(zoneCode))
+    .filter((zoneCode) => !deletedZoneCodes.has(zoneCode));
+
+  if (zonesToCreate.length === 0) {
+    return { detected: zoneCodes.length, created: 0 };
+  }
+
+  const createdZones = await db.insert(regulatoryCalibrationZonesTable).values(
+    zonesToCreate.map((zoneCode, index) => ({
+      communeId: args.communeKey,
+      zoneCode,
+      zoneLabel: `Zone ${zoneCode}`,
+      parentZoneCode: deriveParentZoneCode(zoneCode),
+      guidanceNotes: args.sourceName
+        ? `Zone détectée automatiquement depuis ${args.sourceName}.`
+        : "Zone détectée automatiquement depuis un document réglementaire.",
+      displayOrder: nextDisplayOrder + index,
+      isActive: true,
+      createdBy: args.userId || null,
+      updatedBy: args.userId || null,
+    })),
+  ).returning();
+
+  await Promise.all(
+    createdZones.map((zone) =>
+      safeRecordRegulatoryValidationHistory({
+        communeId: args.communeKey,
+        entityType: "zone",
+        entityId: zone.id,
+        action: "zone_auto_detected",
+        userId: args.userId || null,
+        snapshot: zone as Record<string, unknown>,
+      }),
+    ),
+  );
+
+  return {
+    detected: zoneCodes.length,
+    created: createdZones.length,
+  };
 }
 
 function inferCanonicalDocumentType(documentType: string | null | undefined, category?: string | null, subCategory?: string | null) {
@@ -1973,6 +2131,7 @@ async function queueTownHallDocumentIndexing(args: {
   mimeType: string;
   originalName: string;
   targetCommune: string;
+  userId?: string | null;
   category?: string | null;
   subCategory?: string | null;
   documentType?: string | null;
@@ -2063,6 +2222,14 @@ async function queueTownHallDocumentIndexing(args: {
         sourceAuthority: authorityForCanonicalType(canonicalType),
         isOpposable,
         rawText,
+      });
+
+      await ensureCalibrationZonesForCommune({
+        communeKey: municipalityKey,
+        communeAliases: Array.from(new Set([args.targetCommune, inseeCode].filter((value): value is string => !!value))),
+        rawText,
+        sourceName: args.originalName,
+        userId: args.userId || null,
       });
 
       await persistStructuredKnowledgeForDocument({
@@ -2334,6 +2501,7 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
       mimeType: session.mimeType || "application/pdf",
       originalName: session.originalFileName,
       targetCommune: session.commune || "",
+      userId: req.user!.userId,
       category: session.category,
       subCategory: session.subCategory,
       documentType: session.documentType,
@@ -2476,10 +2644,51 @@ router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
 
     const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
 
-    const zones = await db.select()
+    let zones = await db.select()
       .from(regulatoryCalibrationZonesTable)
       .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases))
       .orderBy(regulatoryCalibrationZonesTable.displayOrder, regulatoryCalibrationZonesTable.zoneCode);
+
+    if (zones.length === 0) {
+      const docs = await db.select({
+        title: townHallDocumentsTable.title,
+        fileName: townHallDocumentsTable.fileName,
+        rawText: townHallDocumentsTable.rawText,
+        documentType: townHallDocumentsTable.documentType,
+        category: townHallDocumentsTable.category,
+        subCategory: townHallDocumentsTable.subCategory,
+        createdAt: townHallDocumentsTable.createdAt,
+      }).from(townHallDocumentsTable)
+        .where(eq(sql`lower(${townHallDocumentsTable.commune})`, access.targetCommune.toLowerCase()))
+        .orderBy(desc(townHallDocumentsTable.createdAt));
+
+      for (const doc of docs) {
+        if (!hasUsableTownHallText(doc.rawText)) continue;
+
+        const classification = resolveTownHallClassification({
+          rawText: doc.rawText,
+          fileName: doc.title || doc.fileName || "document",
+          category: doc.category,
+          subCategory: doc.subCategory,
+          documentType: doc.documentType,
+        });
+
+        if (!["plu_reglement", "plu_annexe"].includes(classification.canonicalType)) continue;
+
+        await ensureCalibrationZonesForCommune({
+          communeKey,
+          communeAliases,
+          rawText: doc.rawText,
+          sourceName: doc.title || doc.fileName || "document",
+          userId: req.user!.userId,
+        });
+      }
+
+      zones = await db.select()
+        .from(regulatoryCalibrationZonesTable)
+        .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases))
+        .orderBy(regulatoryCalibrationZonesTable.displayOrder, regulatoryCalibrationZonesTable.zoneCode);
+    }
 
     return res.json({
       commune: access.targetCommune,
@@ -3869,6 +4078,13 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  isOpposable,
                  rawText,
                });
+               await ensureCalibrationZonesForCommune({
+                 communeKey: municipalityKey,
+                 communeAliases: Array.from(new Set([targetCommune, inseeCode].filter((value): value is string => !!value))),
+                 rawText,
+                 sourceName: file.originalname,
+                 userId: req.user!.userId,
+               });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
              } catch (ragErr) {
                console.error(`[mairie/batch] RAG Processing failed for doc ${doc.id}:`, ragErr);
@@ -3945,6 +4161,7 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
       mimeType: file.mimetype,
       originalName: file.originalname,
       targetCommune,
+      userId: req.user!.userId,
       category: req.body.category || null,
       subCategory: req.body.subCategory || null,
       documentType: req.body.documentType || null,
@@ -4219,6 +4436,14 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
         autoCorrected: classification.autoCorrected,
         source: "manual_resegment",
       },
+    });
+
+    await ensureCalibrationZonesForCommune({
+      communeKey: municipalityId,
+      communeAliases: Array.from(new Set([communeName, await resolveInseeCode(communeName)].filter((value): value is string => !!value))),
+      rawText,
+      sourceName,
+      userId: req.user!.userId,
     });
 
     const [sectionCount, ruleCount] = await Promise.all([
