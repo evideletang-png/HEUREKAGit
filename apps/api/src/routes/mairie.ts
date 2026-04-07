@@ -19,13 +19,18 @@ import {
   regulatoryZoneSectionsTable
 } from "@workspace/db";
 import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
+import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
+import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urbanRuleConflicts.js";
+import { urbanRulesTable } from "../../../../packages/db/src/schema/urbanRules.js";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
 import { generateGlobalSynthesis, type ExtractedDocumentData } from "../services/pluAnalysis.js";
 import { persistRegulatoryUnitsForDocument } from "../services/regulatoryUnitService.js";
 import { persistRegulatoryZoneSectionsForDocument } from "../services/regulatoryZoneSectionService.js";
+import { persistDocumentKnowledgeProfile } from "../services/documentKnowledgeService.js";
+import { persistUrbanRulesForDocument } from "../services/urbanRuleExtractionService.js";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import multer from "multer";
 import fs from "fs";
@@ -238,6 +243,205 @@ async function resolveAuthorizedTownHallCommune(userId: string, requestedCommune
     targetCommune,
   };
 }
+
+async function persistStructuredKnowledgeForDocument(args: {
+  baseIADocumentId?: string | null;
+  townHallDocumentId?: string | null;
+  municipalityId: string;
+  documentType: string;
+  documentSubtype?: string | null;
+  sourceName: string;
+  sourceUrl?: string | null;
+  versionDate?: string | null;
+  sourceAuthority: number;
+  opposable: boolean;
+  rawText: string;
+  rawClassification?: Record<string, unknown>;
+}) {
+  await persistDocumentKnowledgeProfile({
+    baseIADocumentId: args.baseIADocumentId || null,
+    townHallDocumentId: args.townHallDocumentId || null,
+    municipalityId: args.municipalityId,
+    documentType: args.documentType,
+    documentSubtype: args.documentSubtype || null,
+    sourceName: args.sourceName,
+    sourceUrl: args.sourceUrl || null,
+    versionDate: args.versionDate || null,
+    opposable: args.opposable,
+    sourceAuthority: args.sourceAuthority,
+    rawText: args.rawText,
+    rawClassification: args.rawClassification || {},
+  });
+
+  await persistUrbanRulesForDocument({
+    baseIADocumentId: args.baseIADocumentId || null,
+    townHallDocumentId: args.townHallDocumentId || null,
+    municipalityId: args.municipalityId,
+    documentType: args.documentType,
+    sourceAuthority: args.sourceAuthority,
+    isOpposable: args.opposable,
+  });
+}
+
+router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const targetCommune = access.targetCommune;
+    const inseeCode = await resolveInseeCode(targetCommune);
+    const municipalityAliases = Array.from(new Set([targetCommune, inseeCode].filter((value): value is string => !!value)));
+
+    const docs = await db.select({
+      id: townHallDocumentsTable.id,
+      title: townHallDocumentsTable.title,
+      fileName: townHallDocumentsTable.fileName,
+      commune: townHallDocumentsTable.commune,
+      rawText: townHallDocumentsTable.rawText,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+      documentType: townHallDocumentsTable.documentType,
+      isOpposable: townHallDocumentsTable.isOpposable,
+      createdAt: townHallDocumentsTable.createdAt,
+    }).from(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
+      .orderBy(desc(townHallDocumentsTable.createdAt));
+
+    let profiles = await db.select().from(documentKnowledgeProfilesTable)
+      .where(inArray(documentKnowledgeProfilesTable.municipalityId, municipalityAliases))
+      .orderBy(desc(documentKnowledgeProfilesTable.updatedAt));
+
+    if (profiles.length === 0) {
+      const municipalityKey = inseeCode || targetCommune;
+      for (const doc of docs) {
+        const canonicalType = inferCanonicalDocumentType(doc.documentType, doc.category, doc.subCategory);
+        if (!isRegulatoryLikeDocument(doc.documentType, doc.category, doc.subCategory)) continue;
+        if (!hasUsableTownHallText(doc.rawText)) continue;
+
+        await persistRegulatoryZoneSectionsForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          isOpposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+        });
+
+        await persistRegulatoryUnitsForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          isOpposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+        });
+
+        await persistStructuredKnowledgeForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          documentSubtype: doc.documentType || null,
+          sourceName: doc.title,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          opposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+          rawClassification: {
+            category: doc.category,
+            subCategory: doc.subCategory,
+            documentType: doc.documentType,
+            source: "knowledge_summary_backfill",
+          },
+        });
+      }
+
+      profiles = await db.select().from(documentKnowledgeProfilesTable)
+        .where(inArray(documentKnowledgeProfilesTable.municipalityId, municipalityAliases))
+        .orderBy(desc(documentKnowledgeProfilesTable.updatedAt));
+    }
+
+    const rules = await db.select().from(urbanRulesTable)
+      .where(inArray(urbanRulesTable.municipalityId, municipalityAliases));
+
+    const conflicts = await db.select().from(urbanRuleConflictsTable)
+      .where(
+        and(
+          inArray(urbanRuleConflictsTable.municipalityId, municipalityAliases),
+          ne(urbanRuleConflictsTable.status, "resolved"),
+        )
+      );
+
+    const profileByTownHallDocId = new Map(
+      profiles
+        .filter((profile) => !!profile.townHallDocumentId)
+        .map((profile) => [profile.townHallDocumentId as string, profile]),
+    );
+
+    const rulesByDocumentId = new Map<string, number>();
+    for (const rule of rules) {
+      if (!rule.sourceDocumentId) continue;
+      rulesByDocumentId.set(rule.sourceDocumentId, (rulesByDocumentId.get(rule.sourceDocumentId) || 0) + 1);
+    }
+
+    const allZones = new Set<string>();
+    for (const profile of profiles) {
+      if (Array.isArray(profile.detectedZones)) {
+        for (const zone of profile.detectedZones) {
+          if (zone && typeof zone === "object" && typeof (zone as Record<string, unknown>).zoneCode === "string") {
+            allZones.add(String((zone as Record<string, unknown>).zoneCode));
+          }
+        }
+      }
+    }
+
+    return res.json({
+      commune: targetCommune,
+      municipalityId: inseeCode || targetCommune,
+      summary: {
+        documentCount: docs.length,
+        structuredDocumentCount: profiles.length,
+        zoneCount: allZones.size,
+        ruleCount: rules.length,
+        conflictCount: conflicts.length,
+        manualReviewCount:
+          profiles.filter((profile) => profile.manualReviewRequired).length
+          + rules.filter((rule) => rule.requiresManualValidation).length
+          + conflicts.filter((conflict) => conflict.requiresManualValidation).length,
+      },
+      documents: docs.map((doc) => {
+        const profile = profileByTownHallDocId.get(doc.id);
+        const availability = getTownHallDocumentAvailability(doc);
+        const zones = Array.isArray(profile?.detectedZones) ? profile.detectedZones : [];
+        const topics = Array.isArray(profile?.structuredTopics) ? profile.structuredTopics : [];
+        return {
+          id: doc.id,
+          title: doc.title,
+          fileName: doc.fileName,
+          documentType: doc.documentType,
+          opposable: !!doc.isOpposable,
+          availabilityStatus: availability.availabilityStatus,
+          availabilityMessage: availability.availabilityMessage,
+          textQualityLabel: availability.textQualityLabel,
+          textQualityScore: availability.textQualityScore,
+          profile: profile ? {
+            id: profile.id,
+            status: profile.status,
+            extractionMode: profile.extractionMode,
+            extractionReliability: profile.extractionReliability,
+            manualReviewRequired: profile.manualReviewRequired,
+            detectedZonesCount: zones.length,
+            structuredTopicsCount: topics.length,
+          } : null,
+          extractedRuleCount: rulesByDocumentId.get(doc.id) || 0,
+        };
+      }),
+    });
+  } catch (err) {
+    logger.error("[mairie/plu-knowledge-summary GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
 
 // ─── DOSSIERS LIST ────────────────────────────────────────────────────────────
 router.get("/dossiers", async (req: AuthRequest, res) => {
@@ -1219,6 +1423,24 @@ async function queueTownHallDocumentIndexing(args: {
         rawText,
       });
 
+      await persistStructuredKnowledgeForDocument({
+        baseIADocumentId: baseIADoc.id,
+        townHallDocumentId: args.docId,
+        municipalityId: municipalityKey,
+        documentType: canonicalType,
+        documentSubtype: args.documentType || null,
+        sourceName: path.basename(args.persistentPath),
+        sourceAuthority: authorityForCanonicalType(canonicalType),
+        opposable: isOpposable,
+        rawText,
+        rawClassification: {
+          category,
+          subCategory,
+          documentType: args.documentType || null,
+          source: "mairie_upload",
+        },
+      });
+
       await db.update(baseIADocumentsTable)
         .set({ status: "indexed" })
         .where(eq(baseIADocumentsTable.id, baseIADoc.id));
@@ -1589,6 +1811,22 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
           isOpposable: !!doc.isOpposable,
           rawText: doc.rawText,
         });
+        await persistStructuredKnowledgeForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          documentSubtype: doc.documentType || null,
+          sourceName: doc.title,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          opposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+          rawClassification: {
+            category: doc.category,
+            subCategory: doc.subCategory,
+            documentType: doc.documentType,
+            source: "zone_review_backfill",
+          },
+        });
       }
 
       sections = await db.select().from(regulatoryZoneSectionsTable)
@@ -1767,6 +2005,22 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
           sourceAuthority: authorityForCanonicalType(canonicalType),
           isOpposable: !!doc.isOpposable,
           rawText: doc.rawText,
+        });
+        await persistStructuredKnowledgeForDocument({
+          townHallDocumentId: doc.id,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          documentSubtype: doc.documentType || null,
+          sourceName: doc.title,
+          sourceAuthority: authorityForCanonicalType(canonicalType),
+          opposable: !!doc.isOpposable,
+          rawText: doc.rawText,
+          rawClassification: {
+            category: doc.category,
+            subCategory: doc.subCategory,
+            documentType: doc.documentType,
+            source: "rule_review_backfill",
+          },
         });
       }
 

@@ -19,8 +19,10 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
 import { GPUProviderService } from "./gpuProviderService.js";
 import { processDocumentForRAG } from "./baseIAIngestion.js";
+import { persistDocumentKnowledgeProfile } from "./documentKnowledgeService.js";
 import { persistRegulatoryUnitsForDocument } from "./regulatoryUnitService.js";
 import { persistRegulatoryZoneSectionsForDocument } from "./regulatoryZoneSectionService.js";
+import { persistUrbanRulesForDocument } from "./urbanRuleExtractionService.js";
 import { VisionService } from "./visionService.js";
 
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
@@ -264,6 +266,28 @@ export async function autoFetchPLU(
           sourceAuthority: authorityFor(doc.docType),
           isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
           rawText: doc.rawText,
+        });
+
+        await persistDocumentKnowledgeProfile({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceName: doc.fileName,
+          opposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+          sourceAuthority: authorityFor(doc.docType),
+          rawText: doc.rawText,
+          rawClassification: {
+            source: "plu_auto_fetch",
+            docType: doc.docType,
+          },
+        });
+
+        await persistUrbanRulesForDocument({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceAuthority: authorityFor(doc.docType),
+          isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
         });
 
         await db.update(baseIADocumentsTable)

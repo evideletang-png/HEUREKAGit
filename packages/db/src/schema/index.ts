@@ -23,3 +23,6 @@ export * from "./geocodingCache";
 export * from "./appeals";
 export * from "./regulatoryUnits";
 export * from "./regulatoryZoneSections";
+export * from "./documentKnowledgeProfiles";
+export * from "./urbanRules";
+export * from "./urbanRuleConflicts";
