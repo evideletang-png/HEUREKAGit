@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db } from "@workspace/db";
+import { db, runMigrations } from "@workspace/db";
 import { desc, eq, sql, and, inArray, or, ne } from "drizzle-orm";
 import { 
   dossiersTable, 
@@ -83,6 +83,24 @@ const RESUMABLE_UPLOAD_CHUNK_SIZE = 5 * 1024 * 1024;
 const router: IRouter = Router();
 
 router.use(authenticate, requireMairie);
+
+let calibrationSchemaReady = false;
+let calibrationSchemaPromise: Promise<void> | null = null;
+
+async function ensureCalibrationSchemaReady() {
+  if (calibrationSchemaReady) return;
+  if (!calibrationSchemaPromise) {
+    calibrationSchemaPromise = (async () => {
+      await runMigrations();
+      await ensureRegulatoryThemeTaxonomySeed();
+      calibrationSchemaReady = true;
+    })().catch((err) => {
+      calibrationSchemaPromise = null;
+      throw err;
+    });
+  }
+  await calibrationSchemaPromise;
+}
 
 // ─── DECISION GENERATION ───────────────────────────────────────────────────
 router.post("/dossiers/:id/generate-decision", async (req: AuthRequest, res) => {
@@ -831,6 +849,19 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
   } catch (err) {
     logger.error("[mairie/plu-knowledge-summary GET]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.use("/regulatory-calibration", async (_req, res, next) => {
+  try {
+    await ensureCalibrationSchemaReady();
+    return next();
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/bootstrap]", err);
+    return res.status(503).json({
+      error: "CALIBRATION_SCHEMA_UNAVAILABLE",
+      message: "Le module de calibration est en cours d'initialisation. Réessaie dans quelques instants.",
+    });
   }
 });
 

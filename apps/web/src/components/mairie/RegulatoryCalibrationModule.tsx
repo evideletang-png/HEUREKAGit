@@ -218,37 +218,37 @@ export function RegulatoryCalibrationModule({
     interpretationNote: string;
   }>>({});
 
-  const { data: themesData } = useQuery<{ themes: ThemeItem[]; articleReference: Array<{ code: string; label: string }> }>({
+  const { data: themesData, error: themesError } = useQuery<{ themes: ThemeItem[]; articleReference: Array<{ code: string; label: string }> }>({
     queryKey: ["reg-calibration-themes"],
     queryFn: () => apiFetch("/api/mairie/regulatory-calibration/themes"),
     enabled: currentCommune !== "all",
   });
 
-  const { data: overviewData } = useQuery<OverviewResponse>({
+  const { data: overviewData, error: overviewError } = useQuery<OverviewResponse>({
     queryKey: ["reg-calibration-overview", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/overview?commune=${encodeURIComponent(currentCommune)}`),
     enabled: currentCommune !== "all",
   });
 
-  const { data: zonesData, isLoading: loadingZones } = useQuery<{ commune: string; communeId: string; zones: ZoneItem[] }>({
+  const { data: zonesData, isLoading: loadingZones, error: zonesError } = useQuery<{ commune: string; communeId: string; zones: ZoneItem[] }>({
     queryKey: ["reg-calibration-zones", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/zones?commune=${encodeURIComponent(currentCommune)}`),
     enabled: currentCommune !== "all",
   });
 
-  const { data: workspaceData, isLoading: loadingWorkspace } = useQuery<WorkspaceData>({
+  const { data: workspaceData, isLoading: loadingWorkspace, error: workspaceError } = useQuery<WorkspaceData>({
     queryKey: ["reg-calibration-workspace", currentCommune, selectedDocumentId],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/documents/${selectedDocumentId}/workspace?commune=${encodeURIComponent(currentCommune)}`),
     enabled: currentCommune !== "all" && !!selectedDocumentId,
   });
 
-  const { data: libraryData } = useQuery<LibraryResponse>({
+  const { data: libraryData, error: libraryError } = useQuery<LibraryResponse>({
     queryKey: ["reg-calibration-library", currentCommune, "internal"],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/library?commune=${encodeURIComponent(currentCommune)}&visibility=internal`),
     enabled: currentCommune !== "all",
   });
 
-  const { data: publishedData } = useQuery<LibraryResponse>({
+  const { data: publishedData, error: publishedError } = useQuery<LibraryResponse>({
     queryKey: ["reg-calibration-library", currentCommune, "published"],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/library?commune=${encodeURIComponent(currentCommune)}&visibility=published`),
     enabled: currentCommune !== "all",
@@ -383,6 +383,12 @@ export function RegulatoryCalibrationModule({
     [documents, selectedDocumentId],
   );
   const canEditCalibration = currentCommune !== "all";
+  const calibrationLoadError = overviewError || zonesError || themesError || libraryError || publishedError || (selectedDocumentId ? workspaceError : null);
+  const calibrationLoadErrorMessage = calibrationLoadError instanceof Error
+    ? calibrationLoadError.message
+    : calibrationLoadError
+      ? "Le module de calibration n'a pas pu être chargé."
+      : null;
 
   const activeRules = workspaceData?.excerpts.find((excerpt) => excerpt.id === activeExcerptId)?.rules || [];
 
@@ -433,6 +439,20 @@ export function RegulatoryCalibrationModule({
         </CardContent>
       </Card>
 
+      {calibrationLoadErrorMessage && (
+        <Card className="border-destructive/30 bg-destructive/5 shadow-sm">
+          <CardContent className="p-4 text-sm text-destructive">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Le module de calibration n&apos;est pas prêt.</p>
+                <p className="mt-1 text-destructive/90">{calibrationLoadErrorMessage}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <TabsContent value="zones" className="space-y-4">
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
@@ -447,7 +467,7 @@ export function RegulatoryCalibrationModule({
               <Textarea placeholder="Notes de guidage (pages, secteur, nuances utiles)" value={zoneForm.guidanceNotes} onChange={(e) => setZoneForm((v) => ({ ...v, guidanceNotes: e.target.value }))} />
               <Button
                 className="w-full"
-                disabled={!canEditCalibration || createZoneMutation.isPending || !zoneForm.zoneCode.trim()}
+                disabled={!canEditCalibration || !!calibrationLoadErrorMessage || loadingZones || createZoneMutation.isPending || !zoneForm.zoneCode.trim()}
                 onClick={() => createZoneMutation.mutate()}
               >
                 {createZoneMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
@@ -456,6 +476,11 @@ export function RegulatoryCalibrationModule({
               {!canEditCalibration && (
                 <p className="text-sm text-muted-foreground">
                   Sélectionne d&apos;abord une commune précise pour créer ses zones de calibration.
+                </p>
+              )}
+              {canEditCalibration && calibrationLoadErrorMessage && (
+                <p className="text-sm text-destructive">
+                  Corrige d&apos;abord le chargement du module avant de créer une zone.
                 </p>
               )}
             </div>
