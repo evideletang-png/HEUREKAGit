@@ -203,6 +203,15 @@ function buildRuleEditorDraft(rule: LibraryResponse["rules"][number]) {
   };
 }
 
+function buildZoneEditorDraft(zone: ZoneItem) {
+  return {
+    zoneCode: zone.zoneCode || "",
+    zoneLabel: zone.zoneLabel || "",
+    parentZoneCode: zone.parentZoneCode || "",
+    guidanceNotes: zone.guidanceNotes || "",
+  };
+}
+
 export function RegulatoryCalibrationModule({
   currentCommune,
   documents,
@@ -217,6 +226,8 @@ export function RegulatoryCalibrationModule({
   const [activeTab, setActiveTab] = useState("zones");
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [zoneForm, setZoneForm] = useState({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "" });
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  const [zoneEditorDrafts, setZoneEditorDrafts] = useState<Record<string, ReturnType<typeof buildZoneEditorDraft>>>({});
   const [selectionZoneId, setSelectionZoneId] = useState("");
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
@@ -303,6 +314,25 @@ export function RegulatoryCalibrationModule({
     onSuccess: () => {
       refreshCalibration();
       toast({ title: "Zone supprimée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateZoneMutation = useMutation({
+    mutationFn: async ({ zoneId, draft }: { zoneId: string; draft: ReturnType<typeof buildZoneEditorDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/zones/${zoneId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        commune: currentCommune,
+        zoneCode: draft.zoneCode,
+        zoneLabel: draft.zoneLabel,
+        parentZoneCode: draft.parentZoneCode,
+        guidanceNotes: draft.guidanceNotes,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setEditingZoneId((current) => (current === variables.zoneId ? null : current));
+      toast({ title: "Zone modifiée", description: "La zone a été mise à jour." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -553,13 +583,91 @@ export function RegulatoryCalibrationModule({
                         </div>
                         <p className="font-medium">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
                         {zone.guidanceNotes && <p className="text-sm text-muted-foreground">{zone.guidanceNotes}</p>}
+                        {editingZoneId === zone.id && (
+                          <div className="mt-3 space-y-3 rounded-xl border bg-muted/10 p-3">
+                            <Input
+                              placeholder="Code zone"
+                              value={zoneEditorDrafts[zone.id]?.zoneCode || ""}
+                              onChange={(e) => setZoneEditorDrafts((current) => ({
+                                ...current,
+                                [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), zoneCode: e.target.value },
+                              }))}
+                            />
+                            <Input
+                              placeholder="Libellé"
+                              value={zoneEditorDrafts[zone.id]?.zoneLabel || ""}
+                              onChange={(e) => setZoneEditorDrafts((current) => ({
+                                ...current,
+                                [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), zoneLabel: e.target.value },
+                              }))}
+                            />
+                            <Input
+                              placeholder="Zone mère"
+                              value={zoneEditorDrafts[zone.id]?.parentZoneCode || ""}
+                              onChange={(e) => setZoneEditorDrafts((current) => ({
+                                ...current,
+                                [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), parentZoneCode: e.target.value },
+                              }))}
+                            />
+                            <Textarea
+                              placeholder="Notes de guidage"
+                              value={zoneEditorDrafts[zone.id]?.guidanceNotes || ""}
+                              onChange={(e) => setZoneEditorDrafts((current) => ({
+                                ...current,
+                                [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), guidanceNotes: e.target.value },
+                              }))}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                disabled={updateZoneMutation.isPending || !(zoneEditorDrafts[zone.id]?.zoneCode || "").trim()}
+                                onClick={() => updateZoneMutation.mutate({ zoneId: zone.id, draft: zoneEditorDrafts[zone.id] || buildZoneEditorDraft(zone) })}
+                              >
+                                {updateZoneMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
+                                Enregistrer
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingZoneId(null);
+                                  setZoneEditorDrafts((current) => {
+                                    const next = { ...current };
+                                    delete next[zone.id];
+                                    return next;
+                                  });
+                                }}
+                              >
+                                Annuler
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <Button variant="outline" size="sm" className="border-destructive/20 text-destructive hover:bg-destructive/5" onClick={() => {
-                        if (!window.confirm(`Supprimer la zone ${zone.zoneCode} ?`)) return;
-                        deleteZoneMutation.mutate(zone.id);
-                      }}>
-                        <Trash2 className="mr-2 h-3.5 w-3.5" /> Supprimer
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={updateZoneMutation.isPending || deleteZoneMutation.isPending}
+                          onClick={() => {
+                            if (editingZoneId === zone.id) {
+                              setEditingZoneId(null);
+                              return;
+                            }
+                            setZoneEditorDrafts((current) => ({ ...current, [zone.id]: buildZoneEditorDraft(zone) }));
+                            setEditingZoneId(zone.id);
+                          }}
+                        >
+                          <FilePenLine className="mr-2 h-3.5 w-3.5" />
+                          {editingZoneId === zone.id ? "Fermer" : "Modifier"}
+                        </Button>
+                        <Button variant="outline" size="sm" className="border-destructive/20 text-destructive hover:bg-destructive/5" onClick={() => {
+                          if (!window.confirm(`Supprimer la zone ${zone.zoneCode} ?`)) return;
+                          deleteZoneMutation.mutate(zone.id);
+                        }}>
+                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Supprimer
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))
