@@ -4,6 +4,7 @@ import {
   documentReviewsTable,
   rulesTable,
   baseIADocumentsTable,
+  townHallDocumentsTable,
   globalConfigsTable,
   municipalitySettingsTable,
   analysesTable,
@@ -15,7 +16,7 @@ import {
   townHallPromptsTable,
   geocodingCacheTable
 } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { createHash } from "crypto";
 import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
 import { loadRegulatoryUnits, buildParsedRulesFromRegulatoryUnits, buildArticlesFromRegulatoryUnits, buildDigestFromRegulatoryUnits } from "./regulatoryUnitService.js";
@@ -40,6 +41,32 @@ import { getParcelByCoords, getBuildingsByParcel } from "./parcel.js";
 import type { ParcelData } from "./parcel.js";
 import { DVFService } from "./dvfService.js";
 
+type BuildabilitySourceDetail = {
+  field: string;
+  zoneCode: string | null;
+  ruleFamily: string;
+  ruleTopic: string;
+  ruleLabel: string;
+  sourceDocumentId: string | null;
+  sourceDocumentKind: string | null;
+  sourceDocumentName: string | null;
+  sourcePage: number | null;
+  sourceArticle: string | null;
+  sourceExcerpt: string | null;
+  reviewStatus: string | null;
+  confidenceScore: number | null;
+};
+
+type BuildabilitySourceDetails = {
+  footprint: BuildabilitySourceDetail | null;
+  remainingFootprint: BuildabilitySourceDetail | null;
+  height: BuildabilitySourceDetail | null;
+  setbackRoad: BuildabilitySourceDetail | null;
+  setbackBoundary: BuildabilitySourceDetail | null;
+  parking: BuildabilitySourceDetail | null;
+  greenSpace: BuildabilitySourceDetail | null;
+};
+
 // ─── Geocoding cache helpers ────────────────────────────────────────────────
 
 const GEOCODING_CACHE_TTL_DAYS = 90;
@@ -59,6 +86,77 @@ function extractCommuneNameFromAddress(address: string | null | undefined): stri
     return last.replace(/^\d{5}\s+/, "").trim();
   }
   return "";
+}
+
+async function buildBuildabilitySourceDetails(rules: Array<any>): Promise<BuildabilitySourceDetails> {
+  const baseIds = Array.from(new Set(
+    rules
+      .filter((rule) => rule?.sourceDocumentKind === "base_ia_document" && typeof rule?.sourceDocumentId === "string")
+      .map((rule) => rule.sourceDocumentId as string),
+  ));
+  const townHallIds = Array.from(new Set(
+    rules
+      .filter((rule) => rule?.sourceDocumentKind === "town_hall_document" && typeof rule?.sourceDocumentId === "string")
+      .map((rule) => rule.sourceDocumentId as string),
+  ));
+
+  const [baseDocs, townHallDocs] = await Promise.all([
+    baseIds.length > 0
+      ? db.select({
+          id: baseIADocumentsTable.id,
+          fileName: baseIADocumentsTable.fileName,
+        }).from(baseIADocumentsTable).where(inArray(baseIADocumentsTable.id, baseIds))
+      : Promise.resolve([]),
+    townHallIds.length > 0
+      ? db.select({
+          id: townHallDocumentsTable.id,
+          title: townHallDocumentsTable.title,
+          fileName: townHallDocumentsTable.fileName,
+        }).from(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, townHallIds))
+      : Promise.resolve([]),
+  ]);
+
+  const baseDocMap = new Map(baseDocs.map((doc) => [doc.id, doc.fileName]));
+  const townHallDocMap = new Map(townHallDocs.map((doc) => [doc.id, doc.title || doc.fileName]));
+
+  const pickRule = (...families: string[]) => rules.find((rule) => families.includes(String(rule?.ruleFamily || ""))) ?? null;
+  const toDetail = (field: string, rule: any | null): BuildabilitySourceDetail | null => {
+    if (!rule) return null;
+    const sourceDocumentName = rule.sourceDocumentKind === "town_hall_document"
+      ? townHallDocMap.get(rule.sourceDocumentId || "") || null
+      : rule.sourceDocumentKind === "base_ia_document"
+        ? baseDocMap.get(rule.sourceDocumentId || "") || null
+        : null;
+
+    return {
+      field,
+      zoneCode: rule.zoneCode || null,
+      ruleFamily: rule.ruleFamily,
+      ruleTopic: rule.ruleTopic,
+      ruleLabel: rule.ruleLabel,
+      sourceDocumentId: rule.sourceDocumentId || null,
+      sourceDocumentKind: rule.sourceDocumentKind || null,
+      sourceDocumentName,
+      sourcePage: rule.sourcePage ?? null,
+      sourceArticle: rule.sourceArticle ?? null,
+      sourceExcerpt: rule.sourceExcerpt ?? null,
+      reviewStatus: rule.reviewStatus ?? null,
+      confidenceScore: typeof rule.confidenceScore === "number" ? rule.confidenceScore : null,
+    };
+  };
+
+  const footprintRule = pickRule("footprint") ?? pickRule("green_space");
+  const boundaryRule = pickRule("setback_side") ?? pickRule("setback_rear");
+
+  return {
+    footprint: toDetail("footprint", footprintRule),
+    remainingFootprint: toDetail("remainingFootprint", footprintRule),
+    height: toDetail("height", pickRule("height")),
+    setbackRoad: toDetail("setbackRoad", pickRule("setback_public")),
+    setbackBoundary: toDetail("setbackBoundary", boundaryRule),
+    parking: toDetail("parking", pickRule("parking")),
+    greenSpace: toDetail("greenSpace", pickRule("green_space")),
+  };
 }
 
 async function getCachedGeocode(address: string) {
@@ -874,6 +972,7 @@ export async function orchestrateDossierAnalysis(
         ...(calculations.blocking_constraints ?? []),
         ...(calculations.uncertainties ?? []),
       ];
+      const sourceDetails = await buildBuildabilitySourceDetails(structuredUrbanRules);
       const explicitSignals = [
         maxFootprint != null || normalizedParams.green_space_ratio?.[0] != null,
         maxHeight != null,
@@ -894,6 +993,7 @@ export async function orchestrateDossierAnalysis(
         parkingRequirement: parkingReq ? String(parkingReq) : null,
         greenSpaceRequirement: greenSpaceReq ? String(greenSpaceReq) : null,
         assumptionsJson: JSON.stringify(assumptions),
+        sourceDetailsJson: JSON.stringify(sourceDetails),
         confidenceScore: calculations.confidence_score ?? Math.round(computedConfidenceScore * 100) / 100,
         resultSummary: calculations.theoretical_potential_synthesis
           ?? `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m`,

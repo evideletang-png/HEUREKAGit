@@ -216,6 +216,7 @@ export const GetAnalysisResponse = zod.object({
       parkingRequirement: zod.string().nullish(),
       greenSpaceRequirement: zod.string().nullish(),
       assumptionsJson: zod.array(zod.string()).optional(),
+      sourceDetailsJson: zod.union([zod.object({}).passthrough(), zod.string()]).optional(),
       confidenceScore: zod.number(),
       resultSummary: zod.string().optional(),
     })

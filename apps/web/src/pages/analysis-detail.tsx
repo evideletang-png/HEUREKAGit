@@ -143,7 +143,30 @@ type FieldEvidenceState = {
   statusLabel: string;
   statusClassName: string;
   helperText: string;
+  sourceLabel?: string | null;
+  sourceExcerpt?: string | null;
 };
+
+type BuildabilitySourceDetail = {
+  field: string;
+  zoneCode: string | null;
+  ruleFamily: string;
+  ruleTopic: string;
+  ruleLabel: string;
+  sourceDocumentId: string | null;
+  sourceDocumentKind: string | null;
+  sourceDocumentName: string | null;
+  sourcePage: number | null;
+  sourceArticle: string | null;
+  sourceExcerpt: string | null;
+  reviewStatus: string | null;
+  confidenceScore: number | null;
+};
+
+type BuildabilitySourceDetails = Partial<Record<
+  "footprint" | "remainingFootprint" | "height" | "setbackRoad" | "setbackBoundary" | "parking" | "greenSpace",
+  BuildabilitySourceDetail | null
+>>;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -154,6 +177,7 @@ function buildEvidenceState({
   formattedValue,
   explicitRuleFound,
   defaultApplied,
+  sourceDetail,
   missingLabel = "Non déterminé",
   explicitHelper = "Valeur retrouvée dans une règle opposable de la zone.",
   derivedHelper = "Valeur calculée, mais base réglementaire encore partielle.",
@@ -164,6 +188,7 @@ function buildEvidenceState({
   formattedValue: string;
   explicitRuleFound: boolean;
   defaultApplied?: boolean;
+  sourceDetail?: BuildabilitySourceDetail | null;
   missingLabel?: string;
   explicitHelper?: string;
   derivedHelper?: string;
@@ -176,6 +201,8 @@ function buildEvidenceState({
       statusLabel: "Non trouvé",
       statusClassName: "border-slate-200 bg-slate-50 text-slate-700",
       helperText: missingHelper,
+      sourceLabel: null,
+      sourceExcerpt: null,
     };
   }
 
@@ -185,6 +212,8 @@ function buildEvidenceState({
       statusLabel: "Par défaut",
       statusClassName: "border-amber-200 bg-amber-50 text-amber-800",
       helperText: defaultHelper,
+      sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
+      sourceExcerpt: sourceDetail?.sourceExcerpt || null,
     };
   }
 
@@ -194,6 +223,8 @@ function buildEvidenceState({
       statusLabel: "Règle trouvée",
       statusClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
       helperText: explicitHelper,
+      sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
+      sourceExcerpt: sourceDetail?.sourceExcerpt || null,
     };
   }
 
@@ -202,7 +233,23 @@ function buildEvidenceState({
     statusLabel: "Calcul partiel",
     statusClassName: "border-sky-200 bg-sky-50 text-sky-800",
     helperText: derivedHelper,
+    sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
+    sourceExcerpt: sourceDetail?.sourceExcerpt || null,
   };
+}
+
+function formatBuildabilitySourceDetail(sourceDetail?: BuildabilitySourceDetail | null) {
+  if (!sourceDetail) return null;
+
+  const parts = [
+    sourceDetail.sourceDocumentName,
+    sourceDetail.zoneCode ? `Zone ${sourceDetail.zoneCode}` : null,
+    sourceDetail.sourceArticle,
+    sourceDetail.sourcePage != null ? `p. ${sourceDetail.sourcePage}` : null,
+  ].filter(Boolean);
+
+  if (parts.length === 0) return null;
+  return `Source : ${parts.join(" · ")}`;
 }
 
 function formatMeasuredValue(
@@ -567,6 +614,17 @@ export default function AnalysisDetailPage() {
   // confidence score is stored as 0-1, display as percentage
   const confidencePct = analysis.confidenceScore != null ? Math.round(analysis.confidenceScore * 100) : null;
   const buildabilityConfidencePct = buildability?.confidenceScore != null ? Math.round(buildability.confidenceScore * 100) : null;
+  const buildabilitySourceDetails = useMemo<BuildabilitySourceDetails>(() => {
+    if (!buildability?.sourceDetailsJson) return {};
+    try {
+      const raw = typeof buildability.sourceDetailsJson === "string"
+        ? JSON.parse(buildability.sourceDetailsJson as string)
+        : buildability.sourceDetailsJson;
+      return raw && typeof raw === "object" ? raw as BuildabilitySourceDetails : {};
+    } catch {
+      return {};
+    }
+  }, [buildability?.sourceDetailsJson]);
 
   // Formatting polygon data for Leaflet — handles both Polygon and MultiPolygon
   function extractFirstRing(geom: { type?: string; coordinates?: unknown }): number[][] | null {
@@ -609,6 +667,7 @@ export default function AnalysisDetailPage() {
     formattedValue: buildability?.maxFootprintM2 != null ? `${buildability.maxFootprintM2} m²` : "Non déterminé",
     explicitRuleFound: isFiniteNumber(calcVariables.maxFootprintRatio),
     defaultApplied: assumptionFlags.footprintDefault,
+    sourceDetail: buildabilitySourceDetails.footprint ?? null,
     explicitHelper: "Emprise calculée à partir d'une règle retrouvée dans le règlement de la zone.",
     derivedHelper: "Emprise calculée, mais la source réglementaire reste incomplète ou indirecte.",
   });
@@ -618,6 +677,7 @@ export default function AnalysisDetailPage() {
     formattedValue: buildability?.remainingFootprintM2 != null ? `${buildability.remainingFootprintM2} m²` : "Non déterminé",
     explicitRuleFound: isFiniteNumber(calcVariables.maxFootprintRatio) && !assumptionFlags.footprintDefault,
     defaultApplied: assumptionFlags.footprintDefault,
+    sourceDetail: buildabilitySourceDetails.remainingFootprint ?? null,
     explicitHelper: "Potentiel résiduel calculé à partir d'une emprise réglementaire effectivement retrouvée.",
     derivedHelper: "Potentiel calculé, mais au moins une variable réglementaire reste partielle.",
   });
@@ -627,6 +687,7 @@ export default function AnalysisDetailPage() {
     formattedValue: buildability?.maxHeightM != null ? `${buildability.maxHeightM} m` : "Non déterminé",
     explicitRuleFound: isFiniteNumber(calcVariables.maxHeightM),
     defaultApplied: assumptionFlags.heightDefault,
+    sourceDetail: buildabilitySourceDetails.height ?? null,
     explicitHelper: "Hauteur maximale issue d'une règle opposable retrouvée pour la zone.",
   });
 
@@ -635,6 +696,7 @@ export default function AnalysisDetailPage() {
     formattedValue: buildability?.greenSpaceRequirement || "Non déterminé",
     explicitRuleFound: isFiniteNumber(calcVariables.greenSpaceRatio),
     defaultApplied: assumptionFlags.greenDefault,
+    sourceDetail: buildabilitySourceDetails.greenSpace ?? null,
     explicitHelper: "Exigence de pleine terre / espaces verts issue d'une règle retrouvée dans le PLU.",
   });
 
@@ -643,6 +705,7 @@ export default function AnalysisDetailPage() {
     formattedValue: buildability?.setbackRoadM != null ? `${buildability.setbackRoadM} m minimum` : "Non déterminé",
     explicitRuleFound: isFiniteNumber(calcVariables.minSetbackFromRoadM),
     defaultApplied: assumptionFlags.roadSetbackDefault,
+    sourceDetail: buildabilitySourceDetails.setbackRoad ?? null,
     explicitHelper: "Recul voirie trouvé dans les règles opposables de la zone.",
     missingHelper: "Aucune règle claire de recul sur voie n'a été stabilisée pour la zone.",
   });
@@ -652,6 +715,7 @@ export default function AnalysisDetailPage() {
     formattedValue: buildability?.setbackBoundaryM != null ? `${buildability.setbackBoundaryM} m minimum` : "Non déterminé",
     explicitRuleFound: isFiniteNumber(calcVariables.minSetbackFromBoundariesM),
     defaultApplied: assumptionFlags.boundarySetbackDefault,
+    sourceDetail: buildabilitySourceDetails.setbackBoundary ?? null,
     explicitHelper: "Recul sur limites séparatives trouvé dans les règles opposables de la zone.",
     missingHelper: "Aucune règle claire de recul sur limites séparatives n'a été stabilisée pour la zone.",
   });
@@ -1533,24 +1597,32 @@ export default function AnalysisDetailPage() {
 	                      <p className="text-3xl font-bold text-primary">{footprintEvidence.displayValue}</p>
                         <Badge variant="outline" className={`mt-3 ${footprintEvidence.statusClassName}`}>{footprintEvidence.statusLabel}</Badge>
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{footprintEvidence.helperText}</p>
+                        {footprintEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{footprintEvidence.sourceLabel}</p>}
+                        {footprintEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{footprintEvidence.sourceExcerpt}</p>}
 	                    </div>
 	                    <div className="p-6 flex flex-col items-center text-center">
 	                      <p className="text-sm text-muted-foreground mb-2">Droit à bâtir restant</p>
 	                      <p className="text-3xl font-bold text-emerald-600">{remainingFootprintEvidence.displayValue}</p>
                         <Badge variant="outline" className={`mt-3 ${remainingFootprintEvidence.statusClassName}`}>{remainingFootprintEvidence.statusLabel}</Badge>
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{remainingFootprintEvidence.helperText}</p>
+                        {remainingFootprintEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{remainingFootprintEvidence.sourceLabel}</p>}
+                        {remainingFootprintEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{remainingFootprintEvidence.sourceExcerpt}</p>}
 	                    </div>
 	                    <div className="p-6 flex flex-col items-center text-center">
 	                      <p className="text-sm text-muted-foreground mb-2">Hauteur Max.</p>
 	                      <p className="text-3xl font-bold text-primary">{heightEvidence.displayValue}</p>
                         <Badge variant="outline" className={`mt-3 ${heightEvidence.statusClassName}`}>{heightEvidence.statusLabel}</Badge>
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{heightEvidence.helperText}</p>
+                        {heightEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{heightEvidence.sourceLabel}</p>}
+                        {heightEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{heightEvidence.sourceExcerpt}</p>}
 	                    </div>
 	                    <div className="p-6 flex flex-col items-center text-center">
 	                      <p className="text-sm text-muted-foreground mb-2">Pleine Terre</p>
 	                      <p className="text-3xl font-bold text-primary">{greenSpaceEvidence.displayValue}</p>
                         <Badge variant="outline" className={`mt-3 ${greenSpaceEvidence.statusClassName}`}>{greenSpaceEvidence.statusLabel}</Badge>
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{greenSpaceEvidence.helperText}</p>
+                        {greenSpaceEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{greenSpaceEvidence.sourceLabel}</p>}
+                        {greenSpaceEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{greenSpaceEvidence.sourceExcerpt}</p>}
 	                    </div>
 	                  </div>
 	                  <div className="p-6 bg-muted/30 border-t border-border">
@@ -1561,12 +1633,16 @@ export default function AnalysisDetailPage() {
 	                        <span className="font-semibold text-lg">{setbackRoadEvidence.displayValue}</span>
                           <Badge variant="outline" className={`mt-3 ${setbackRoadEvidence.statusClassName}`}>{setbackRoadEvidence.statusLabel}</Badge>
                           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setbackRoadEvidence.helperText}</p>
+                          {setbackRoadEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{setbackRoadEvidence.sourceLabel}</p>}
+                          {setbackRoadEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{setbackRoadEvidence.sourceExcerpt}</p>}
 	                      </div>
 	                      <div className="bg-background p-4 rounded-lg border border-border shadow-sm">
 	                        <span className="block text-sm text-muted-foreground mb-1">Recul limites séparatives (Art. 7)</span>
 	                        <span className="font-semibold text-lg">{setbackBoundaryEvidence.displayValue}</span>
                           <Badge variant="outline" className={`mt-3 ${setbackBoundaryEvidence.statusClassName}`}>{setbackBoundaryEvidence.statusLabel}</Badge>
                           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setbackBoundaryEvidence.helperText}</p>
+                          {setbackBoundaryEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{setbackBoundaryEvidence.sourceLabel}</p>}
+                          {setbackBoundaryEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{setbackBoundaryEvidence.sourceExcerpt}</p>}
 	                      </div>
 	                    </div>
 	                  </div>
