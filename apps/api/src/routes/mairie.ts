@@ -585,6 +585,29 @@ async function resolveCommuneAliases(commune: string) {
   };
 }
 
+async function safeRecordRegulatoryValidationHistory(args: {
+  communeId: string;
+  entityType: "zone" | "excerpt" | "rule" | "conflict";
+  entityId: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  action: string;
+  note?: string | null;
+  userId?: string | null;
+  snapshot?: Record<string, unknown>;
+}) {
+  try {
+    await recordRegulatoryValidationHistory(args);
+  } catch (err) {
+    logger.warn("[mairie/regulatory-calibration/history]", {
+      action: args.action,
+      entityType: args.entityType,
+      entityId: args.entityId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 async function persistStructuredKnowledgeForDocument(args: {
   baseIADocumentId?: string | null;
   townHallDocumentId?: string | null;
@@ -2472,7 +2495,7 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         .where(eq(regulatoryCalibrationZonesTable.id, existing[0].id))
         .returning();
       zone = updated;
-      await recordRegulatoryValidationHistory({
+      await safeRecordRegulatoryValidationHistory({
         communeId: communeKey,
         entityType: "zone",
         entityId: zone.id,
@@ -2494,7 +2517,7 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         updatedBy: req.user!.userId,
       }).returning();
       zone = created;
-      await recordRegulatoryValidationHistory({
+      await safeRecordRegulatoryValidationHistory({
         communeId: communeKey,
         entityType: "zone",
         entityId: zone.id,
@@ -2507,7 +2530,10 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
     return res.json({ zone });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zones POST]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+    return res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: "Impossible de creer cette zone pour la commune selectionnee.",
+    });
   }
 });
 
@@ -2535,7 +2561,7 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
       .where(eq(regulatoryCalibrationZonesTable.id, id))
       .returning();
 
-    await recordRegulatoryValidationHistory({
+    await safeRecordRegulatoryValidationHistory({
       communeId: updated.communeId,
       entityType: "zone",
       entityId: updated.id,
@@ -2547,7 +2573,10 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
     return res.json({ zone: updated });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zones PATCH]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+    return res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: "Impossible de mettre a jour cette zone.",
+    });
   }
 });
 

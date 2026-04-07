@@ -382,6 +382,7 @@ export function RegulatoryCalibrationModule({
     () => documents.find((doc) => doc.id === selectedDocumentId) || null,
     [documents, selectedDocumentId],
   );
+  const canEditCalibration = currentCommune !== "all";
 
   const activeRules = workspaceData?.excerpts.find((excerpt) => excerpt.id === activeExcerptId)?.rules || [];
 
@@ -444,10 +445,19 @@ export function RegulatoryCalibrationModule({
               <Input placeholder="Libellé optionnel" value={zoneForm.zoneLabel} onChange={(e) => setZoneForm((v) => ({ ...v, zoneLabel: e.target.value }))} />
               <Input placeholder="Zone mère optionnelle" value={zoneForm.parentZoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, parentZoneCode: e.target.value }))} />
               <Textarea placeholder="Notes de guidage (pages, secteur, nuances utiles)" value={zoneForm.guidanceNotes} onChange={(e) => setZoneForm((v) => ({ ...v, guidanceNotes: e.target.value }))} />
-              <Button className="w-full" disabled={createZoneMutation.isPending || !zoneForm.zoneCode.trim()} onClick={() => createZoneMutation.mutate()}>
+              <Button
+                className="w-full"
+                disabled={!canEditCalibration || createZoneMutation.isPending || !zoneForm.zoneCode.trim()}
+                onClick={() => createZoneMutation.mutate()}
+              >
                 {createZoneMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
                 Ajouter la zone
               </Button>
+              {!canEditCalibration && (
+                <p className="text-sm text-muted-foreground">
+                  Sélectionne d&apos;abord une commune précise pour créer ses zones de calibration.
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">
