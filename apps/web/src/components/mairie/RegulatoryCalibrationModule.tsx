@@ -802,26 +802,6 @@ export function RegulatoryCalibrationModule({
                       </Button>
                     </div>
 
-                    <div className="rounded-xl border bg-background p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold">Assistance IA</p>
-                        <Badge variant="secondary">Pré-classement uniquement</Badge>
-                      </div>
-                      <div className="mt-3 space-y-3">
-                        {workspaceData.aiSuggestions.sections.slice(0, 3).map((section) => (
-                          <div key={section.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
-                            <p className="font-medium">{section.zoneCode} · {section.heading}</p>
-                            <p className="text-xs text-muted-foreground">Pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}</p>
-                          </div>
-                        ))}
-                        {workspaceData.aiSuggestions.rules.slice(0, 3).map((rule) => (
-                          <div key={rule.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
-                            <p className="font-medium">{rule.zoneCode || "Zone ?"} · {rule.label}</p>
-                            <p className="text-xs text-muted-foreground">Art. {rule.articleCode || "?"} · page {rule.sourcePage || "?"}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -958,6 +938,30 @@ export function RegulatoryCalibrationModule({
                         </div>
                       )}
                     </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border bg-background p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">Assistance IA</p>
+                      <p className="text-xs text-muted-foreground">Suggestions à consulter après la lecture manuelle du texte source.</p>
+                    </div>
+                    <Badge variant="secondary">Pré-classement uniquement</Badge>
+                  </div>
+                  <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                    {workspaceData.aiSuggestions.sections.slice(0, 3).map((section) => (
+                      <div key={section.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
+                        <p className="font-medium">{section.zoneCode} · {section.heading}</p>
+                        <p className="text-xs text-muted-foreground">Pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}</p>
+                      </div>
+                    ))}
+                    {workspaceData.aiSuggestions.rules.slice(0, 3).map((rule) => (
+                      <div key={rule.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
+                        <p className="font-medium">{rule.zoneCode || "Zone ?"} · {rule.label}</p>
+                        <p className="text-xs text-muted-foreground">Art. {rule.articleCode || "?"} · page {rule.sourcePage || "?"}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </>
