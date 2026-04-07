@@ -461,7 +461,7 @@ export function RegulatoryCalibrationModule({
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-[320px,1fr]">
             <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
-              <Input placeholder="Code zone (ex : N, UA, UDa)" value={zoneForm.zoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, zoneCode: e.target.value }))} />
+              <Input placeholder="Code zone (ex : N, UA, UDa, 1AU)" value={zoneForm.zoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, zoneCode: e.target.value }))} />
               <Input placeholder="Libellé optionnel" value={zoneForm.zoneLabel} onChange={(e) => setZoneForm((v) => ({ ...v, zoneLabel: e.target.value }))} />
               <Input placeholder="Zone mère optionnelle" value={zoneForm.parentZoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, parentZoneCode: e.target.value }))} />
               <Textarea placeholder="Notes de guidage (pages, secteur, nuances utiles)" value={zoneForm.guidanceNotes} onChange={(e) => setZoneForm((v) => ({ ...v, guidanceNotes: e.target.value }))} />

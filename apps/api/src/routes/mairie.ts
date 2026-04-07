@@ -437,14 +437,17 @@ async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
 function normalizeConfiguredZoneCode(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const normalized = raw.replace(/\s+/g, "").trim().toUpperCase();
-  return /^[A-Z]{1,4}[A-Z0-9-]*$/.test(normalized) ? normalized : null;
+  return /^(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*$/.test(normalized) ? normalized : null;
 }
 
 function deriveParentZoneCode(zoneCode: string | null): string | null {
-  if (!zoneCode) return null;
-  const match = zoneCode.match(/^([A-Z]+)/);
-  const parent = match?.[1]?.toUpperCase() || null;
-  return parent && parent !== zoneCode ? parent : null;
+  const normalized = normalizeConfiguredZoneCode(zoneCode);
+  if (!normalized) return null;
+
+  // Only infer an automatic parent when the zone clearly carries a numeric prefix
+  // such as 1AU / 2AU. Other parent relationships stay user-configurable.
+  const withoutNumericPrefix = normalized.replace(/^\d+/, "");
+  return withoutNumericPrefix && withoutNumericPrefix !== normalized ? withoutNumericPrefix : null;
 }
 
 function inferCanonicalDocumentType(documentType: string | null | undefined, category?: string | null, subCategory?: string | null) {
