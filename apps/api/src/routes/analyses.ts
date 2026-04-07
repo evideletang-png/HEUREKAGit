@@ -27,7 +27,7 @@ import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { getZoningByCoords } from "../services/planning.js";
 import { extractDeterministicRegulatoryRules } from "../services/pluAnalysis.js";
 import { loadRegulatoryUnits, buildArticlesFromRegulatoryUnits } from "../services/regulatoryUnitService.js";
-import { buildArticlesFromUrbanRules, loadUrbanRules } from "../services/urbanRuleExtractionService.js";
+import { buildArticlesFromUrbanRules, loadStructuredRulesForAnalysis } from "../services/urbanRuleExtractionService.js";
 
 const router: IRouter = Router();
 
@@ -388,14 +388,15 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
         : null;
       const municipalityId = geoContext?.source_lock?.inseeCode || analysis.city || null;
       const communeName = geoContext?.source_lock?.city || analysis.city || null;
-      const structuredUrbanRules = municipalityId
-        ? await loadUrbanRules({
+      const structuredRuleLoad = municipalityId
+        ? await loadStructuredRulesForAnalysis({
             municipalityId,
             communeName,
             zoneCode: zoneData.zoneCode || analysis.zoneCode || undefined,
             minAuthority: 7,
           })
-        : [];
+        : { source: "none" as const, rules: [] };
+      const structuredUrbanRules = structuredRuleLoad.rules;
       const canonicalUnits = municipalityId && structuredUrbanRules.length === 0
         ? await loadRegulatoryUnits({
             municipalityId,
@@ -419,7 +420,10 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
           impactText: article.impactText,
           vigilanceText: article.vigilanceText,
           confidence: article.confidence,
-          structuredJson: JSON.stringify(article.structuredData || {}),
+          structuredJson: JSON.stringify({
+            structured_source: structuredRuleLoad.source,
+            ...(article.structuredData || {}),
+          }),
         }));
       } else {
         articles = synthesizeEvidenceFromSourceExcerpt(zoneData.id, zoneData.sourceExcerpt);

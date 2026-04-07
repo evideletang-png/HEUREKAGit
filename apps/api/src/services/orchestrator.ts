@@ -20,7 +20,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { createHash } from "crypto";
 import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
 import { loadRegulatoryUnits, buildParsedRulesFromRegulatoryUnits, buildArticlesFromRegulatoryUnits, buildDigestFromRegulatoryUnits } from "./regulatoryUnitService.js";
-import { buildArticlesFromUrbanRules, buildParsedRulesFromUrbanRules, loadUrbanRules } from "./urbanRuleExtractionService.js";
+import { buildArticlesFromUrbanRules, buildParsedRulesFromUrbanRules, loadStructuredRulesForAnalysis, type StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -88,7 +88,7 @@ function extractCommuneNameFromAddress(address: string | null | undefined): stri
   return "";
 }
 
-async function buildBuildabilitySourceDetails(rules: Array<any>): Promise<BuildabilitySourceDetails> {
+async function buildBuildabilitySourceDetails(rules: StructuredUrbanRuleSource[]): Promise<BuildabilitySourceDetails> {
   const baseIds = Array.from(new Set(
     rules
       .filter((rule) => rule?.sourceDocumentKind === "base_ia_document" && typeof rule?.sourceDocumentId === "string")
@@ -797,12 +797,13 @@ export async function orchestrateDossierAnalysis(
   const annexRegulatoryContext = annexRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
   const regulatoryContext = [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n--- ANNEXES OPPOSABLES ---\n\n");
   const supplementaryPlanningContext = supplementaryPlanningDocs.map((d) => d.rawText || "").join("\n\n");
-  const structuredUrbanRules = await loadUrbanRules({
+  const structuredRuleLoad = await loadStructuredRulesForAnalysis({
     municipalityId: regulatoryCommune,
     communeName,
     zoneCode: finalZone,
     minAuthority: 7,
   });
+  const structuredUrbanRules = structuredRuleLoad.rules;
   const canonicalUnits = structuredUrbanRules.length === 0 ? await loadRegulatoryUnits({
     municipalityId: regulatoryCommune,
     communeName,
@@ -819,7 +820,7 @@ export async function orchestrateDossierAnalysis(
 
   if (structuredUrbanRules.length > 0) {
     parsedRules = buildParsedRulesFromUrbanRules(structuredUrbanRules);
-    logger.info(`[Orchestrator] Using ${structuredUrbanRules.length} structured urban rules for zone ${finalZone}.`);
+    logger.info(`[Orchestrator] Using ${structuredUrbanRules.length} ${structuredRuleLoad.source} rules for zone ${finalZone}.`);
   } else if (canonicalUnits.length > 0) {
     parsedRules = buildParsedRulesFromRegulatoryUnits(canonicalUnits);
     logger.info(`[Orchestrator] Using ${canonicalUnits.length} canonical regulatory units for zone ${finalZone}.`);
@@ -1220,7 +1221,7 @@ export async function orchestrateDossierAnalysis(
       fullZoneAnalysis = {
         zoneCode: finalZone,
         zoneLabel: `${finalZone} : Zone identifiée`,
-        digest: canonicalDigest || {},
+        digest: canonicalDigest || buildDeterministicZoneDigest(canonicalArticles, finalZone),
         issues: [],
         articles: canonicalArticles,
         calculationVariables: {},
