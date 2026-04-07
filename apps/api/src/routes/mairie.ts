@@ -450,6 +450,24 @@ function deriveParentZoneCode(zoneCode: string | null): string | null {
   return withoutNumericPrefix && withoutNumericPrefix !== normalized ? withoutNumericPrefix : null;
 }
 
+function normalizeDocumentFingerprintPart(raw: string | null | undefined) {
+  return (raw || "")
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildTownHallDocumentVersionSignature(args: {
+  title?: string | null;
+  fileName?: string | null;
+  canonicalType?: string | null;
+}) {
+  const sourceName = normalizeDocumentFingerprintPart(args.title || args.fileName || "");
+  const canonicalType = (args.canonicalType || "other").trim().toLowerCase();
+  return `${canonicalType}::${sourceName}`;
+}
+
 function isLikelyPluZoneCode(raw: unknown, options?: { allowSingleLetter?: boolean }) {
   const normalized = normalizeConfiguredZoneCode(raw);
   if (!normalized) return null;
@@ -3301,19 +3319,34 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
     const docs = await db.select({
       id: townHallDocumentsTable.id,
       title: townHallDocumentsTable.title,
+      fileName: townHallDocumentsTable.fileName,
       commune: townHallDocumentsTable.commune,
       documentType: townHallDocumentsTable.documentType,
       category: townHallDocumentsTable.category,
       subCategory: townHallDocumentsTable.subCategory,
       createdAt: townHallDocumentsTable.createdAt,
       rawText: townHallDocumentsTable.rawText,
-      fileName: townHallDocumentsTable.fileName,
       isOpposable: townHallDocumentsTable.isOpposable,
     }).from(townHallDocumentsTable)
       .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
       .orderBy(desc(townHallDocumentsTable.createdAt));
 
     const docById = new Map(docs.map((doc) => [doc.id, doc]));
+    const latestDocIdBySignature = new Map<string, string>();
+
+    for (const doc of docs) {
+      const classification = await maybeSyncTownHallDocumentClassification(doc);
+      const signature = buildTownHallDocumentVersionSignature({
+        title: doc.title,
+        fileName: doc.fileName,
+        canonicalType: classification.canonicalType,
+      });
+
+      if (!latestDocIdBySignature.has(signature)) {
+        latestDocIdBySignature.set(signature, doc.id);
+      }
+    }
+    const latestDocIds = new Set(latestDocIdBySignature.values());
 
     let allSections = await db.select().from(regulatoryZoneSectionsTable)
       .where(
@@ -3412,7 +3445,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
           isOpposable: linkedDoc.isOpposable,
         } : null,
       };
-    });
+    }).filter((section) => !!section.document && latestDocIds.has(section.document.id));
 
     const reviewableSections = sectionsWithDocs.filter((section) => !!section.document);
     const resolvedDocs = docs.map((doc) => resolveTownHallClassification({
