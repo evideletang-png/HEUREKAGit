@@ -2858,8 +2858,22 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || rule.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
 
+    let nextZoneId = rule.zoneId;
+    if (typeof req.body.zoneId === "string" && req.body.zoneId.trim()) {
+      const requestedZoneId = req.body.zoneId.trim();
+      const [targetZone] = await db.select()
+        .from(regulatoryCalibrationZonesTable)
+        .where(eq(regulatoryCalibrationZonesTable.id, requestedZoneId))
+        .limit(1);
+      if (!targetZone || targetZone.communeId !== rule.communeId) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Zone cible invalide pour cette commune." });
+      }
+      nextZoneId = targetZone.id;
+    }
+
     const [updated] = await db.update(indexedRegulatoryRulesTable)
       .set({
+        zoneId: nextZoneId,
         articleCode: typeof req.body.articleCode === "string" && req.body.articleCode.trim() ? req.body.articleCode.trim() : rule.articleCode,
         themeCode: typeof req.body.themeCode === "string" && req.body.themeCode.trim() ? req.body.themeCode.trim() : rule.themeCode,
         ruleLabel: typeof req.body.ruleLabel === "string" && req.body.ruleLabel.trim() ? req.body.ruleLabel.trim() : rule.ruleLabel,
@@ -2887,6 +2901,11 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
       userId: req.user!.userId,
       snapshot: updated as Record<string, unknown>,
     });
+
+    await recomputeIndexedRuleConflicts({ communeId: updated.communeId, zoneId: rule.zoneId });
+    if (updated.zoneId !== rule.zoneId) {
+      await recomputeIndexedRuleConflicts({ communeId: updated.communeId, zoneId: updated.zoneId });
+    }
 
     return res.json({ rule: updated });
   } catch (err) {
@@ -2944,6 +2963,37 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/rules/status POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.delete("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [rule] = await db.select().from(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, id)).limit(1);
+    if (!rule) return res.status(404).json({ error: "RULE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || rule.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    await db.delete(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, id));
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: rule.communeId,
+      entityType: "rule",
+      entityId: rule.id,
+      action: "rule_deleted",
+      fromStatus: rule.status,
+      toStatus: null,
+      userId: req.user!.userId,
+      snapshot: rule as Record<string, unknown>,
+    });
+
+    await recomputeIndexedRuleConflicts({ communeId: rule.communeId, zoneId: rule.zoneId });
+
+    return res.json({ deleted: true, ruleId: id });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rules DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Suppression de la règle impossible." });
   }
 });
 

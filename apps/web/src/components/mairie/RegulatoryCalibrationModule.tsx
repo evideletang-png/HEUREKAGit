@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CheckCircle2, Eye, FileText, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Eye, FilePenLine, FileText, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -188,6 +188,21 @@ function formatRuleValue(rule: LibraryResponse["rules"][number] | WorkspaceData[
   return numeric || rule.valueText || "Valeur non structurée";
 }
 
+function buildRuleEditorDraft(rule: LibraryResponse["rules"][number]) {
+  return {
+    zoneId: rule.zoneId || "",
+    articleCode: rule.articleCode || "",
+    themeCode: rule.themeCode || "",
+    ruleLabel: rule.ruleLabel || "",
+    operator: rule.operator || "",
+    valueNumeric: typeof rule.valueNumeric === "number" ? String(rule.valueNumeric) : "",
+    valueText: rule.valueText || "",
+    unit: rule.unit || "",
+    conditionText: rule.conditionText || "",
+    interpretationNote: rule.interpretationNote || "",
+  };
+}
+
 export function RegulatoryCalibrationModule({
   currentCommune,
   documents,
@@ -207,6 +222,8 @@ export function RegulatoryCalibrationModule({
   const [selectionLabel, setSelectionLabel] = useState("");
   const [pendingSelection, setPendingSelection] = useState<{ text: string; pageNumber: number } | null>(null);
   const [activeExcerptId, setActiveExcerptId] = useState<string | null>(null);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [ruleEditorDrafts, setRuleEditorDrafts] = useState<Record<string, ReturnType<typeof buildRuleEditorDraft>>>({});
   const [ruleDrafts, setRuleDrafts] = useState<Record<string, {
     themeCode: string;
     ruleLabel: string;
@@ -355,6 +372,43 @@ export function RegulatoryCalibrationModule({
     onSuccess: (_payload, variables) => {
       refreshCalibration();
       toast({ title: "Statut mis à jour", description: `La règle est maintenant ${getStatusBadge(variables.status).label.toLowerCase()}.` });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateRuleMutation = useMutation({
+    mutationFn: async ({ ruleId, draft }: { ruleId: string; draft: ReturnType<typeof buildRuleEditorDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/rules/${ruleId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        commune: currentCommune,
+        zoneId: draft.zoneId,
+        articleCode: draft.articleCode,
+        themeCode: draft.themeCode,
+        ruleLabel: draft.ruleLabel,
+        operator: draft.operator,
+        valueNumeric: draft.valueNumeric,
+        valueText: draft.valueText,
+        unit: draft.unit,
+        conditionText: draft.conditionText,
+        interpretationNote: draft.interpretationNote,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setEditingRuleId((current) => (current === variables.ruleId ? null : current));
+      toast({ title: "Règle modifiée", description: "La règle a été mise à jour dans la bibliothèque." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteRuleMutation = useMutation({
+    mutationFn: async (ruleId: string) => apiFetch(`/api/mairie/regulatory-calibration/rules/${ruleId}?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "DELETE",
+    }),
+    onSuccess: (_payload, ruleId) => {
+      refreshCalibration();
+      setEditingRuleId((current) => (current === ruleId ? null : current));
+      toast({ title: "Règle supprimée", description: "La règle a été retirée de la bibliothèque." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -826,14 +880,173 @@ export function RegulatoryCalibrationModule({
                     <p className="text-sm text-muted-foreground">{formatRuleValue(rule)}</p>
                     <p className="text-xs text-muted-foreground">{rule.documentTitle} · page {rule.sourcePage}</p>
                     <div className="rounded-lg bg-muted/20 px-3 py-2 text-xs text-foreground/80">{rule.sourceText}</div>
+                    {editingRuleId === rule.id && (
+                      <div className="space-y-3 rounded-xl border bg-muted/10 p-3">
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.zoneId || ""}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), zoneId: value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Zone" /></SelectTrigger>
+                            <SelectContent>
+                              {(zonesData?.zones || []).map((zone) => (
+                                <SelectItem key={zone.id} value={zone.id}>{zone.zoneCode}{zone.zoneLabel ? ` · ${zone.zoneLabel}` : ""}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.themeCode || ""}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), themeCode: value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Thème métier" /></SelectTrigger>
+                            <SelectContent>
+                              {(themesData?.themes || []).map((theme) => (
+                                <SelectItem key={theme.code} value={theme.code}>{theme.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Select
+                            value={ruleEditorDrafts[rule.id]?.articleCode || ""}
+                            onValueChange={(value) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), articleCode: value },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Article" /></SelectTrigger>
+                            <SelectContent>
+                              {(themesData?.articleReference || []).map((article) => (
+                                <SelectItem key={article.code} value={article.code}>{article.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Input
+                          placeholder="Libellé de règle"
+                          value={ruleEditorDrafts[rule.id]?.ruleLabel || ""}
+                          onChange={(e) => setRuleEditorDrafts((current) => ({
+                            ...current,
+                            [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), ruleLabel: e.target.value },
+                          }))}
+                        />
+                        <div className="grid gap-3 md:grid-cols-4">
+                          <Input
+                            placeholder="Opérateur"
+                            value={ruleEditorDrafts[rule.id]?.operator || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), operator: e.target.value },
+                            }))}
+                          />
+                          <Input
+                            placeholder="Valeur numérique"
+                            value={ruleEditorDrafts[rule.id]?.valueNumeric || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), valueNumeric: e.target.value },
+                            }))}
+                          />
+                          <Input
+                            placeholder="Valeur texte"
+                            value={ruleEditorDrafts[rule.id]?.valueText || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), valueText: e.target.value },
+                            }))}
+                          />
+                          <Input
+                            placeholder="Unité"
+                            value={ruleEditorDrafts[rule.id]?.unit || ""}
+                            onChange={(e) => setRuleEditorDrafts((current) => ({
+                              ...current,
+                              [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), unit: e.target.value },
+                            }))}
+                          />
+                        </div>
+                        <Textarea
+                          placeholder="Condition / exception"
+                          value={ruleEditorDrafts[rule.id]?.conditionText || ""}
+                          onChange={(e) => setRuleEditorDrafts((current) => ({
+                            ...current,
+                            [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), conditionText: e.target.value },
+                          }))}
+                        />
+                        <Textarea
+                          placeholder="Note d’interprétation"
+                          value={ruleEditorDrafts[rule.id]?.interpretationNote || ""}
+                          onChange={(e) => setRuleEditorDrafts((current) => ({
+                            ...current,
+                            [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), interpretationNote: e.target.value },
+                          }))}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={updateRuleMutation.isPending || !(ruleEditorDrafts[rule.id]?.zoneId) || !(ruleEditorDrafts[rule.id]?.themeCode) || !(ruleEditorDrafts[rule.id]?.articleCode) || !(ruleEditorDrafts[rule.id]?.ruleLabel?.trim())}
+                            onClick={() => updateRuleMutation.mutate({ ruleId: rule.id, draft: ruleEditorDrafts[rule.id] || buildRuleEditorDraft(rule) })}
+                          >
+                            {updateRuleMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
+                            Enregistrer
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setEditingRuleId(null);
+                              setRuleEditorDrafts((current) => {
+                                const next = { ...current };
+                                delete next[rule.id];
+                                return next;
+                              });
+                            }}
+                          >
+                            Annuler
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex flex-wrap gap-2 xl:justify-end">
+                  <div className="flex flex-wrap gap-2 xl:max-w-[260px] xl:justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updateRuleMutation.isPending || deleteRuleMutation.isPending}
+                      onClick={() => {
+                        if (editingRuleId === rule.id) {
+                          setEditingRuleId(null);
+                          return;
+                        }
+                        setRuleEditorDrafts((current) => ({ ...current, [rule.id]: buildRuleEditorDraft(rule) }));
+                        setEditingRuleId(rule.id);
+                      }}
+                    >
+                      <FilePenLine className="mr-2 h-3.5 w-3.5" />
+                      {editingRuleId === rule.id ? "Fermer" : "Modifier"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/20 text-destructive hover:bg-destructive/5"
+                      disabled={deleteRuleMutation.isPending}
+                      onClick={() => {
+                        if (!window.confirm(`Supprimer la règle "${rule.ruleLabel}" ?`)) return;
+                        deleteRuleMutation.mutate(rule.id);
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" />
+                      Supprimer
+                    </Button>
                     {STATUS_ORDER.map((status) => (
                       <Button
                         key={status}
                         variant={status === rule.status ? "default" : "outline"}
                         size="sm"
-                        disabled={updateRuleStatusMutation.isPending}
+                        disabled={updateRuleStatusMutation.isPending || deleteRuleMutation.isPending}
                         onClick={() => updateRuleStatusMutation.mutate({ ruleId: rule.id, status })}
                       >
                         {status === "draft" ? "Brouillon" : status === "in_review" ? "En revue" : status === "validated" ? "Valider" : "Publier"}
