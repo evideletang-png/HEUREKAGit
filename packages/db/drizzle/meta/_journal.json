@@ -78,6 +78,20 @@
       "when": 1775518200000,
       "tag": "0010_buildability_source_details",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1775543400000,
+      "tag": "0011_regulatory_zone_reviewed_zone_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1775572200000,
+      "tag": "0012_assisted_regulatory_calibration",
+      "breakpoints": true
     }
   ]
 }
