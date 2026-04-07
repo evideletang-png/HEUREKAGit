@@ -144,57 +144,162 @@ function buildMunicipalityAliasFilter(column: any, aliases: string[]) {
   )!;
 }
 
+function buildDeleteScopeFilter(clauses: Array<any>) {
+  const validClauses = clauses.filter(Boolean);
+  if (validClauses.length === 0) return sql`FALSE`;
+  if (validClauses.length === 1) return validClauses[0];
+  return or(...validClauses)!;
+}
+
 async function purgeMunicipalityStructuredKnowledge(args: {
   requestedCommune: string;
   municipalityAliases: string[];
+  townHallDocumentIds: string[];
 }) {
   const municipalityFilter = buildMunicipalityAliasFilter(baseIADocumentsTable.municipalityId, args.municipalityAliases);
 
-  const baseDocs = await db.select({ id: baseIADocumentsTable.id })
-    .from(baseIADocumentsTable)
-    .where(municipalityFilter);
+  const [baseDocs, profileBaseDocs, sectionBaseDocs, unitBaseDocs, urbanRuleBaseDocs, calibrationZones] = await Promise.all([
+    db.select({ id: baseIADocumentsTable.id })
+      .from(baseIADocumentsTable)
+      .where(municipalityFilter),
+    args.townHallDocumentIds.length > 0
+      ? db.select({ baseIADocumentId: documentKnowledgeProfilesTable.baseIADocumentId })
+          .from(documentKnowledgeProfilesTable)
+          .where(inArray(documentKnowledgeProfilesTable.townHallDocumentId, args.townHallDocumentIds))
+      : Promise.resolve([]),
+    args.townHallDocumentIds.length > 0
+      ? db.select({ baseIADocumentId: regulatoryZoneSectionsTable.baseIADocumentId })
+          .from(regulatoryZoneSectionsTable)
+          .where(inArray(regulatoryZoneSectionsTable.townHallDocumentId, args.townHallDocumentIds))
+      : Promise.resolve([]),
+    args.townHallDocumentIds.length > 0
+      ? db.select({ baseIADocumentId: regulatoryUnitsTable.baseIADocumentId })
+          .from(regulatoryUnitsTable)
+          .where(inArray(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentIds))
+      : Promise.resolve([]),
+    args.townHallDocumentIds.length > 0
+      ? db.select({ baseIADocumentId: urbanRulesTable.baseIADocumentId })
+          .from(urbanRulesTable)
+          .where(inArray(urbanRulesTable.townHallDocumentId, args.townHallDocumentIds))
+      : Promise.resolve([]),
+    db.select({ id: regulatoryCalibrationZonesTable.id })
+      .from(regulatoryCalibrationZonesTable)
+      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.municipalityAliases)),
+  ]);
 
-  const baseDocIds = baseDocs.map((doc) => doc.id);
+  const baseDocIds = Array.from(new Set([
+    ...baseDocs.map((doc) => doc.id),
+    ...profileBaseDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+    ...sectionBaseDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+    ...unitBaseDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+    ...urbanRuleBaseDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
+  ]));
+  const calibrationZoneIds = calibrationZones.map((zone) => zone.id);
+
+  const excerpts = await db.select({ id: calibratedExcerptsTable.id })
+    .from(calibratedExcerptsTable)
+    .where(buildDeleteScopeFilter([
+      buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, args.municipalityAliases),
+      args.townHallDocumentIds.length > 0 ? inArray(calibratedExcerptsTable.documentId, args.townHallDocumentIds) : null,
+      calibrationZoneIds.length > 0 ? inArray(calibratedExcerptsTable.zoneId, calibrationZoneIds) : null,
+    ]));
+  const excerptIds = excerpts.map((excerpt) => excerpt.id);
+
+  const indexedRules = await db.select({ id: indexedRegulatoryRulesTable.id })
+    .from(indexedRegulatoryRulesTable)
+    .where(buildDeleteScopeFilter([
+      buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, args.municipalityAliases),
+      args.townHallDocumentIds.length > 0 ? inArray(indexedRegulatoryRulesTable.documentId, args.townHallDocumentIds) : null,
+      calibrationZoneIds.length > 0 ? inArray(indexedRegulatoryRulesTable.zoneId, calibrationZoneIds) : null,
+      excerptIds.length > 0 ? inArray(indexedRegulatoryRulesTable.excerptId, excerptIds) : null,
+    ]));
+  const indexedRuleIds = indexedRules.map((rule) => rule.id);
 
   return db.transaction(async (tx) => {
     const deletedValidationHistory = await tx.delete(regulatoryValidationHistoryTable)
-      .where(buildMunicipalityAliasFilter(regulatoryValidationHistoryTable.communeId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(regulatoryValidationHistoryTable.communeId, args.municipalityAliases),
+        calibrationZoneIds.length > 0
+          ? and(eq(regulatoryValidationHistoryTable.entityType, "zone"), inArray(regulatoryValidationHistoryTable.entityId, calibrationZoneIds))
+          : null,
+        excerptIds.length > 0
+          ? and(eq(regulatoryValidationHistoryTable.entityType, "excerpt"), inArray(regulatoryValidationHistoryTable.entityId, excerptIds))
+          : null,
+        indexedRuleIds.length > 0
+          ? and(eq(regulatoryValidationHistoryTable.entityType, "rule"), inArray(regulatoryValidationHistoryTable.entityId, indexedRuleIds))
+          : null,
+      ]))
       .returning({ id: regulatoryValidationHistoryTable.id });
 
     const deletedCalibrationConflicts = await tx.delete(regulatoryRuleConflictsTable)
-      .where(buildMunicipalityAliasFilter(regulatoryRuleConflictsTable.communeId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(regulatoryRuleConflictsTable.communeId, args.municipalityAliases),
+        calibrationZoneIds.length > 0 ? inArray(regulatoryRuleConflictsTable.zoneId, calibrationZoneIds) : null,
+        indexedRuleIds.length > 0 ? inArray(regulatoryRuleConflictsTable.leftRuleId, indexedRuleIds) : null,
+        indexedRuleIds.length > 0 ? inArray(regulatoryRuleConflictsTable.rightRuleId, indexedRuleIds) : null,
+      ]))
       .returning({ id: regulatoryRuleConflictsTable.id });
 
     const deletedIndexedRules = await tx.delete(indexedRegulatoryRulesTable)
-      .where(buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(indexedRegulatoryRulesTable.communeId, args.municipalityAliases),
+        args.townHallDocumentIds.length > 0 ? inArray(indexedRegulatoryRulesTable.documentId, args.townHallDocumentIds) : null,
+        calibrationZoneIds.length > 0 ? inArray(indexedRegulatoryRulesTable.zoneId, calibrationZoneIds) : null,
+        excerptIds.length > 0 ? inArray(indexedRegulatoryRulesTable.excerptId, excerptIds) : null,
+      ]))
       .returning({ id: indexedRegulatoryRulesTable.id });
 
     const deletedExcerpts = await tx.delete(calibratedExcerptsTable)
-      .where(buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(calibratedExcerptsTable.communeId, args.municipalityAliases),
+        args.townHallDocumentIds.length > 0 ? inArray(calibratedExcerptsTable.documentId, args.townHallDocumentIds) : null,
+        calibrationZoneIds.length > 0 ? inArray(calibratedExcerptsTable.zoneId, calibrationZoneIds) : null,
+      ]))
       .returning({ id: calibratedExcerptsTable.id });
 
     const deletedCalibrationZones = await tx.delete(regulatoryCalibrationZonesTable)
-      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.municipalityAliases),
+        calibrationZoneIds.length > 0 ? inArray(regulatoryCalibrationZonesTable.id, calibrationZoneIds) : null,
+      ]))
       .returning({ id: regulatoryCalibrationZonesTable.id });
 
     const deletedConflicts = await tx.delete(urbanRuleConflictsTable)
-      .where(buildMunicipalityAliasFilter(urbanRuleConflictsTable.municipalityId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(urbanRuleConflictsTable.municipalityId, args.municipalityAliases),
+      ]))
       .returning({ id: urbanRuleConflictsTable.id });
 
     const deletedRules = await tx.delete(urbanRulesTable)
-      .where(buildMunicipalityAliasFilter(urbanRulesTable.municipalityId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(urbanRulesTable.municipalityId, args.municipalityAliases),
+        args.townHallDocumentIds.length > 0 ? inArray(urbanRulesTable.townHallDocumentId, args.townHallDocumentIds) : null,
+        baseDocIds.length > 0 ? inArray(urbanRulesTable.baseIADocumentId, baseDocIds) : null,
+      ]))
       .returning({ id: urbanRulesTable.id });
 
     const deletedUnits = await tx.delete(regulatoryUnitsTable)
-      .where(buildMunicipalityAliasFilter(regulatoryUnitsTable.municipalityId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(regulatoryUnitsTable.municipalityId, args.municipalityAliases),
+        args.townHallDocumentIds.length > 0 ? inArray(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentIds) : null,
+        baseDocIds.length > 0 ? inArray(regulatoryUnitsTable.baseIADocumentId, baseDocIds) : null,
+      ]))
       .returning({ id: regulatoryUnitsTable.id });
 
     const deletedSections = await tx.delete(regulatoryZoneSectionsTable)
-      .where(buildMunicipalityAliasFilter(regulatoryZoneSectionsTable.municipalityId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(regulatoryZoneSectionsTable.municipalityId, args.municipalityAliases),
+        args.townHallDocumentIds.length > 0 ? inArray(regulatoryZoneSectionsTable.townHallDocumentId, args.townHallDocumentIds) : null,
+        baseDocIds.length > 0 ? inArray(regulatoryZoneSectionsTable.baseIADocumentId, baseDocIds) : null,
+      ]))
       .returning({ id: regulatoryZoneSectionsTable.id });
 
     const deletedProfiles = await tx.delete(documentKnowledgeProfilesTable)
-      .where(buildMunicipalityAliasFilter(documentKnowledgeProfilesTable.municipalityId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(documentKnowledgeProfilesTable.municipalityId, args.municipalityAliases),
+        args.townHallDocumentIds.length > 0 ? inArray(documentKnowledgeProfilesTable.townHallDocumentId, args.townHallDocumentIds) : null,
+        baseDocIds.length > 0 ? inArray(documentKnowledgeProfilesTable.baseIADocumentId, baseDocIds) : null,
+      ]))
       .returning({ id: documentKnowledgeProfilesTable.id });
 
     const deletedEmbeddings = baseDocIds.length > 0
@@ -217,7 +322,10 @@ async function purgeMunicipalityStructuredKnowledge(args: {
           .returning({ id: baseIAEmbeddingsTable.id });
 
     const deletedBaseDocs = await tx.delete(baseIADocumentsTable)
-      .where(buildMunicipalityAliasFilter(baseIADocumentsTable.municipalityId, args.municipalityAliases))
+      .where(buildDeleteScopeFilter([
+        buildMunicipalityAliasFilter(baseIADocumentsTable.municipalityId, args.municipalityAliases),
+        baseDocIds.length > 0 ? inArray(baseIADocumentsTable.id, baseDocIds) : null,
+      ]))
       .returning({ id: baseIADocumentsTable.id });
 
     return {
@@ -3745,13 +3853,14 @@ router.delete("/documents", async (req: AuthRequest, res) => {
     const municipalityAliases = Array.from(new Set([requestedCommune, inseeCode].filter((value): value is string => !!value)));
     const docsToDelete = await db.select({ id: townHallDocumentsTable.id, fileName: townHallDocumentsTable.fileName })
       .from(townHallDocumentsTable)
-      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, requestedLower));
+      .where(buildMunicipalityAliasFilter(townHallDocumentsTable.commune, municipalityAliases));
 
     const docIds = docsToDelete.map(d => d.id);
 
     const cleanupSummary = await purgeMunicipalityStructuredKnowledge({
       requestedCommune,
       municipalityAliases,
+      townHallDocumentIds: docIds,
     });
 
     if (docIds.length > 0) {
@@ -3774,7 +3883,10 @@ router.delete("/documents", async (req: AuthRequest, res) => {
     });
   } catch (err) {
     logger.error("[mairie/documents DELETE bulk]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+    return res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: "Impossible de vider completement la Base IA de cette commune.",
+    });
   }
 });
 
