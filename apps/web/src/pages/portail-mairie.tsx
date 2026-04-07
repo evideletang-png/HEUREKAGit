@@ -1398,7 +1398,32 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         method: "DELETE",
       });
     },
-    onSuccess: () => {
+    onSuccess: (_payload, deletedId) => {
+      queryClient.setQueryData<PluZoneReviewData | undefined>(["mairie-plu-zone-reviews", currentCommune], (current) => {
+        if (!current) return current;
+        const nextSections = current.sections.filter((section) => section.id !== deletedId);
+        const validatedZoneCount = nextSections.filter((section) => section.reviewStatus === "validated").length;
+        const pendingZoneCount = nextSections.filter((section) => section.reviewStatus === "to_review" || section.reviewStatus === "auto").length;
+        const readyStatus = (() => {
+          if (nextSections.length === 0) return "missing" as const;
+          const criticalZonesCount = new Set(nextSections.map((section) => section.zoneCode)).size;
+          if (validatedZoneCount >= Math.max(1, criticalZonesCount)) return "ready" as const;
+          if (validatedZoneCount > 0) return "partial" as const;
+          return "needs_review" as const;
+        })();
+
+        return {
+          ...current,
+          summary: {
+            ...current.summary,
+            zoneSectionCount: nextSections.length,
+            validatedZoneCount,
+            pendingZoneCount,
+            readyStatus,
+          },
+          sections: nextSections,
+        };
+      });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
       queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });

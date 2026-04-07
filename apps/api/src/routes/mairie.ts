@@ -3436,6 +3436,7 @@ router.delete("/plu-zone-reviews/:id", async (req: AuthRequest, res) => {
     await db.transaction(async (tx) => {
       await tx.update(regulatoryZoneSectionsTable)
         .set({
+          isOpposable: false,
           reviewStatus: "rejected",
           reviewNotes: section.reviewedZoneCode
             ? `Section supprimée manuellement (${section.reviewedZoneCode}).`
