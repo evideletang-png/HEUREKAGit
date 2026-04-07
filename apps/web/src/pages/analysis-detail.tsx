@@ -277,6 +277,27 @@ function formatBuildabilityConfidenceHint(meta?: BuildabilitySourceMeta) {
   return "Le score repose surtout sur des fallbacks documentaires, sans règle calibrée publiée.";
 }
 
+function getBuildabilityModeBadge(meta?: BuildabilitySourceMeta) {
+  if (meta?.structuredRuleSource === "published_calibration") {
+    return {
+      label: "Pilote par regles publiees",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    };
+  }
+
+  if (meta?.structuredRuleSource === "structured_urban_rules") {
+    return {
+      label: "Base structuree non publiee",
+      className: "border-sky-200 bg-sky-50 text-sky-800",
+    };
+  }
+
+  return {
+    label: "Fallback documentaire",
+    className: "border-amber-200 bg-amber-50 text-amber-800",
+  };
+}
+
 function formatMeasuredValue(
   value: unknown,
   {
@@ -651,6 +672,7 @@ export default function AnalysisDetailPage() {
     }
   })();
   const buildabilityConfidenceHint = formatBuildabilityConfidenceHint(buildabilitySourceDetails.meta);
+  const buildabilityModeBadge = getBuildabilityModeBadge(buildabilitySourceDetails.meta);
 
   // Formatting polygon data for Leaflet — handles both Polygon and MultiPolygon
   function extractFirstRing(geom: { type?: string; coordinates?: unknown }): number[][] | null {
@@ -1607,6 +1629,9 @@ export default function AnalysisDetailPage() {
                     <div className="flex items-center gap-3">
                       <CardTitle>Potentiel Constructible Théorique</CardTitle>
                       <ReliabilityBadge level={(dataQuality.buildability || "to_confirm") as ReliabilityLevel} />
+                      <Badge variant="outline" className={buildabilityModeBadge.className}>
+                        {buildabilityModeBadge.label}
+                      </Badge>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-1">Score de confiance</p>
