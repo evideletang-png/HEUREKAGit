@@ -831,7 +831,12 @@ export async function orchestrateDossierAnalysis(
   }
 
   const { NormalizationService } = await import("./normalizationService.js");
-  const normalizedParams = await NormalizationService.normalizeRules(parsedRules);
+  const normalizedParams = structuredUrbanRules.length > 0
+    ? NormalizationService.mergeCalculationParameters(
+        await NormalizationService.normalizeUrbanRules(structuredUrbanRules),
+        await NormalizationService.normalizeRules(parsedRules),
+      )
+    : await NormalizationService.normalizeRules(parsedRules);
 
   const hasPluSourceData = (primaryRegulatoryContext || "").trim().length >= 200
     || (annexRegulatoryContext || "").trim().length >= 200
@@ -861,11 +866,23 @@ export async function orchestrateDossierAnalysis(
       const roadSetback = normalizedParams.road_setback?.[0] ?? null;
       const boundarySetback = normalizedParams.boundary_setback?.[0] ?? null;
       const parkingReq = normalizedParams.parking_requirements?.[0] ?? null;
-      const greenSpaceReq = normalizedParams.landscaping_requirements?.[0] ?? null;
+      const greenSpaceReq = normalizedParams.landscaping_requirements?.[0]
+        ?? (normalizedParams.green_space_ratio?.[0] != null
+          ? `${Math.round(normalizedParams.green_space_ratio[0] * 100)}% de pleine terre minimum`
+          : null);
       const assumptions = [
         ...(calculations.blocking_constraints ?? []),
         ...(calculations.uncertainties ?? []),
       ];
+      const explicitSignals = [
+        maxFootprint != null || normalizedParams.green_space_ratio?.[0] != null,
+        maxHeight != null,
+        roadSetback != null,
+        boundarySetback != null,
+        parkingReq != null,
+        greenSpaceReq != null,
+      ];
+      const computedConfidenceScore = explicitSignals.filter(Boolean).length / explicitSignals.length;
 
       const buildabilityData = {
         analysisId,
@@ -877,7 +894,7 @@ export async function orchestrateDossierAnalysis(
         parkingRequirement: parkingReq ? String(parkingReq) : null,
         greenSpaceRequirement: greenSpaceReq ? String(greenSpaceReq) : null,
         assumptionsJson: JSON.stringify(assumptions),
-        confidenceScore: (maxFootprint != null && maxFootprint > 0) ? 0.75 : 0.4,
+        confidenceScore: calculations.confidence_score ?? Math.round(computedConfidenceScore * 100) / 100,
         resultSummary: calculations.theoretical_potential_synthesis
           ?? `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m`,
       };
@@ -1044,7 +1061,11 @@ export async function orchestrateDossierAnalysis(
           ? buildingData.buildings.reduce((s: number, b: any) => s + (b.avgHeightM || 0), 0) / buildingData.buildings.length
           : null,
         urban_typology: parcelSurface > 2000 ? "pavillonnaire_diffus" : parcelSurface > 500 ? "urbain_dense" : "centre_bourg",
-        dominant_alignment: normalizedParams.road_setback?.[0] === 0 ? "alignement_obligatoire" : "retrait",
+        dominant_alignment: normalizedParams.road_setback?.[0] === 0
+          ? "alignement_obligatoire"
+          : normalizedParams.road_setback?.length
+            ? "retrait"
+            : null,
       },
       roads: {
         nearest_road_name: parcelData?._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,

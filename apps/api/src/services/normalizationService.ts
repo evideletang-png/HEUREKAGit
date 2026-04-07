@@ -11,6 +11,7 @@ export const CalculationParametersSchema = z.object({
   internal_spacing: z.array(z.number()).default([]),
   max_footprint: z.array(z.number()).default([]), // As percentage or m2
   max_height: z.array(z.number()).default([]),
+  green_space_ratio: z.array(z.number()).default([]),
   parking_requirements: z.array(z.string()).default([]),
   landscaping_requirements: z.array(z.string()).default([]),
   special_conditions: z.array(z.string()).default([])
@@ -18,74 +19,171 @@ export const CalculationParametersSchema = z.object({
 
 export type CalculationParameters = z.infer<typeof CalculationParametersSchema>;
 
+type StructuredRuleData = {
+  family?: string | null;
+  topic?: string | null;
+  value_type?: string | null;
+  value_min?: number | null;
+  value_max?: number | null;
+  value_exact?: number | null;
+  unit?: string | null;
+  condition?: string | null;
+  exception?: string | null;
+};
+
+type StructuredUrbanRuleLike = {
+  ruleFamily?: string | null;
+  ruleTopic?: string | null;
+  ruleLabel?: string | null;
+  ruleTextRaw?: string | null;
+  ruleSummary?: string | null;
+  ruleValueType?: string | null;
+  ruleValueMin?: number | null;
+  ruleValueMax?: number | null;
+  ruleValueExact?: number | null;
+  ruleUnit?: string | null;
+  ruleCondition?: string | null;
+  ruleException?: string | null;
+};
+
 /**
  * Normalization Service (Step 4 & 5)
  * Converts qualitative "operational_rules" into quantitative calculation parameters.
  * Handles Step 5: Regulatory Overrides (ABF, PPRI, etc.)
  */
 export class NormalizationService {
-  /**
-   * Normalizes a set of PLU rules into a calculation-ready layer.
-   */
-  static async normalizeRules(articles: PluRule[], overlays: any[] = []): Promise<CalculationParameters> {
-    logger.info(`[Normalization] Normalizing ${articles.length} articles with ${overlays.length} overlays...`);
-    
-    const params: CalculationParameters = {
+  static createEmptyParameters(): CalculationParameters {
+    return {
       road_setback: [],
       boundary_setback: [],
       internal_spacing: [],
       max_footprint: [],
       max_height: [],
+      green_space_ratio: [],
       parking_requirements: [],
       landscaping_requirements: [],
-      special_conditions: []
+      special_conditions: [],
     };
+  }
+
+  /**
+   * Normalizes a set of PLU rules into a calculation-ready layer.
+   */
+  static async normalizeRules(articles: PluRule[], overlays: any[] = []): Promise<CalculationParameters> {
+    logger.info(`[Normalization] Normalizing ${articles.length} articles with ${overlays.length} overlays...`);
+
+    const params = this.createEmptyParameters();
 
     for (const art of articles) {
       const rawArticle = (art as any)?.article ?? (art as any)?.articleNumber ?? (art as any)?.title ?? null;
       const operationalRule = this.resolveOperationalRule(art);
+      const structured = this.resolveStructuredData(art);
+      const structuredFamily = typeof structured.family === "string" && structured.family.trim().length > 0
+        ? structured.family.trim()
+        : null;
+
+      if (structuredFamily && this.applyStructuredRule(params, structuredFamily, operationalRule, {
+        valueType: structured.value_type,
+        valueMin: structured.value_min,
+        valueMax: structured.value_max,
+        valueExact: structured.value_exact,
+        unit: structured.unit,
+        condition: structured.condition,
+        exception: structured.exception,
+        label: String((art as any)?.title ?? (art as any)?.section ?? structured.topic ?? structuredFamily),
+      })) {
+        continue;
+      }
+
       const artNum = this.resolveArticleNumber(rawArticle, art, operationalRule);
       
       // Article 6: Position by roads
       if (artNum === "6") {
-        this.extractNumbers(operationalRule).forEach(n => params.road_setback.push(n));
+        const setback = this.pickLegacySetbackValue(operationalRule, "public");
+        if (setback != null) this.pushUniqueNumber(params.road_setback, setback);
       }
       // Article 7: Side boundaries
       if (artNum === "7") {
-        this.extractNumbers(operationalRule).forEach(n => params.boundary_setback.push(n));
+        const setback = this.pickLegacySetbackValue(operationalRule, "boundary");
+        if (setback != null) this.pushUniqueNumber(params.boundary_setback, setback);
+      }
+      // Article 8: Internal spacing
+      if (artNum === "8") {
+        const spacing = this.pickLegacySetbackValue(operationalRule, "spacing");
+        if (spacing != null) this.pushUniqueNumber(params.internal_spacing, spacing);
       }
       // Article 9: Footprint
       if (artNum === "9") {
-        this.extractFootprintValues(operationalRule).forEach(n => params.max_footprint.push(n));
+        const footprint = this.pickLegacyFootprintValue(operationalRule);
+        if (footprint != null) this.pushUniqueNumber(params.max_footprint, footprint);
       }
       // Article 10: Height
       if (artNum === "10") {
-        this.extractNumbers(operationalRule).forEach(n => params.max_height.push(n));
+        const height = this.pickLegacyHeightValue(operationalRule);
+        if (height != null) this.pushUniqueNumber(params.max_height, height);
       }
       // Article 12: Parking
       if (artNum === "12") {
-        if (operationalRule) params.parking_requirements.push(operationalRule);
+        if (operationalRule) this.pushUniqueText(params.parking_requirements, operationalRule);
       }
       // Article 13: Greenery
       if (artNum === "13") {
-        if (operationalRule) params.landscaping_requirements.push(operationalRule);
+        const greenRatio = this.pickLegacyGreenSpaceRatio(operationalRule);
+        if (greenRatio != null) this.pushUniqueNumber(params.green_space_ratio, greenRatio);
+        if (operationalRule) this.pushUniqueText(params.landscaping_requirements, operationalRule);
       }
     }
 
-    // Step 5: APPLY REGULATORY OVERRIDES
-    for (const overlay of overlays) {
-      logger.info(`[Normalization] Applying override from ${overlay.source_name || "Overlay"}`);
-      if (overlay.target_item === "height" && overlay.max_value) {
-        params.max_height = params.max_height.map(h => Math.min(h, overlay.max_value));
-        params.special_conditions.push(`Override Hauteur: ${overlay.reason || "Contrainte patrimoniale"}`);
-      }
-      if (overlay.target_item === "footprint" && overlay.max_value) {
-          params.max_footprint = params.max_footprint.map(f => Math.min(f, overlay.max_value));
-          params.special_conditions.push(`Override Emprise: ${overlay.reason || "Contrainte environnementale"}`);
+    return this.applyRegulatoryOverrides(params, overlays);
+  }
+
+  static async normalizeUrbanRules(rules: StructuredUrbanRuleLike[], overlays: any[] = []): Promise<CalculationParameters> {
+    logger.info(`[Normalization] Normalizing ${rules.length} structured urban rules with ${overlays.length} overlays...`);
+
+    const params = this.createEmptyParameters();
+
+    for (const rule of rules) {
+      const family = typeof rule.ruleFamily === "string" && rule.ruleFamily.trim().length > 0
+        ? rule.ruleFamily.trim()
+        : null;
+      if (!family) continue;
+
+      const rawText = String(rule.ruleTextRaw ?? rule.ruleSummary ?? "").trim();
+      const applied = this.applyStructuredRule(params, family, rawText, {
+        valueType: rule.ruleValueType,
+        valueMin: rule.ruleValueMin,
+        valueMax: rule.ruleValueMax,
+        valueExact: rule.ruleValueExact,
+        unit: rule.ruleUnit,
+        condition: rule.ruleCondition,
+        exception: rule.ruleException,
+        label: String(rule.ruleLabel ?? rule.ruleTopic ?? family),
+      });
+
+      if (!applied && rawText.length > 0) {
+        if (family === "parking") {
+          this.pushUniqueText(params.parking_requirements, rawText);
+        } else if (family === "green_space") {
+          this.pushUniqueText(params.landscaping_requirements, rawText);
+        }
       }
     }
 
-    return params;
+    return this.applyRegulatoryOverrides(params, overlays);
+  }
+
+  static mergeCalculationParameters(primary: CalculationParameters, fallback: CalculationParameters): CalculationParameters {
+    return {
+      road_setback: primary.road_setback.length > 0 ? primary.road_setback : fallback.road_setback,
+      boundary_setback: primary.boundary_setback.length > 0 ? primary.boundary_setback : fallback.boundary_setback,
+      internal_spacing: primary.internal_spacing.length > 0 ? primary.internal_spacing : fallback.internal_spacing,
+      max_footprint: primary.max_footprint.length > 0 ? primary.max_footprint : fallback.max_footprint,
+      max_height: primary.max_height.length > 0 ? primary.max_height : fallback.max_height,
+      green_space_ratio: primary.green_space_ratio.length > 0 ? primary.green_space_ratio : fallback.green_space_ratio,
+      parking_requirements: primary.parking_requirements.length > 0 ? primary.parking_requirements : fallback.parking_requirements,
+      landscaping_requirements: primary.landscaping_requirements.length > 0 ? primary.landscaping_requirements : fallback.landscaping_requirements,
+      special_conditions: Array.from(new Set([...primary.special_conditions, ...fallback.special_conditions])),
+    };
   }
 
   private static resolveOperationalRule(article: PluRule | Record<string, unknown>): string {
@@ -99,6 +197,12 @@ export class NormalizationService {
     ];
     const firstText = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
     return typeof firstText === "string" ? firstText : "";
+  }
+
+  private static resolveStructuredData(article: PluRule | Record<string, unknown>): StructuredRuleData {
+    const raw = (article as any)?.structuredData;
+    if (!raw || typeof raw !== "object") return {};
+    return raw as StructuredRuleData;
   }
 
   private static resolveArticleNumber(rawArticle: unknown, article: PluRule | Record<string, unknown>, operationalRule: string): string {
@@ -118,6 +222,296 @@ export class NormalizationService {
     if (fullText.includes("desserte")) return "3";
 
     return "";
+  }
+
+  private static applyStructuredRule(
+    params: CalculationParameters,
+    family: string,
+    text: string,
+    structured: {
+      valueType?: string | null;
+      valueMin?: number | null;
+      valueMax?: number | null;
+      valueExact?: number | null;
+      unit?: string | null;
+      condition?: string | null;
+      exception?: string | null;
+      label?: string | null;
+    },
+  ): boolean {
+    let applied = false;
+
+    switch (family) {
+      case "setback_public": {
+        const setback = this.pickStructuredSetbackValue(structured, text, "public");
+        if (setback != null) {
+          this.pushUniqueNumber(params.road_setback, setback);
+          applied = true;
+        }
+        break;
+      }
+      case "setback_side":
+      case "setback_rear": {
+        const setback = this.pickStructuredSetbackValue(structured, text, "boundary");
+        if (setback != null) {
+          this.pushUniqueNumber(params.boundary_setback, setback);
+          applied = true;
+        }
+        break;
+      }
+      case "setback_between_buildings": {
+        const spacing = this.pickStructuredSetbackValue(structured, text, "spacing");
+        if (spacing != null) {
+          this.pushUniqueNumber(params.internal_spacing, spacing);
+          applied = true;
+        }
+        break;
+      }
+      case "footprint": {
+        const footprint = this.pickStructuredFootprintValue(structured, text);
+        if (footprint != null) {
+          this.pushUniqueNumber(params.max_footprint, footprint);
+          applied = true;
+        }
+        break;
+      }
+      case "height": {
+        const height = this.pickStructuredHeightValue(structured, text);
+        if (height != null) {
+          this.pushUniqueNumber(params.max_height, height);
+          applied = true;
+        }
+        break;
+      }
+      case "parking": {
+        this.pushUniqueText(params.parking_requirements, this.pickRuleTextSummary(structured.label, text));
+        applied = true;
+        break;
+      }
+      case "green_space": {
+        const ratio = this.pickStructuredGreenSpaceRatio(structured, text);
+        if (ratio != null) {
+          this.pushUniqueNumber(params.green_space_ratio, ratio);
+          applied = true;
+        }
+        this.pushUniqueText(params.landscaping_requirements, this.pickGreenSpaceSummary(structured, text, ratio));
+        applied = true;
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (structured.condition) {
+      this.pushUniqueText(params.special_conditions, `${structured.label || family} — condition : ${structured.condition}`);
+    }
+    if (structured.exception) {
+      this.pushUniqueText(params.special_conditions, `${structured.label || family} — exception : ${structured.exception}`);
+    }
+
+    return applied;
+  }
+
+  private static applyRegulatoryOverrides(params: CalculationParameters, overlays: any[] = []): CalculationParameters {
+    for (const overlay of overlays) {
+      logger.info(`[Normalization] Applying override from ${overlay.source_name || "Overlay"}`);
+      if (overlay.target_item === "height" && overlay.max_value) {
+        params.max_height = params.max_height.map((h) => Math.min(h, overlay.max_value));
+        this.pushUniqueText(params.special_conditions, `Override Hauteur: ${overlay.reason || "Contrainte patrimoniale"}`);
+      }
+      if (overlay.target_item === "footprint" && overlay.max_value) {
+        params.max_footprint = params.max_footprint.map((f) => Math.min(f, overlay.max_value));
+        this.pushUniqueText(params.special_conditions, `Override Emprise: ${overlay.reason || "Contrainte environnementale"}`);
+      }
+    }
+
+    return params;
+  }
+
+  private static pickStructuredSetbackValue(
+    structured: {
+      valueType?: string | null;
+      valueMin?: number | null;
+      valueMax?: number | null;
+      valueExact?: number | null;
+      unit?: string | null;
+    },
+    text: string,
+    mode: "public" | "boundary" | "spacing",
+  ): number | null {
+    const exact = this.normalizeValueUnit(structured.valueExact, structured.unit);
+    const min = this.normalizeValueUnit(structured.valueMin, structured.unit);
+    const max = this.normalizeValueUnit(structured.valueMax, structured.unit);
+
+    if (exact != null) return exact;
+    if (min != null && max != null) return Math.max(min, max);
+    if (min != null) return min;
+    if (max != null) return max;
+
+    if (mode === "public" && /(?:à l['’]alignement|en alignement|alignement obligatoire|sans recul)/i.test(text)) {
+      return 0;
+    }
+    if (mode === "boundary" && /(?:en limite s[ée]parative|sur limite s[ée]parative|implantation en limite|en mitoyennet[eé])/i.test(text)) {
+      return 0;
+    }
+
+    const extracted = this.extractNumbers(text);
+    if (extracted.length === 0) return null;
+    return Math.max(...extracted);
+  }
+
+  private static pickStructuredFootprintValue(
+    structured: {
+      valueType?: string | null;
+      valueMin?: number | null;
+      valueMax?: number | null;
+      valueExact?: number | null;
+      unit?: string | null;
+    },
+    text: string,
+  ): number | null {
+    const exact = this.normalizeFootprintOrRatio(structured.valueExact, structured.unit);
+    const max = this.normalizeFootprintOrRatio(structured.valueMax, structured.unit);
+    const min = this.normalizeFootprintOrRatio(structured.valueMin, structured.unit);
+
+    if (exact != null) return exact;
+    if (max != null) return max;
+    if ((structured.valueType || "").toLowerCase() === "range" && min != null && max != null) {
+      return Math.min(min, max);
+    }
+
+    return this.pickLegacyFootprintValue(text);
+  }
+
+  private static pickStructuredHeightValue(
+    structured: {
+      valueMin?: number | null;
+      valueMax?: number | null;
+      valueExact?: number | null;
+      unit?: string | null;
+    },
+    text: string,
+  ): number | null {
+    const exact = this.normalizeValueUnit(structured.valueExact, structured.unit);
+    const max = this.normalizeValueUnit(structured.valueMax, structured.unit);
+    const min = this.normalizeValueUnit(structured.valueMin, structured.unit);
+
+    if (exact != null) return exact;
+    if (max != null) return max;
+    if (min != null && max != null) return Math.max(min, max);
+
+    return this.pickLegacyHeightValue(text);
+  }
+
+  private static pickStructuredGreenSpaceRatio(
+    structured: {
+      valueMin?: number | null;
+      valueMax?: number | null;
+      valueExact?: number | null;
+      unit?: string | null;
+    },
+    text: string,
+  ): number | null {
+    const exact = this.normalizePercentageRatio(structured.valueExact, structured.unit);
+    const min = this.normalizePercentageRatio(structured.valueMin, structured.unit);
+    const max = this.normalizePercentageRatio(structured.valueMax, structured.unit);
+
+    if (exact != null) return exact;
+    if (min != null && max != null) return Math.max(min, max);
+    if (min != null) return min;
+    if (max != null) return max;
+
+    return this.pickLegacyGreenSpaceRatio(text);
+  }
+
+  private static pickLegacySetbackValue(text?: string | null, mode: "public" | "boundary" | "spacing" = "public"): number | null {
+    const raw = text || "";
+    if (mode === "public" && /(?:à l['’]alignement|en alignement|alignement obligatoire|sans recul)/i.test(raw)) {
+      return 0;
+    }
+    if (mode === "boundary" && /(?:en limite s[ée]parative|sur limite s[ée]parative|implantation en limite|en mitoyennet[eé])/i.test(raw)) {
+      return 0;
+    }
+
+    const values = this.extractNumbers(raw);
+    if (values.length === 0) return null;
+    return Math.max(...values);
+  }
+
+  private static pickLegacyFootprintValue(text?: string | null): number | null {
+    const values = this.extractFootprintValues(text);
+    if (values.length === 0) return null;
+    return Math.min(...values.filter((value) => value > 0));
+  }
+
+  private static pickLegacyHeightValue(text?: string | null): number | null {
+    const values = this.extractNumbers(text);
+    if (values.length === 0) return null;
+    return Math.max(...values);
+  }
+
+  private static pickLegacyGreenSpaceRatio(text?: string | null): number | null {
+    if (!text) return null;
+    const percentageMatches = Array.from(text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g));
+    if (percentageMatches.length === 0) return null;
+    const values = percentageMatches
+      .map((match) => this.normalizePercentageRatio(parseFloat(match[1].replace(",", ".")), "%"))
+      .filter((value): value is number => value != null);
+    if (values.length === 0) return null;
+    return Math.max(...values);
+  }
+
+  private static pickGreenSpaceSummary(
+    structured: { label?: string | null },
+    text: string,
+    ratio: number | null,
+  ): string {
+    if (text.trim().length > 0) return this.pickRuleTextSummary(structured.label, text);
+    if (ratio != null) return `Pleine terre / espaces verts : minimum ${Math.round(ratio * 100)}%.`;
+    return structured.label || "Espaces verts & pleine terre";
+  }
+
+  private static pickRuleTextSummary(label: string | null | undefined, text: string): string {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (normalized.length === 0) return String(label || "").trim();
+    return normalized.length > 320 ? `${normalized.slice(0, 317)}...` : normalized;
+  }
+
+  private static normalizeValueUnit(value: number | null | undefined, unit: string | null | undefined): number | null {
+    if (value == null || !Number.isFinite(value)) return null;
+    if ((unit || "").trim() === "%") return value;
+    return value;
+  }
+
+  private static normalizeFootprintOrRatio(value: number | null | undefined, unit: string | null | undefined): number | null {
+    if (value == null || !Number.isFinite(value)) return null;
+    if ((unit || "").trim() === "%") {
+      return value > 1 ? value / 100 : value;
+    }
+    return value;
+  }
+
+  private static normalizePercentageRatio(value: number | null | undefined, unit: string | null | undefined): number | null {
+    if (value == null || !Number.isFinite(value)) return null;
+    if ((unit || "").trim() === "%" || value > 1) {
+      return value > 1 ? value / 100 : value;
+    }
+    return value >= 0 && value <= 1 ? value : null;
+  }
+
+  private static pushUniqueNumber(target: number[], value: number | null) {
+    if (value == null || !Number.isFinite(value)) return;
+    if (!target.some((current) => Math.abs(current - value) < 0.001)) {
+      target.push(value);
+    }
+  }
+
+  private static pushUniqueText(target: string[], value: string | null | undefined) {
+    const normalized = String(value || "").replace(/\s+/g, " ").trim();
+    if (normalized.length === 0) return;
+    if (!target.includes(normalized)) {
+      target.push(normalized);
+    }
   }
 
   private static extractNumbers(text?: string | null): number[] {
