@@ -1,0 +1,125 @@
+import type { CalculationParameters } from "./normalizationService.js";
+import type { StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
+
+export type BuildabilityFieldKey =
+  | "footprint"
+  | "remainingFootprint"
+  | "height"
+  | "setbackRoad"
+  | "setbackBoundary"
+  | "parking"
+  | "greenSpace";
+
+export function pickMaxNumeric(values: number[] | null | undefined): number | null {
+  const candidates = (values || []).filter((value) => Number.isFinite(value));
+  if (candidates.length === 0) return null;
+  return Math.max(...candidates);
+}
+
+export function pickMinPositiveNumeric(values: number[] | null | undefined): number | null {
+  const candidates = (values || []).filter((value) => Number.isFinite(value) && value > 0);
+  if (candidates.length === 0) {
+    return (values || []).some((value) => value === 0) ? 0 : null;
+  }
+  return Math.min(...candidates);
+}
+
+export function summarizeRuleTexts(values: string[] | null | undefined, emptyLabel: string) {
+  const normalized = Array.from(
+    new Set(
+      (values || [])
+        .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+        .filter((value) => value.length > 0),
+    ),
+  );
+  if (normalized.length === 0) return emptyLabel;
+  const summary = normalized.join("; ");
+  return summary.length > 700 ? `${summary.slice(0, 697)}...` : summary;
+}
+
+export function resolveNormalizedBuildabilitySelections(normalizedRules: CalculationParameters) {
+  return {
+    footprintRule: pickMinPositiveNumeric(normalizedRules.max_footprint),
+    greenSpaceRatio: pickMaxNumeric(normalizedRules.green_space_ratio),
+    roadSetback: pickMaxNumeric(normalizedRules.road_setback),
+    boundarySetback: pickMaxNumeric(normalizedRules.boundary_setback),
+    internalSpacing: pickMaxNumeric(normalizedRules.internal_spacing),
+    maxHeight: pickMinPositiveNumeric(normalizedRules.max_height),
+    parkingRequirement: summarizeRuleTexts(normalizedRules.parking_requirements, "").trim() || null,
+    landscapingRequirement: summarizeRuleTexts(normalizedRules.landscaping_requirements, "").trim() || null,
+  };
+}
+
+function getRuleUpperBoundValue(rule: StructuredUrbanRuleSource) {
+  if (typeof rule.ruleValueExact === "number" && Number.isFinite(rule.ruleValueExact)) return rule.ruleValueExact;
+  if (typeof rule.ruleValueMax === "number" && Number.isFinite(rule.ruleValueMax)) return rule.ruleValueMax;
+  if (typeof rule.ruleValueMin === "number" && Number.isFinite(rule.ruleValueMin)) return rule.ruleValueMin;
+  return null;
+}
+
+function getRuleLowerBoundValue(rule: StructuredUrbanRuleSource) {
+  if (typeof rule.ruleValueExact === "number" && Number.isFinite(rule.ruleValueExact)) return rule.ruleValueExact;
+  if (typeof rule.ruleValueMin === "number" && Number.isFinite(rule.ruleValueMin)) return rule.ruleValueMin;
+  if (typeof rule.ruleValueMax === "number" && Number.isFinite(rule.ruleValueMax)) return rule.ruleValueMax;
+  return null;
+}
+
+function getSourcePageWeight(rule: StructuredUrbanRuleSource) {
+  return typeof rule.sourcePage === "number" && Number.isFinite(rule.sourcePage)
+    ? rule.sourcePage
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function getCandidateRules(rules: StructuredUrbanRuleSource[], field: BuildabilityFieldKey) {
+  switch (field) {
+    case "footprint":
+    case "remainingFootprint":
+      return rules.filter((rule) => rule.ruleFamily === "footprint");
+    case "height":
+      return rules.filter((rule) => rule.ruleFamily === "height");
+    case "setbackRoad":
+      return rules.filter((rule) => rule.ruleFamily === "setback_public");
+    case "setbackBoundary":
+      return rules.filter((rule) => rule.ruleFamily === "setback_side" || rule.ruleFamily === "setback_rear");
+    case "parking":
+      return rules.filter((rule) => rule.ruleFamily === "parking");
+    case "greenSpace":
+      return rules.filter((rule) => rule.ruleFamily === "green_space");
+    default:
+      return [];
+  }
+}
+
+export function selectRuleForBuildabilityField(
+  rules: StructuredUrbanRuleSource[],
+  field: BuildabilityFieldKey,
+): StructuredUrbanRuleSource | null {
+  const candidates = getCandidateRules(rules, field);
+  if (candidates.length === 0) return null;
+
+  if (field === "parking") {
+    return candidates[0] ?? null;
+  }
+
+  const comparator = field === "footprint" || field === "remainingFootprint" || field === "height"
+    ? (left: StructuredUrbanRuleSource, right: StructuredUrbanRuleSource) => {
+        const leftValue = getRuleUpperBoundValue(left);
+        const rightValue = getRuleUpperBoundValue(right);
+        if (leftValue == null && rightValue == null) return getSourcePageWeight(left) - getSourcePageWeight(right);
+        if (leftValue == null) return 1;
+        if (rightValue == null) return -1;
+        if (Math.abs(leftValue - rightValue) > 0.0001) return leftValue - rightValue;
+        return getSourcePageWeight(left) - getSourcePageWeight(right);
+      }
+    : (left: StructuredUrbanRuleSource, right: StructuredUrbanRuleSource) => {
+        const leftValue = getRuleLowerBoundValue(left);
+        const rightValue = getRuleLowerBoundValue(right);
+        if (leftValue == null && rightValue == null) return getSourcePageWeight(left) - getSourcePageWeight(right);
+        if (leftValue == null) return 1;
+        if (rightValue == null) return -1;
+        if (Math.abs(leftValue - rightValue) > 0.0001) return rightValue - leftValue;
+        return getSourcePageWeight(left) - getSourcePageWeight(right);
+      };
+
+  return [...candidates].sort(comparator)[0] ?? null;
+}

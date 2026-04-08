@@ -1,5 +1,9 @@
 import { logger } from "../utils/logger.js";
 import { CalculationParameters } from "./normalizationService.js";
+import {
+  resolveNormalizedBuildabilitySelections,
+  summarizeRuleTexts,
+} from "./buildabilitySelection.js";
 
 export interface TunnelResult {
   parcel_surface_m2: number | null;
@@ -43,8 +47,9 @@ export class CalculationTunnel {
     // B. Buildability Calculations
     
     // 1. Footprint (Article 9) and green space (Article 13)
-    const footprintRule = normalizedRules.max_footprint?.[0] ?? null;
-    const greenSpaceRatio = normalizedRules.green_space_ratio?.[0] ?? null;
+    const selections = resolveNormalizedBuildabilitySelections(normalizedRules);
+    const footprintRule = selections.footprintRule;
+    const greenSpaceRatio = selections.greenSpaceRatio;
 
     const maxFootprintFromRule = (() => {
       if (footprintRule == null || footprintRule <= 0) return null;
@@ -76,24 +81,30 @@ export class CalculationTunnel {
       : null;
 
     // 2. Setbacks & Heights (Summaries)
-    const roadRule = normalizedRules.road_setback.length > 0
-      ? normalizedRules.road_setback[0] === 0
+    const roadRuleValue = selections.roadSetback;
+    const boundaryRuleValue = selections.boundarySetback;
+
+    const roadRule = roadRuleValue != null
+      ? roadRuleValue === 0
         ? "Implantation à l'alignement ou sans recul minimal explicite par rapport à la voie."
-        : `Retrait minimum de ${normalizedRules.road_setback.join("/")}m par rapport à l'alignement.`
+        : `Retrait minimum de ${roadRuleValue}m par rapport à l'alignement.`
       : "Règle non retrouvée de manière opposable (Article 6).";
 
-    const boundaryRule = normalizedRules.boundary_setback.length > 0
-      ? normalizedRules.boundary_setback[0] === 0
+    const boundaryRule = boundaryRuleValue != null
+      ? boundaryRuleValue === 0
         ? "Implantation en limite séparative autorisée ou possible sur tout ou partie du linéaire."
-        : `Recul de ${normalizedRules.boundary_setback.join("/")}m par rapport aux limites séparatives.`
+        : `Recul de ${boundaryRuleValue}m par rapport aux limites séparatives.`
       : "Règle non retrouvée de manière opposable (Article 7).";
 
-    const maxHeightRule = normalizedRules.max_height.length > 0
-      ? `Hauteur limitée à ${normalizedRules.max_height.join("/")}m.`
+    const maxHeightValue = selections.maxHeight;
+    const maxHeightRule = maxHeightValue != null
+      ? `Hauteur limitée à ${maxHeightValue}m.`
       : "Règle de hauteur non retrouvée de manière opposable (Article 10).";
 
-    const landscapingRule = normalizedRules.landscaping_requirements.join("; ")
-      || (greenSpaceRatio != null ? `Pleine terre / espaces verts : minimum ${Math.round(greenSpaceRatio * 100)}%.` : "")
+    const landscapingRule = summarizeRuleTexts(
+      normalizedRules.landscaping_requirements,
+      greenSpaceRatio != null ? `Pleine terre / espaces verts : minimum ${Math.round(greenSpaceRatio * 100)}%.` : "Règle non retrouvée de manière opposable",
+    )
       || "Règle non retrouvée de manière opposable";
 
     // C. Buildable Potential Synthesis
@@ -133,9 +144,9 @@ export class CalculationTunnel {
       remaining_footprint_m2: remainingFootprint,
       road_setback_rule: roadRule,
       boundary_setback_rule: boundaryRule,
-      internal_spacing_rule: normalizedRules.internal_spacing.length > 0 ? `${normalizedRules.internal_spacing.join("/")}m` : "N/A",
+      internal_spacing_rule: selections.internalSpacing != null ? `${selections.internalSpacing}m` : "N/A",
       max_height_rule: maxHeightRule,
-      parking_rule: normalizedRules.parking_requirements.join("; ") || "Règle non retrouvée de manière opposable",
+      parking_rule: summarizeRuleTexts(normalizedRules.parking_requirements, "Règle non retrouvée de manière opposable"),
       landscaping_rule: landscapingRule,
       blocking_constraints: blocking,
       uncertainties: uncertainties,

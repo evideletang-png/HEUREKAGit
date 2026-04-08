@@ -40,6 +40,10 @@ import { getZoningByCoords } from "./planning.js";
 import { getParcelByCoords, getBuildingsByParcel } from "./parcel.js";
 import type { ParcelData } from "./parcel.js";
 import { DVFService } from "./dvfService.js";
+import {
+  resolveNormalizedBuildabilitySelections,
+  selectRuleForBuildabilityField,
+} from "./buildabilitySelection.js";
 
 type BuildabilitySourceDetail = {
   field: string;
@@ -145,7 +149,6 @@ async function buildBuildabilitySourceDetails(
   const baseDocMap = new Map(baseDocs.map((doc) => [doc.id, doc.fileName]));
   const townHallDocMap = new Map(townHallDocs.map((doc) => [doc.id, doc.title || doc.fileName]));
 
-  const pickRule = (...families: string[]) => rules.find((rule) => families.includes(String(rule?.ruleFamily || ""))) ?? null;
   const toDetail = (field: string, rule: any | null): BuildabilitySourceDetail | null => {
     if (!rule) return null;
     const sourceDocumentName = rule.sourceDocumentKind === "town_hall_document"
@@ -177,16 +180,17 @@ async function buildBuildabilitySourceDetails(
     };
   };
 
-  const footprintRule = pickRule("footprint") ?? pickRule("green_space");
-  const boundaryRule = pickRule("setback_side") ?? pickRule("setback_rear");
+  const footprintRule = selectRuleForBuildabilityField(rules, "footprint")
+    ?? selectRuleForBuildabilityField(rules, "greenSpace");
+  const boundaryRule = selectRuleForBuildabilityField(rules, "setbackBoundary");
   const details = {
     footprint: toDetail("footprint", footprintRule),
     remainingFootprint: toDetail("remainingFootprint", footprintRule),
-    height: toDetail("height", pickRule("height")),
-    setbackRoad: toDetail("setbackRoad", pickRule("setback_public")),
+    height: toDetail("height", selectRuleForBuildabilityField(rules, "height")),
+    setbackRoad: toDetail("setbackRoad", selectRuleForBuildabilityField(rules, "setbackRoad")),
     setbackBoundary: toDetail("setbackBoundary", boundaryRule),
-    parking: toDetail("parking", pickRule("parking")),
-    greenSpace: toDetail("greenSpace", pickRule("green_space")),
+    parking: toDetail("parking", selectRuleForBuildabilityField(rules, "parking")),
+    greenSpace: toDetail("greenSpace", selectRuleForBuildabilityField(rules, "greenSpace")),
   };
   const explicitFields = [
     details.footprint,
@@ -1018,15 +1022,17 @@ export async function orchestrateDossierAnalysis(
   if (analysisId && calculations) {
     try {
       // TunnelResult uses snake_case keys; normalizedParams has numeric arrays
+      const selections = resolveNormalizedBuildabilitySelections(normalizedParams);
       const maxFootprint = calculations.max_authorized_footprint_m2 ?? null;
       const remainingFootprint = calculations.remaining_footprint_m2 ?? null;
-      const maxHeight = normalizedParams.max_height?.[0] ?? null;
-      const roadSetback = normalizedParams.road_setback?.[0] ?? null;
-      const boundarySetback = normalizedParams.boundary_setback?.[0] ?? null;
-      const parkingReq = normalizedParams.parking_requirements?.[0] ?? null;
-      const greenSpaceReq = normalizedParams.landscaping_requirements?.[0]
-        ?? (normalizedParams.green_space_ratio?.[0] != null
-          ? `${Math.round(normalizedParams.green_space_ratio[0] * 100)}% de pleine terre minimum`
+      const maxHeight = selections.maxHeight;
+      const roadSetback = selections.roadSetback;
+      const boundarySetback = selections.boundarySetback;
+      const parkingReq = selections.parkingRequirement;
+      const greenSpaceRatio = selections.greenSpaceRatio;
+      const greenSpaceReq = selections.landscapingRequirement
+        ?? (greenSpaceRatio != null
+          ? `${Math.round(greenSpaceRatio * 100)}% de pleine terre minimum`
           : null);
       const assumptions = [
         ...(calculations.blocking_constraints ?? []),
@@ -1039,7 +1045,7 @@ export async function orchestrateDossierAnalysis(
       )).slice(0, 4);
       const sourceDetails = await buildBuildabilitySourceDetails(structuredUrbanRules, structuredRuleLoad.source);
       const explicitSignals = [
-        maxFootprint != null || normalizedParams.green_space_ratio?.[0] != null,
+        maxFootprint != null || greenSpaceRatio != null,
         maxHeight != null,
         roadSetback != null,
         boundarySetback != null,
