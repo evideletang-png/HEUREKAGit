@@ -184,6 +184,8 @@ function normalizeQuickText(value: string) {
 
 function detectQuickRuleOperator(input: string) {
   const normalized = normalizeQuickText(input);
+  if (/(interdit|interdiction|prohibe|prohibee|prohibé|prohibée|non autorise|non autorisé|impossible)/.test(normalized)) return "interdit";
+  if (/(autorise|autorisé|admise|admis|possible)/.test(normalized)) return "autorisé";
   if (/(maximum|maximale|maximal|au plus|ne depasse pas|inferieur ou egal|<=)/.test(normalized)) return "<=";
   if (/(minimum|minimale|minimal|au moins|superieur ou egal|>=|obligatoire|minimum de)/.test(normalized)) return ">=";
   return "=";
@@ -216,11 +218,17 @@ function matchQuickRuleTheme(input: string, themes: ThemeItem[]) {
   }) || null;
 }
 
-function buildQuickRuleDraft(input: string, themes: ThemeItem[]) {
+function matchThemeByArticleCode(articleCode: string | null | undefined, themes: ThemeItem[]) {
+  const normalized = String(articleCode || "").trim();
+  if (!normalized) return null;
+  return themes.find((theme) => String(theme.articleHint || "").trim() === normalized) || null;
+}
+
+function buildQuickRuleDraft(input: string, themes: ThemeItem[], articleCode?: string | null) {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  const theme = matchQuickRuleTheme(trimmed, themes);
+  const theme = matchQuickRuleTheme(trimmed, themes) || matchThemeByArticleCode(articleCode, themes);
   const numericPerUnitMatch = trimmed.match(/(\d+(?:[.,]\d+)?)\s*(place(?:s)?|emplacement(?:s)?|m²|m2|m|%)(?:\s*(?:par|\/)\s*([A-Za-zÀ-ÿ0-9 m²m2]+))?/i);
   const numericMatch = trimmed.match(/(\d+(?:[.,]\d+)?)/);
   const numericValue = numericPerUnitMatch?.[1] || numericMatch?.[1] || "";
@@ -234,7 +242,7 @@ function buildQuickRuleDraft(input: string, themes: ThemeItem[]) {
 
   return {
     themeCode: theme?.code || "",
-    ruleLabel: theme?.label || trimmed,
+    ruleLabel: theme?.label || trimmed.slice(0, 120),
     operator: detectQuickRuleOperator(trimmed),
     valueNumeric: numeric !== null && Number.isFinite(numeric) ? String(numeric) : "",
     valueText: numeric === null ? trimmed : "",
@@ -553,12 +561,29 @@ export function ZoneCalibrationWorkspace({
 
   const applyQuickRuleInput = () => {
     if (!data) return;
-    const nextDraft = buildQuickRuleDraft(quickRuleInput, data.themes);
-    if (!nextDraft) return;
+    const inputSource = quickRuleInput.trim() || selection?.text?.trim() || "";
+    const nextDraft = buildQuickRuleDraft(inputSource, data.themes, selectionArticleCode || null);
+    if (!nextDraft) {
+      toast({
+        title: "Interprétation impossible",
+        description: "Saisis une consigne rapide ou sélectionne un extrait dans le PDF avant d’interpréter.",
+        variant: "destructive",
+      });
+      return;
+    }
     setRuleDraft((current) => ({
       ...current,
       ...nextDraft,
     }));
+    if (!quickRuleInput.trim() && inputSource) {
+      setQuickRuleInput(inputSource.slice(0, 160));
+    }
+    toast({
+      title: "Interprétation appliquée",
+      description: nextDraft.themeCode
+        ? "Le thème et les principaux champs de la règle ont été préremplis."
+        : "Une première interprétation a été injectée. Tu peux maintenant l’affiner.",
+    });
   };
 
   const saveCurrentExcerpt = async () => {
@@ -1011,9 +1036,15 @@ export function ZoneCalibrationWorkspace({
                         value={quickRuleInput}
                         disabled={!data.permissions.canEditCalibration}
                         onChange={(event) => setQuickRuleInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            applyQuickRuleInput();
+                          }
+                        }}
                         placeholder='Ex : "Hauteur 15 m" ou "Stationnement 2 places / logement"'
                       />
-                      <Button variant="outline" onClick={applyQuickRuleInput} disabled={!data.permissions.canEditCalibration}>
+                      <Button type="button" variant="outline" onClick={applyQuickRuleInput} disabled={!data.permissions.canEditCalibration}>
                         <Sparkles className="h-4 w-4" />
                         Interpréter
                       </Button>
