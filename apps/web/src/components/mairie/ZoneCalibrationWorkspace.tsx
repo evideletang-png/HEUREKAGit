@@ -65,7 +65,7 @@ type ZoneWorkspaceResponse = {
   themes: ThemeItem[];
   articleReference: Array<{ code: string; label: string }>;
   pages: Array<{ pageNumber: number; text: string; startOffset: number; endOffset: number }>;
-  articleAnchors: Array<{ articleCode: string; pageNumber: number; label: string }>;
+  articleAnchors: Array<{ articleCode: string; pageNumber: number; label: string; snippet: string }>;
   keywordMatches: Array<{ keyword: string; pageNumber: number; snippet: string; articleCode: string | null }>;
   detectedSections: Array<{
     id: string;
@@ -590,12 +590,15 @@ export function ZoneCalibrationWorkspace({
                         <Badge variant="secondary">page {anchor.pageNumber}</Badge>
                       </div>
                       <p className="mt-2 text-sm">{anchor.label}</p>
+                      {anchor.snippet && (
+                        <p className="mt-2 text-sm text-muted-foreground">{anchor.snippet}</p>
+                      )}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setSelection({ text: anchor.label, pageNumber: anchor.pageNumber });
+                            setSelection({ text: anchor.snippet || anchor.label, pageNumber: anchor.pageNumber });
                             setSelectionArticleCode(anchor.articleCode);
                             setSelectionLabel(anchor.label);
                           }}
@@ -665,6 +668,7 @@ export function ZoneCalibrationWorkspace({
                   documentId={data.referenceDocument.id}
                   documentTitle={data.referenceDocument.title || data.referenceDocument.fileName || "Document"}
                   pageNumbers={pageNumbers}
+                  fallbackPages={data.pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text }))}
                   onTextSelected={({ text, pageNumber }) => {
                     setSelection({ text, pageNumber });
                     if (!selectionLabel) {

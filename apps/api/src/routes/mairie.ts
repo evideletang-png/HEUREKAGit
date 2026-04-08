@@ -650,6 +650,97 @@ function buildZoneKeywordMatchSnippet(lines: string[], index: number) {
   return window.join(" ").replace(/\s+/g, " ").trim();
 }
 
+function buildPseudoPagesFromBoundedZoneText(args: {
+  text: string;
+  startPage: number;
+  endPage: number;
+}) {
+  const normalizedText = (args.text || "").trim();
+  if (!normalizedText) return [] as Array<{ pageNumber: number; text: string; startOffset: number; endOffset: number }>;
+
+  const pageCount = Math.max(1, args.endPage - args.startPage + 1);
+  if (pageCount === 1) {
+    return [{
+      pageNumber: args.startPage,
+      text: normalizedText,
+      startOffset: 0,
+      endOffset: normalizedText.length,
+    }];
+  }
+
+  const articleBlocks = Array.from(
+    normalizedText.matchAll(/(^|\n)\s*((?:[A-Z0-9-]+\s*-\s*)?ARTICLE\s*(\d{1,2})\s*:?[^\n]*)/gim),
+  ).map((match, index, allMatches) => {
+    const start = match.index + (match[1]?.length || 0);
+    const next = allMatches[index + 1];
+    const end = next ? next.index + (next[1]?.length || 0) : normalizedText.length;
+    return normalizedText.slice(start, end).trim();
+  }).filter((block) => block.length > 0);
+
+  const paragraphBlocks = normalizedText
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+
+  const blocks = (articleBlocks.length >= 2 ? articleBlocks : paragraphBlocks).filter((block) => block.length > 0);
+  if (blocks.length === 0) {
+    return [{
+      pageNumber: args.startPage,
+      text: normalizedText,
+      startOffset: 0,
+      endOffset: normalizedText.length,
+    }];
+  }
+
+  const totalLength = blocks.reduce((sum, block) => sum + block.length, 0);
+  const targetLength = Math.max(1, Math.ceil(totalLength / pageCount));
+  const pages: Array<{ pageNumber: number; text: string; startOffset: number; endOffset: number }> = [];
+  let currentBlocks: string[] = [];
+  let currentLength = 0;
+  let cursor = 0;
+
+  const flushPage = () => {
+    if (currentBlocks.length === 0) return;
+    const text = currentBlocks.join("\n\n").trim();
+    if (!text) return;
+    pages.push({
+      pageNumber: args.startPage + pages.length,
+      text,
+      startOffset: cursor,
+      endOffset: cursor + text.length,
+    });
+    cursor += text.length + 2;
+    currentBlocks = [];
+    currentLength = 0;
+  };
+
+  blocks.forEach((block, index) => {
+    currentBlocks.push(block);
+    currentLength += block.length;
+    const remainingBlocks = blocks.length - index - 1;
+    const remainingPages = pageCount - pages.length - 1;
+    if (
+      pages.length < pageCount - 1 &&
+      currentLength >= targetLength &&
+      remainingBlocks >= remainingPages
+    ) {
+      flushPage();
+    }
+  });
+  flushPage();
+
+  while (pages.length < pageCount) {
+    pages.push({
+      pageNumber: args.startPage + pages.length,
+      text: "",
+      startOffset: cursor,
+      endOffset: cursor,
+    });
+  }
+
+  return pages.filter((page) => page.pageNumber >= args.startPage && page.pageNumber <= args.endPage);
+}
+
 function buildZoneKeywordMatches(args: {
   pages: Array<{ pageNumber: number; text: string }>;
   keywords: string[];
@@ -682,22 +773,64 @@ function buildZoneKeywordMatches(args: {
 }
 
 function buildZoneArticleAnchors(pages: Array<{ pageNumber: number; text: string }>) {
-  return pages.flatMap((page) => {
-    const lines = page.text
+  const nonEmptyPages = pages.filter((page) => page.text.trim().length > 0);
+  if (nonEmptyPages.length === 0) return [];
+
+  const offsetRanges: Array<{ start: number; end: number; pageNumber: number }> = [];
+  let cursor = 0;
+  const combinedText = nonEmptyPages.map((page) => {
+    const text = page.text.trim();
+    offsetRanges.push({
+      start: cursor,
+      end: cursor + text.length,
+      pageNumber: page.pageNumber,
+    });
+    cursor += text.length + 2;
+    return text;
+  }).join("\n\n");
+
+  const matches = Array.from(
+    combinedText.matchAll(/(^|\n)\s*((?:[A-Z0-9-]+\s*-\s*)?ARTICLE\s*(\d{1,2})\s*:?[^\n]*)/gim),
+  );
+
+  const anchors = matches.flatMap((match, index) => {
+    const articleCode = match[3] || null;
+    if (!articleCode) return [];
+
+    const startOffset = match.index + (match[1]?.length || 0);
+    const next = matches[index + 1];
+    const endOffset = next ? next.index + (next[1]?.length || 0) : combinedText.length;
+    const blockText = combinedText.slice(startOffset, endOffset).trim();
+    const [headingLine, ...restLines] = blockText
       .split(/\n+/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
 
-    return lines.flatMap((line) => {
-      const articleCode = inferArticleCodeFromCalibrationText(line);
-      if (!articleCode) return [];
-      return [{
-        articleCode,
-        pageNumber: page.pageNumber,
-        label: line.replace(/\s+/g, " ").trim(),
-      }];
-    });
-  }).filter((anchor, index, all) => all.findIndex((candidate) => candidate.articleCode === anchor.articleCode && candidate.pageNumber === anchor.pageNumber && candidate.label === anchor.label) === index);
+    const snippet = restLines.join(" ").replace(/\s+/g, " ").trim();
+    if (!snippet && (!headingLine || headingLine.replace(/\s+/g, "").length <= 12)) {
+      return [];
+    }
+
+    const range = offsetRanges.find((candidate) => startOffset >= candidate.start && startOffset <= candidate.end);
+    return [{
+      articleCode,
+      pageNumber: range?.pageNumber || nonEmptyPages[0]?.pageNumber || 1,
+      label: headingLine || match[2].replace(/\s+/g, " ").trim(),
+      snippet: snippet.slice(0, 500),
+    }];
+  });
+
+  const bestByArticle = new Map<string, typeof anchors[number]>();
+  for (const anchor of anchors) {
+    const existing = bestByArticle.get(anchor.articleCode);
+    const currentScore = (anchor.snippet?.length || 0) * 10 - anchor.pageNumber;
+    const existingScore = existing ? ((existing.snippet?.length || 0) * 10 - existing.pageNumber) : -1;
+    if (!existing || currentScore > existingScore) {
+      bestByArticle.set(anchor.articleCode, anchor);
+    }
+  }
+
+  return Array.from(bestByArticle.values());
 }
 
 function normalizeDocumentFingerprintPart(raw: string | null | undefined) {
@@ -2371,6 +2504,32 @@ async function loadTownHallDocumentBlob(documentId: string) {
   };
 }
 
+async function backfillTownHallDocumentBlobFromDisk(args: {
+  documentId: string;
+  filePath: string;
+  mimeType?: string | null;
+}) {
+  const existing = await loadTownHallDocumentBlob(args.documentId);
+  if (existing || !fs.existsSync(args.filePath)) return;
+
+  const buffer = fs.readFileSync(args.filePath);
+  if (!buffer.length) return;
+
+  await db.insert(townHallDocumentFilesTable).values({
+    documentId: args.documentId,
+    mimeType: args.mimeType || "application/pdf",
+    fileSize: buffer.length,
+    fileBase64: buffer.toString("base64"),
+  }).onConflictDoNothing();
+
+  await db.update(townHallDocumentsTable)
+    .set({
+      hasStoredBlob: true,
+      updatedAt: new Date(),
+    })
+    .where(eq(townHallDocumentsTable.id, args.documentId));
+}
+
 async function ensureTownHallDocumentPersistentSource(documentId: string, fileName: string | null | undefined) {
   const diskPath = resolveTownHallDocumentPath(documentId, fileName);
   if (diskPath && fs.existsSync(diskPath)) {
@@ -3383,9 +3542,23 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       }))
       .filter((page) => page.text.trim().length > 0)
       .filter((page, index, all) => all.findIndex((candidate) => candidate.pageNumber === page.pageNumber && candidate.text === page.text) === index);
+    const pseudoBoundedPages =
+      boundedPages.length === 0 &&
+      effectiveStartPage &&
+      effectiveEndPage &&
+      effectiveEndPage >= effectiveStartPage &&
+      zoneSections.length > 0
+        ? buildPseudoPagesFromBoundedZoneText({
+            text: zoneSections.map((section) => section.sourceText || "").filter((value) => value.trim().length > 0).join("\n\n"),
+            startPage: effectiveStartPage,
+            endPage: effectiveEndPage,
+          })
+        : [];
     const analysisPages =
       boundedPages.length > 0
         ? boundedPages
+        : pseudoBoundedPages.length > 0
+          ? pseudoBoundedPages
         : sectionTextPages.length > 0
           ? sectionTextPages
           : allPages;
@@ -5812,6 +5985,14 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
     if (!source.filePath || !fs.existsSync(source.filePath)) {
       console.error(`[mairie/view] Physical file missing and no persistent fallback found for: ${doc.fileName}`);
       return res.status(404).json({ error: "FILE_NOT_FOUND" });
+    }
+
+    if (!doc.hasStoredBlob) {
+      await backfillTownHallDocumentBlobFromDisk({
+        documentId: id,
+        filePath: source.filePath,
+        mimeType: doc.mimeType || source.mimeType || "application/pdf",
+      });
     }
 
     res.setHeader('Content-Type', doc.mimeType || source.mimeType || 'application/pdf');
