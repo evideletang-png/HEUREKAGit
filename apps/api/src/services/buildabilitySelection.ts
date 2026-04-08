@@ -64,6 +64,78 @@ function getRuleLowerBoundValue(rule: StructuredUrbanRuleSource) {
   return null;
 }
 
+function getRuleTextBlob(rule: StructuredUrbanRuleSource) {
+  return [
+    rule.ruleTextRaw,
+    rule.sourceExcerpt,
+    rule.ruleSummary,
+    rule.ruleLabel,
+    rule.ruleCondition,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value.length > 0)
+    .join(" ");
+}
+
+function extractDistanceValues(text: string) {
+  return Array.from(
+    text.matchAll(/(?:\b(?:recul|retrait|distance|implantation|au moins|minimum|min\.)[^.\n:;]{0,40}?)?(\d+(?:[.,]\d+)?)\s*(?:m(?:\b|[èe]tre(?:s)?\b))/gi),
+  )
+    .map((match) => Number.parseFloat(String(match[1] || "").replace(",", ".")))
+    .filter((value) => Number.isFinite(value));
+}
+
+function extractPercentageValues(text: string) {
+  return Array.from(text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g))
+    .map((match) => Number.parseFloat(String(match[1] || "").replace(",", ".")))
+    .filter((value) => Number.isFinite(value))
+    .map((value) => (value > 1 ? value / 100 : value));
+}
+
+function deriveComparableFieldValue(rule: StructuredUrbanRuleSource, field: BuildabilityFieldKey) {
+  const explicitUpper = getRuleUpperBoundValue(rule);
+  const explicitLower = getRuleLowerBoundValue(rule);
+  if (field === "footprint" || field === "remainingFootprint" || field === "height") {
+    if (explicitUpper != null) return explicitUpper;
+  } else if (field === "setbackRoad" || field === "setbackBoundary" || field === "greenSpace") {
+    if (explicitLower != null) return explicitLower;
+  }
+
+  const text = getRuleTextBlob(rule);
+  if (!text) return null;
+
+  if (field === "height") {
+    const values = extractDistanceValues(text);
+    return values.length > 0 ? Math.max(...values) : null;
+  }
+
+  if (field === "setbackRoad") {
+    if (/(?:à l['’]alignement|en alignement|alignement obligatoire|sans recul)/i.test(text)) return 0;
+    const values = extractDistanceValues(text);
+    return values.length > 0 ? Math.max(...values) : null;
+  }
+
+  if (field === "setbackBoundary") {
+    if (/(?:en limite s[ée]parative|sur limite s[ée]parative|implantation en limite|en mitoyennet[eé])/i.test(text)) return 0;
+    const values = extractDistanceValues(text);
+    return values.length > 0 ? Math.max(...values) : null;
+  }
+
+  if (field === "greenSpace") {
+    const values = extractPercentageValues(text);
+    return values.length > 0 ? Math.max(...values) : null;
+  }
+
+  if (field === "footprint" || field === "remainingFootprint") {
+    const percentageValues = extractPercentageValues(text);
+    if (percentageValues.length > 0) return Math.min(...percentageValues);
+    const values = extractDistanceValues(text);
+    return values.length > 0 ? Math.min(...values) : null;
+  }
+
+  return null;
+}
+
 function getSourcePageWeight(rule: StructuredUrbanRuleSource) {
   return typeof rule.sourcePage === "number" && Number.isFinite(rule.sourcePage)
     ? rule.sourcePage
@@ -103,8 +175,8 @@ export function selectRuleForBuildabilityField(
 
   const comparator = field === "footprint" || field === "remainingFootprint" || field === "height"
     ? (left: StructuredUrbanRuleSource, right: StructuredUrbanRuleSource) => {
-        const leftValue = getRuleUpperBoundValue(left);
-        const rightValue = getRuleUpperBoundValue(right);
+        const leftValue = deriveComparableFieldValue(left, field);
+        const rightValue = deriveComparableFieldValue(right, field);
         if (leftValue == null && rightValue == null) return getSourcePageWeight(left) - getSourcePageWeight(right);
         if (leftValue == null) return 1;
         if (rightValue == null) return -1;
@@ -112,8 +184,8 @@ export function selectRuleForBuildabilityField(
         return getSourcePageWeight(left) - getSourcePageWeight(right);
       }
     : (left: StructuredUrbanRuleSource, right: StructuredUrbanRuleSource) => {
-        const leftValue = getRuleLowerBoundValue(left);
-        const rightValue = getRuleLowerBoundValue(right);
+        const leftValue = deriveComparableFieldValue(left, field);
+        const rightValue = deriveComparableFieldValue(right, field);
         if (leftValue == null && rightValue == null) return getSourcePageWeight(left) - getSourcePageWeight(right);
         if (leftValue == null) return 1;
         if (rightValue == null) return -1;

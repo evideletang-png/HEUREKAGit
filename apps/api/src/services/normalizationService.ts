@@ -348,6 +348,9 @@ export class NormalizationService {
     if (min != null) return min;
     if (max != null) return max;
 
+    const extracted = this.extractDistanceValues(text);
+    if (extracted.length > 0) return Math.max(...extracted);
+
     if (mode === "public" && /(?:à l['’]alignement|en alignement|alignement obligatoire|sans recul)/i.test(text)) {
       return 0;
     }
@@ -355,9 +358,7 @@ export class NormalizationService {
       return 0;
     }
 
-    const extracted = this.extractNumbers(text);
-    if (extracted.length === 0) return null;
-    return Math.max(...extracted);
+    return null;
   }
 
   private static pickStructuredFootprintValue(
@@ -426,6 +427,9 @@ export class NormalizationService {
 
   private static pickLegacySetbackValue(text?: string | null, mode: "public" | "boundary" | "spacing" = "public"): number | null {
     const raw = text || "";
+    const values = this.extractDistanceValues(raw);
+    if (values.length > 0) return Math.max(...values);
+
     if (mode === "public" && /(?:à l['’]alignement|en alignement|alignement obligatoire|sans recul)/i.test(raw)) {
       return 0;
     }
@@ -433,9 +437,7 @@ export class NormalizationService {
       return 0;
     }
 
-    const values = this.extractNumbers(raw);
-    if (values.length === 0) return null;
-    return Math.max(...values);
+    return null;
   }
 
   private static pickLegacyFootprintValue(text?: string | null): number | null {
@@ -519,6 +521,19 @@ export class NormalizationService {
     const matches = text.match(/\d+([.,]\d+)?/g);
     if (!matches) return [];
     return matches.map(m => parseFloat(m.replace(",", ".")));
+  }
+
+  private static extractDistanceValues(text?: string | null): number[] {
+    if (!text) return [];
+    const matches = Array.from(
+      text.matchAll(
+        /(?:\b(?:recul|retrait|distance|implantation|au moins|minimum|min\.)[^.\n:;]{0,40}?)?(\d+(?:[.,]\d+)?)\s*(?:m(?:\b|[èe]tre(?:s)?\b))/gi,
+      ),
+    );
+    if (matches.length === 0) return [];
+    return matches
+      .map((match) => Number.parseFloat(String(match[1] || "").replace(",", ".")))
+      .filter((value) => Number.isFinite(value));
   }
 
   private static extractFootprintValues(text?: string | null): number[] {

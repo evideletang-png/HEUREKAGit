@@ -170,6 +170,25 @@ function mapPublishedRuleValueType(operator: string | null | undefined, valueNum
   return "exact";
 }
 
+function sanitizeIndexedNumericValue(row: {
+  operator: string | null;
+  valueNumeric: number | null;
+  valueText: string | null;
+  unit: string | null;
+}) {
+  if (typeof row.valueNumeric !== "number" || !Number.isFinite(row.valueNumeric)) return null;
+  const hasOperator = typeof row.operator === "string" && row.operator.trim().length > 0;
+  const hasUnit = typeof row.unit === "string" && row.unit.trim().length > 0;
+  const hasTextValue = typeof row.valueText === "string" && row.valueText.trim().length > 0;
+
+  // Historical bug: null/empty numeric inputs were serialized as 0.
+  if (row.valueNumeric === 0 && !hasOperator && !hasUnit && !hasTextValue) {
+    return null;
+  }
+
+  return row.valueNumeric;
+}
+
 function truncateSourceExcerpt(text: string | null | undefined) {
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   if (normalized.length === 0) return null;
@@ -212,8 +231,14 @@ function toPublishedIndexedRule(row: {
   documentName: string | null;
   rawSuggestion?: unknown;
 }): PublishedIndexedRule {
+  const sanitizedValueNumeric = sanitizeIndexedNumericValue({
+    operator: row.operator,
+    valueNumeric: row.valueNumeric,
+    valueText: row.valueText,
+    unit: row.unit,
+  });
   const ruleFamily = mapPublishedRuleFamily(row.themeCode, row.articleCode);
-  const ruleValueType = mapPublishedRuleValueType(row.operator, row.valueNumeric, row.valueText);
+  const ruleValueType = mapPublishedRuleValueType(row.operator, sanitizedValueNumeric, row.valueText);
   const sourceArticle = row.articleCode && row.articleCode.toLowerCase() !== "manual" ? `Article ${row.articleCode}` : null;
   const rawSuggestion = row.rawSuggestion && typeof row.rawSuggestion === "object"
     ? row.rawSuggestion as Record<string, unknown>
@@ -244,9 +269,9 @@ function toPublishedIndexedRule(row: {
     ruleTextRaw: row.sourceText,
     ruleSummary: row.interpretationNote || row.valueText || truncateSourceExcerpt(row.sourceText),
     ruleValueType,
-    ruleValueMin: ruleValueType === "min" ? row.valueNumeric : null,
-    ruleValueMax: ruleValueType === "max" ? row.valueNumeric : null,
-    ruleValueExact: ruleValueType === "exact" ? row.valueNumeric : null,
+    ruleValueMin: ruleValueType === "min" ? sanitizedValueNumeric : null,
+    ruleValueMax: ruleValueType === "max" ? sanitizedValueNumeric : null,
+    ruleValueExact: ruleValueType === "exact" ? sanitizedValueNumeric : null,
     ruleUnit: row.unit,
     ruleCondition: row.conditionText,
     ruleException: null,

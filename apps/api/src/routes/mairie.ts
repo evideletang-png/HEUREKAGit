@@ -588,6 +588,29 @@ function normalizeOptionalPositivePage(raw: unknown): number | null {
   return value > 0 ? value : null;
 }
 
+function parseNullableNumericInput(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "string" && raw.trim().length === 0) return null;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function sanitizeZoneRuleValueNumeric(rule: {
+  operator?: string | null;
+  valueNumeric?: number | null;
+  valueText?: string | null;
+  unit?: string | null;
+}) {
+  if (typeof rule.valueNumeric !== "number" || !Number.isFinite(rule.valueNumeric)) return null;
+  const hasOperator = typeof rule.operator === "string" && rule.operator.trim().length > 0;
+  const hasTextValue = typeof rule.valueText === "string" && rule.valueText.trim().length > 0;
+  const hasUnit = typeof rule.unit === "string" && rule.unit.trim().length > 0;
+  if (rule.valueNumeric === 0 && !hasOperator && !hasTextValue && !hasUnit) {
+    return null;
+  }
+  return rule.valueNumeric;
+}
+
 async function resolveCalibrationReferenceDocumentId(args: {
   communeAliases: string[];
   requestedId: unknown;
@@ -3945,7 +3968,12 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       excerpts: zoneExcerpts.map((excerpt) => ({
         ...excerpt,
         document: documentMap.get(excerpt.documentId) || null,
-        rules: zoneRules.filter((rule) => rule.excerptId === excerpt.id),
+        rules: zoneRules
+          .filter((rule) => rule.excerptId === excerpt.id)
+          .map((rule) => ({
+            ...rule,
+            valueNumeric: sanitizeZoneRuleValueNumeric(rule),
+          })),
       })),
       rules: zoneRules.map((rule) => {
         const excerpt = excerptMap.get(rule.excerptId);
@@ -3953,6 +3981,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         const rawSuggestion = rule.rawSuggestion && typeof rule.rawSuggestion === "object" ? rule.rawSuggestion as Record<string, unknown> : null;
         return {
           ...rule,
+          valueNumeric: sanitizeZoneRuleValueNumeric(rule),
           document: documentMap.get(rule.documentId) || null,
           excerptSelectionLabel: excerpt?.selectionLabel || null,
           visualCapture: (rawSuggestion?.visualCapture || excerptMetadata?.visualCapture || null) as Record<string, unknown> | null,
@@ -4554,7 +4583,7 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       themeCode: themeCode.trim(),
       ruleLabel: ruleLabel.trim(),
       operator: typeof operator === "string" ? operator.trim() || null : null,
-      valueNumeric: Number.isFinite(Number(valueNumeric)) ? Number(valueNumeric) : null,
+      valueNumeric: parseNullableNumericInput(valueNumeric),
       valueText: typeof valueText === "string" ? valueText.trim() || null : null,
       unit: typeof unit === "string" ? unit.trim() || null : null,
       conditionText: typeof conditionText === "string" ? conditionText.trim() || null : null,
@@ -4673,7 +4702,7 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
         themeCode: typeof req.body.themeCode === "string" && req.body.themeCode.trim() ? req.body.themeCode.trim() : rule.themeCode,
         ruleLabel: typeof req.body.ruleLabel === "string" && req.body.ruleLabel.trim() ? req.body.ruleLabel.trim() : rule.ruleLabel,
         operator: req.body.operator === undefined ? rule.operator : (typeof req.body.operator === "string" ? req.body.operator.trim() || null : null),
-        valueNumeric: req.body.valueNumeric === undefined ? rule.valueNumeric : (Number.isFinite(Number(req.body.valueNumeric)) ? Number(req.body.valueNumeric) : null),
+        valueNumeric: req.body.valueNumeric === undefined ? rule.valueNumeric : parseNullableNumericInput(req.body.valueNumeric),
         valueText: req.body.valueText === undefined ? rule.valueText : (typeof req.body.valueText === "string" ? req.body.valueText.trim() || null : null),
         unit: req.body.unit === undefined ? rule.unit : (typeof req.body.unit === "string" ? req.body.unit.trim() || null : null),
         conditionText: req.body.conditionText === undefined ? rule.conditionText : (typeof req.body.conditionText === "string" ? req.body.conditionText.trim() || null : null),
