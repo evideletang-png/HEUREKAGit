@@ -186,6 +186,17 @@ type PluKnowledgeSummary = {
   }>;
 };
 
+type CalibrationZoneHints = {
+  commune: string;
+  communeId: string;
+  zones: Array<{
+    id: string;
+    zoneCode: string;
+    zoneLabel: string | null;
+    searchKeywords: string[];
+  }>;
+};
+
 function getTextQualityBadgeMeta(label?: string) {
   switch (label) {
     case "excellent":
@@ -1164,6 +1175,12 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     enabled: currentCommune !== "all",
   });
 
+  const { data: calibrationZonesData } = useQuery<CalibrationZoneHints>({
+    queryKey: ["mairie-calibration-zones-hints", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/zones?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
   const scheduleDocumentsRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
     queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary"] });
@@ -1549,6 +1566,13 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const allDocs = pluDocsData?.documents ?? [];
   const knowledgeConflicts = knowledgeSummaryData?.conflicts ?? [];
   const zoneReviewSections = zoneReviewsData?.sections ?? [];
+  const zoneKeywordMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const zone of calibrationZonesData?.zones ?? []) {
+      map.set(zone.zoneCode.trim().toUpperCase(), zone.searchKeywords || []);
+    }
+    return map;
+  }, [calibrationZonesData?.zones]);
   const zoneReadyMeta = getZoneReadyMeta(zoneReviewsData?.summary?.readyStatus);
   const ruleReviewItems = ruleReviewsData?.rules ?? [];
   const ruleReadyMeta = getZoneReadyMeta(ruleReviewsData?.summary?.readyStatus);
@@ -1888,6 +1912,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                       const statusMeta = getZoneReviewStatusMeta(section.reviewStatus);
                       const StatusIcon = statusMeta.icon;
                       const linkedDoc = section.document?.id ? allDocs.find((doc) => doc.id === section.document?.id) : null;
+                      const zoneKeywords = zoneKeywordMap.get(section.zoneCode.trim().toUpperCase()) || [];
                       return (
                         <div key={section.id} className="rounded-xl border bg-background p-4">
                           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1937,6 +1962,20 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                 <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
                                   {section.reviewNotes}
                                 </p>
+                              )}
+                              {zoneKeywords.length > 0 && (
+                                <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">
+                                    Guidage actif
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {zoneKeywords.map((keyword) => (
+                                      <Badge key={`${section.id}-${keyword}`} variant="outline" className="border-sky-200 bg-sky-50 text-sky-800">
+                                        {keyword}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
                             </div>
 
