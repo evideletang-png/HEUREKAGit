@@ -255,7 +255,11 @@ export function ZoneCalibrationWorkspace({
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const selectionEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const [selection, setSelection] = useState<{ text: string; pageNumber: number } | null>(null);
+  const [selection, setSelection] = useState<{
+    text: string;
+    pageNumber: number;
+    pageEndNumber: number | null;
+  } | null>(null);
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
@@ -338,7 +342,13 @@ export function ZoneCalibrationWorkspace({
   });
 
   const createExcerptMutation = useMutation({
-    mutationFn: async (payload: { sourceText: string; sourcePage: number; articleCode: string; selectionLabel: string }) => apiFetch("/api/mairie/regulatory-calibration/excerpts", {
+    mutationFn: async (payload: {
+      sourceText: string;
+      sourcePage: number;
+      sourcePageEnd: number | null;
+      articleCode: string;
+      selectionLabel: string;
+    }) => apiFetch("/api/mairie/regulatory-calibration/excerpts", {
       method: "POST",
       body: JSON.stringify({
         commune: currentCommune,
@@ -348,6 +358,7 @@ export function ZoneCalibrationWorkspace({
         selectionLabel: payload.selectionLabel || null,
         sourceText: payload.sourceText,
         sourcePage: payload.sourcePage,
+        sourcePageEnd: payload.sourcePageEnd,
       }),
     }),
     onSuccess: (payload) => {
@@ -443,10 +454,15 @@ export function ZoneCalibrationWorkspace({
   const applySelectionCandidate = (candidate: {
     text: string;
     pageNumber: number;
+    pageEndNumber?: number | null;
     articleCode?: string | null;
     label?: string | null;
   }) => {
-    setSelection({ text: candidate.text, pageNumber: candidate.pageNumber });
+    setSelection({
+      text: candidate.text,
+      pageNumber: candidate.pageNumber,
+      pageEndNumber: candidate.pageEndNumber ?? null,
+    });
     setSelectionArticleCode(candidate.articleCode || "");
     setSelectionLabel(candidate.label || candidate.text.slice(0, 80));
     requestAnimationFrame(() => {
@@ -617,6 +633,7 @@ export function ZoneCalibrationWorkspace({
                             applySelectionCandidate({
                               text: anchor.snippet || anchor.label,
                               pageNumber: anchor.pageNumber,
+                              pageEndNumber: null,
                               articleCode: anchor.articleCode,
                               label: anchor.label,
                             });
@@ -655,6 +672,7 @@ export function ZoneCalibrationWorkspace({
                             applySelectionCandidate({
                               text: match.snippet,
                               pageNumber: match.pageNumber,
+                              pageEndNumber: null,
                               articleCode: match.articleCode || "",
                               label: match.keyword,
                             });
@@ -691,8 +709,8 @@ export function ZoneCalibrationWorkspace({
                   documentTitle={data.referenceDocument.title || data.referenceDocument.fileName || "Document"}
                   pageNumbers={pageNumbers}
                   fallbackPages={data.pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text }))}
-                  onTextSelected={({ text, pageNumber }) => {
-                    setSelection({ text, pageNumber });
+                  onTextSelected={({ text, pageNumber, pageEndNumber }) => {
+                    setSelection({ text, pageNumber, pageEndNumber });
                     if (!selectionLabel) {
                       setSelectionLabel(text.slice(0, 80));
                     }
@@ -752,7 +770,13 @@ export function ZoneCalibrationWorkspace({
                 />
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {selection?.pageNumber ? <span>page {selection.pageNumber}</span> : null}
+                {selection?.pageNumber ? (
+                  <span>
+                    {selection.pageEndNumber && selection.pageEndNumber > selection.pageNumber
+                      ? `pages ${selection.pageNumber} à ${selection.pageEndNumber}`
+                      : `page ${selection.pageNumber}`}
+                  </span>
+                ) : null}
                 {selectedExcerptId ? <span>extrait actif sélectionné</span> : null}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -763,6 +787,7 @@ export function ZoneCalibrationWorkspace({
                     createExcerptMutation.mutate({
                       sourceText: selection.text,
                       sourcePage: selection.pageNumber,
+                      sourcePageEnd: selection.pageEndNumber,
                       articleCode: selectionArticleCode,
                       selectionLabel,
                     });
@@ -812,6 +837,7 @@ export function ZoneCalibrationWorkspace({
                       createExcerptMutation.mutate({
                         sourceText: manualArticle.sourceText,
                         sourcePage,
+                        sourcePageEnd: null,
                         articleCode: manualArticle.articleCode,
                         selectionLabel: manualArticle.label,
                       });
@@ -855,7 +881,9 @@ export function ZoneCalibrationWorkspace({
                   <SelectItem value="__none__">Choisir un extrait</SelectItem>
                   {excerptChoices.map((excerpt) => (
                     <SelectItem key={excerpt.id} value={excerpt.id}>
-                      {excerpt.articleCode ? `Art. ${excerpt.articleCode}` : "Sans article"} · page {excerpt.sourcePage}
+                      {excerpt.articleCode ? `Art. ${excerpt.articleCode}` : "Sans article"} · {excerpt.sourcePageEnd && excerpt.sourcePageEnd > excerpt.sourcePage
+                        ? `pages ${excerpt.sourcePage} à ${excerpt.sourcePageEnd}`
+                        : `page ${excerpt.sourcePage}`}
                     </SelectItem>
                   ))}
                 </SelectContent>

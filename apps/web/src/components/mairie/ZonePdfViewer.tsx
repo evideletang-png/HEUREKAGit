@@ -15,9 +15,27 @@ type ZonePdfViewerProps = {
   documentTitle: string;
   pageNumbers: number[];
   fallbackPages?: Array<{ pageNumber: number; text: string }>;
-  onTextSelected: (selection: { text: string; pageNumber: number }) => void;
+  onTextSelected: (selection: { text: string; pageNumber: number; pageEndNumber: number | null }) => void;
   className?: string;
 };
+
+function resolveSelectionPageNumber(node: Node | null): number | null {
+  let current: HTMLElement | null =
+    node instanceof HTMLElement
+      ? node
+      : node?.parentElement || null;
+
+  while (current) {
+    const raw = current.dataset.pageNumber;
+    if (raw) {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    current = current.parentElement;
+  }
+
+  return null;
+}
 
 export function ZonePdfViewer({
   documentId,
@@ -123,7 +141,7 @@ export function ZonePdfViewer({
               onMouseUp={() => {
                 const selectedText = window.getSelection?.()?.toString().trim();
                 if (!selectedText) return;
-                onTextSelected({ text: selectedText, pageNumber: page.pageNumber });
+                onTextSelected({ text: selectedText, pageNumber: page.pageNumber, pageEndNumber: null });
               }}
             >
               <div className="border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
@@ -167,11 +185,24 @@ export function ZonePdfViewer({
         {sortedPages.map((pageNumber) => (
           <div
             key={pageNumber}
+            data-page-number={pageNumber}
             className="overflow-hidden rounded-xl border bg-background shadow-sm"
             onMouseUp={() => {
-              const selectedText = window.getSelection?.()?.toString().trim();
-              if (!selectedText) return;
-              onTextSelected({ text: selectedText, pageNumber });
+              const selection = window.getSelection?.();
+              const selectedText = selection?.toString().trim();
+              if (!selection || !selectedText) return;
+
+              const anchorPage = resolveSelectionPageNumber(selection.anchorNode);
+              const focusPage = resolveSelectionPageNumber(selection.focusNode);
+              const pages = [anchorPage, focusPage, pageNumber].filter((value): value is number => Number.isFinite(value));
+              const startPage = Math.min(...pages);
+              const endPage = Math.max(...pages);
+
+              onTextSelected({
+                text: selectedText,
+                pageNumber: startPage,
+                pageEndNumber: endPage > startPage ? endPage : null,
+              });
             }}
           >
             <div className="border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
