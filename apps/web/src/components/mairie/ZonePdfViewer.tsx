@@ -36,6 +36,11 @@ type VisualDraftSelection = {
   canvasTop: number;
 };
 
+type ResolvedPdfPage = {
+  requestedPageNumber: number;
+  actualPageNumber: number;
+};
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -66,6 +71,13 @@ function resolveSelectionPageNumber(node: Node | null): number | null {
   return null;
 }
 
+function normalizePdfPageLabel(raw: string | null | undefined) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return null;
+  const numeric = Number.parseInt(trimmed.replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
 export function ZonePdfViewer({
   documentId,
   documentTitle,
@@ -84,6 +96,8 @@ export function ZonePdfViewer({
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [visualMode, setVisualMode] = useState(false);
   const [visualDraft, setVisualDraft] = useState<VisualDraftSelection | null>(null);
+  const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
+  const [pdfPageLabels, setPdfPageLabels] = useState<Array<string | null> | null>(null);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -102,6 +116,35 @@ export function ZonePdfViewer({
   const sortedPages = useMemo(
     () => pageNumbers.slice().sort((left, right) => left - right),
     [pageNumbers],
+  );
+
+  const resolvedPages = useMemo<ResolvedPdfPage[]>(
+    () => {
+      const labelToActualPage = new Map<number, number>();
+
+      if (Array.isArray(pdfPageLabels) && pdfPageLabels.length > 0) {
+        pdfPageLabels.forEach((label, index) => {
+          const normalized = normalizePdfPageLabel(label);
+          if (normalized && !labelToActualPage.has(normalized)) {
+            labelToActualPage.set(normalized, index + 1);
+          }
+        });
+      }
+
+      return sortedPages.flatMap((requestedPageNumber) => {
+        const actualFromLabel = labelToActualPage.get(requestedPageNumber);
+        if (actualFromLabel) {
+          return [{ requestedPageNumber, actualPageNumber: actualFromLabel }];
+        }
+
+        if (!pdfNumPages || requestedPageNumber <= pdfNumPages) {
+          return [{ requestedPageNumber, actualPageNumber: requestedPageNumber }];
+        }
+
+        return [];
+      });
+    },
+    [pdfNumPages, pdfPageLabels, sortedPages],
   );
 
   useEffect(() => {
@@ -203,6 +246,8 @@ export function ZonePdfViewer({
     setPdfError(null);
     setPdfUnavailable(false);
     setPdfLoading(true);
+    setPdfNumPages(null);
+    setPdfPageLabels(null);
 
     fetch(`/api/mairie/documents/${documentId}/view`, {
       credentials: "include",
@@ -309,6 +354,20 @@ export function ZonePdfViewer({
       </div>
       <Document
         file={pdfObjectUrl}
+        onLoadSuccess={(pdf) => {
+          setPdfNumPages(pdf.numPages || null);
+          Promise.resolve(pdf.getPageLabels?.())
+            .then((labels) => {
+              if (Array.isArray(labels) && labels.length > 0) {
+                setPdfPageLabels(labels);
+              } else {
+                setPdfPageLabels(null);
+              }
+            })
+            .catch(() => {
+              setPdfPageLabels(null);
+            });
+        }}
         onLoadError={(error) => {
           setPdfUnavailable(true);
           setPdfError(error instanceof Error ? error.message : "Impossible d’ouvrir le PDF source.");
@@ -326,10 +385,10 @@ export function ZonePdfViewer({
         )}
         className="space-y-4"
       >
-        {sortedPages.map((pageNumber) => (
+        {resolvedPages.map(({ requestedPageNumber, actualPageNumber }) => (
           <div
-            key={pageNumber}
-            data-page-number={pageNumber}
+            key={requestedPageNumber}
+            data-page-number={requestedPageNumber}
             className="overflow-hidden rounded-xl border bg-background shadow-sm"
             onMouseUp={() => {
               const selection = window.getSelection?.();
@@ -338,7 +397,7 @@ export function ZonePdfViewer({
 
               const anchorPage = resolveSelectionPageNumber(selection.anchorNode);
               const focusPage = resolveSelectionPageNumber(selection.focusNode);
-              const pages = [anchorPage, focusPage, pageNumber].filter((value): value is number => Number.isFinite(value));
+              const pages = [anchorPage, focusPage, requestedPageNumber].filter((value): value is number => Number.isFinite(value));
               const startPage = Math.min(...pages);
               const endPage = Math.max(...pages);
 
@@ -350,16 +409,16 @@ export function ZonePdfViewer({
             }}
           >
             <div className="border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
-              {documentTitle} · page {pageNumber}
+              {documentTitle} · page {requestedPageNumber}
             </div>
             <div
               ref={(node) => {
-                pageCanvasRefs.current[pageNumber] = node;
+                pageCanvasRefs.current[requestedPageNumber] = node;
               }}
               className={cn("relative overflow-x-auto p-3", visualMode && "touch-none select-none cursor-crosshair")}
               onPointerDown={(event) => {
                 if (!visualMode) return;
-                const container = pageCanvasRefs.current[pageNumber];
+                const container = pageCanvasRefs.current[requestedPageNumber];
                 const canvas = container?.querySelector("canvas");
                 if (!container || !canvas) return;
                 event.preventDefault();
@@ -368,7 +427,7 @@ export function ZonePdfViewer({
                 const startX = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
                 const startY = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
                 setVisualDraft({
-                  pageNumber,
+                  pageNumber: requestedPageNumber,
                   startX,
                   startY,
                   currentX: startX,
@@ -379,12 +438,12 @@ export function ZonePdfViewer({
               }}
             >
               <Page
-                pageNumber={pageNumber}
+                pageNumber={actualPageNumber}
                 width={viewerWidth}
                 renderAnnotationLayer
                 renderTextLayer
               />
-              {visualDraft && visualDraft.pageNumber === pageNumber ? (
+              {visualDraft && visualDraft.pageNumber === requestedPageNumber ? (
                 <div
                   className="pointer-events-none absolute rounded-md border-2 border-primary bg-primary/10"
                   style={{
