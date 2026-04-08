@@ -12,7 +12,6 @@ import {
   MapPin,
   RefreshCw,
   Save,
-  Search,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -255,7 +254,6 @@ export function ZoneCalibrationWorkspace({
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const selectionEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const ruleComposerRef = useRef<HTMLDivElement | null>(null);
   const zoneRulesRef = useRef<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState<{
     text: string;
@@ -283,6 +281,7 @@ export function ZoneCalibrationWorkspace({
     referenceEndPage: "",
   });
   const [quickRuleInput, setQuickRuleInput] = useState("");
+  const [visualSupportNote, setVisualSupportNote] = useState("");
   const [ruleDraft, setRuleDraft] = useState({
     themeCode: "",
     ruleLabel: "",
@@ -368,21 +367,22 @@ export function ZoneCalibrationWorkspace({
       setSelectedExcerptId(payload.excerpt.id);
       setManualArticleMode(false);
       setManualArticle({ articleCode: "", label: "", sourcePage: "", sourceText: "" });
-      requestAnimationFrame(() => {
-        ruleComposerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-      });
       toast({
         title: "Extrait enregistré",
-        description: "Le texte est stocké comme extrait calibré. Crée maintenant la règle, puis publie-la dans 'Règles de la zone'.",
+        description: "Le texte est stocké comme extrait calibré. Tu peux maintenant créer la règle directement dans ce même bloc.",
       });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
   const createRuleMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedExcerptId) throw new Error("Choisis d’abord un extrait calibré.");
-      return apiFetch(`/api/mairie/regulatory-calibration/excerpts/${selectedExcerptId}/rules`, {
+    mutationFn: async ({ excerptId }: { excerptId: string }) => {
+      if (!excerptId) throw new Error("Choisis d’abord un extrait calibré.");
+      const interpretationParts = [
+        ruleDraft.interpretationNote?.trim(),
+        visualSupportNote.trim() ? `Repère visuel / croquis : ${visualSupportNote.trim()}` : "",
+      ].filter(Boolean);
+      return apiFetch(`/api/mairie/regulatory-calibration/excerpts/${excerptId}/rules`, {
         method: "POST",
         body: JSON.stringify({
           commune: currentCommune,
@@ -393,7 +393,7 @@ export function ZoneCalibrationWorkspace({
           valueText: ruleDraft.valueText || null,
           unit: ruleDraft.unit || null,
           conditionText: ruleDraft.conditionText || null,
-          interpretationNote: ruleDraft.interpretationNote || null,
+          interpretationNote: interpretationParts.join("\n\n") || null,
           normativeEffect: "primary",
           proceduralEffect: "none",
           applicabilityScope: "main_zone",
@@ -416,6 +416,7 @@ export function ZoneCalibrationWorkspace({
         interpretationNote: "",
       });
       setQuickRuleInput("");
+      setVisualSupportNote("");
       requestAnimationFrame(() => {
         zoneRulesRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
       });
@@ -444,17 +445,6 @@ export function ZoneCalibrationWorkspace({
     [data?.pages],
   );
 
-  const excerptChoices = useMemo(
-    () => data?.excerpts.slice().sort((left, right) => left.sourcePage - right.sourcePage) || [],
-    [data?.excerpts],
-  );
-
-  useEffect(() => {
-    if (!selectedExcerptId && excerptChoices[0]) {
-      setSelectedExcerptId(excerptChoices[0].id);
-    }
-  }, [excerptChoices, selectedExcerptId]);
-
   const applyQuickRuleInput = () => {
     if (!data) return;
     const nextDraft = buildQuickRuleDraft(quickRuleInput, data.themes);
@@ -463,6 +453,33 @@ export function ZoneCalibrationWorkspace({
       ...current,
       ...nextDraft,
     }));
+  };
+
+  const saveCurrentExcerpt = async () => {
+    if (!selection?.text || !selection?.pageNumber) {
+      throw new Error("Sélectionne d’abord un extrait dans le PDF ou dans les textes retrouvés.");
+    }
+    const payload = await createExcerptMutation.mutateAsync({
+      sourceText: selection.text,
+      sourcePage: selection.pageNumber,
+      sourcePageEnd: selection.pageEndNumber,
+      articleCode: selectionArticleCode,
+      selectionLabel,
+    });
+    return payload.excerpt.id as string;
+  };
+
+  const handleCreateRuleFromSelection = async () => {
+    try {
+      const excerptId = selectedExcerptId || await saveCurrentExcerpt();
+      await createRuleMutation.mutateAsync({ excerptId });
+    } catch (err: any) {
+      toast({
+        title: "Erreur",
+        description: err?.message || "Impossible de créer la règle depuis cette sélection.",
+        variant: "destructive",
+      });
+    }
   };
 
   const applySelectionCandidate = (candidate: {
@@ -477,6 +494,7 @@ export function ZoneCalibrationWorkspace({
       pageNumber: candidate.pageNumber,
       pageEndNumber: candidate.pageEndNumber ?? null,
     });
+    setSelectedExcerptId(null);
     setSelectionArticleCode(candidate.articleCode || "");
     setSelectionLabel(candidate.label || candidate.text.slice(0, 80));
     requestAnimationFrame(() => {
@@ -724,6 +742,7 @@ export function ZoneCalibrationWorkspace({
                   pageNumbers={pageNumbers}
                   fallbackPages={data.pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text }))}
                   onTextSelected={({ text, pageNumber, pageEndNumber }) => {
+                    setSelectedExcerptId(null);
                     setSelection({ text, pageNumber, pageEndNumber });
                     if (!selectionLabel) {
                       setSelectionLabel(text.slice(0, 80));
@@ -743,8 +762,8 @@ export function ZoneCalibrationWorkspace({
           <Card className="border-primary/10 bg-primary/[0.03] shadow-sm">
             <CardContent className="space-y-2 p-4 text-sm">
               <p className="font-medium text-primary">Flux de publication</p>
-              <p className="text-muted-foreground">1. Enregistrer l’extrait</p>
-              <p className="text-muted-foreground">2. Créer la règle depuis cet extrait</p>
+              <p className="text-muted-foreground">1. Ajuster la sélection et son interprétation</p>
+              <p className="text-muted-foreground">2. Créer la règle directement depuis ce bloc</p>
               <p className="text-muted-foreground">3. Publier la règle dans le bloc `Règles de la zone`</p>
             </CardContent>
           </Card>
@@ -756,7 +775,7 @@ export function ZoneCalibrationWorkspace({
                 Sélection courante
               </CardTitle>
               <CardDescription>
-                Cette étape enregistre un extrait calibré, pas encore une règle publiée.
+                C’est ici que tu ajustes l’extrait, son interprétation et la règle à créer.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -765,7 +784,10 @@ export function ZoneCalibrationWorkspace({
                   <Textarea
                     ref={selectionEditorRef}
                     value={selection.text}
-                    onChange={(event) => setSelection((current) => current ? { ...current, text: event.target.value } : current)}
+                    onChange={(event) => {
+                      setSelectedExcerptId(null);
+                      setSelection((current) => current ? { ...current, text: event.target.value } : current);
+                    }}
                     rows={8}
                     placeholder="Le texte de l’extrait peut être corrigé, complété ou simplifié ici avant enregistrement."
                     className="min-h-[180px] resize-y border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
@@ -773,7 +795,13 @@ export function ZoneCalibrationWorkspace({
                 ) : "Sélectionne directement un extrait dans le PDF ou utilise un texte retrouvé à gauche."}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Select value={selectionArticleCode || "__none__"} onValueChange={(value) => setSelectionArticleCode(value === "__none__" ? "" : value)}>
+                <Select
+                  value={selectionArticleCode || "__none__"}
+                  onValueChange={(value) => {
+                    setSelectedExcerptId(null);
+                    setSelectionArticleCode(value === "__none__" ? "" : value);
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Article" />
                   </SelectTrigger>
@@ -788,7 +816,10 @@ export function ZoneCalibrationWorkspace({
                 </Select>
                 <Input
                   value={selectionLabel}
-                  onChange={(event) => setSelectionLabel(event.target.value)}
+                  onChange={(event) => {
+                    setSelectedExcerptId(null);
+                    setSelectionLabel(event.target.value);
+                  }}
                   placeholder="Libellé de l’extrait"
                 />
               </div>
@@ -800,7 +831,80 @@ export function ZoneCalibrationWorkspace({
                       : `page ${selection.pageNumber}`}
                   </span>
                 ) : null}
-                {selectedExcerptId ? <span>extrait actif sélectionné</span> : null}
+                {selectedExcerptId ? <span>extrait calibré déjà enregistré</span> : <span>sélection non enregistrée</span>}
+              </div>
+              <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
+                <div className="text-sm font-medium">Interprétation et règle ferme</div>
+                <div className="flex gap-2">
+                  <Input
+                    value={quickRuleInput}
+                    onChange={(event) => setQuickRuleInput(event.target.value)}
+                    placeholder='Ex : "Hauteur 15 m" ou "Stationnement 2 places / logement"'
+                  />
+                  <Button variant="outline" onClick={applyQuickRuleInput}>
+                    <Sparkles className="h-4 w-4" />
+                    Interpréter
+                  </Button>
+                </div>
+                <Select value={ruleDraft.themeCode || "__none__"} onValueChange={(value) => setRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Thème métier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Aucun thème</SelectItem>
+                    {data.themes.map((theme) => (
+                      <SelectItem key={theme.code} value={theme.code}>
+                        {theme.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={ruleDraft.ruleLabel}
+                  onChange={(event) => setRuleDraft((current) => ({ ...current, ruleLabel: event.target.value }))}
+                  placeholder="Libellé de la règle"
+                />
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Input
+                    value={ruleDraft.operator}
+                    onChange={(event) => setRuleDraft((current) => ({ ...current, operator: event.target.value }))}
+                    placeholder="Opérateur"
+                  />
+                  <Input
+                    value={ruleDraft.valueNumeric}
+                    onChange={(event) => setRuleDraft((current) => ({ ...current, valueNumeric: event.target.value }))}
+                    placeholder="Valeur numérique"
+                  />
+                  <Input
+                    value={ruleDraft.unit}
+                    onChange={(event) => setRuleDraft((current) => ({ ...current, unit: event.target.value }))}
+                    placeholder="Unité"
+                  />
+                </div>
+                <Textarea
+                  value={ruleDraft.valueText}
+                  onChange={(event) => setRuleDraft((current) => ({ ...current, valueText: event.target.value }))}
+                  placeholder="Valeur textuelle"
+                  rows={2}
+                />
+                <Textarea
+                  value={ruleDraft.conditionText}
+                  onChange={(event) => setRuleDraft((current) => ({ ...current, conditionText: event.target.value }))}
+                  placeholder="Condition"
+                  rows={2}
+                />
+                <Textarea
+                  value={ruleDraft.interpretationNote}
+                  onChange={(event) => setRuleDraft((current) => ({ ...current, interpretationNote: event.target.value }))}
+                  placeholder="Interprétation réglementaire"
+                  rows={3}
+                />
+                <Textarea
+                  value={visualSupportNote}
+                  onChange={(event) => setVisualSupportNote(event.target.value)}
+                  placeholder="Pièce visuelle / croquis si besoin : décris ici l’élément graphique à prendre en compte"
+                  rows={2}
+                />
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -817,7 +921,23 @@ export function ZoneCalibrationWorkspace({
                   }}
                 >
                   {createExcerptMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Etape 1 · Enregistrer l’extrait
+                  Enregistrer l’extrait
+                </Button>
+                <Button
+                  disabled={
+                    createRuleMutation.isPending
+                    || createExcerptMutation.isPending
+                    || !selection?.text
+                    || !selection?.pageNumber
+                    || !ruleDraft.themeCode
+                    || !ruleDraft.ruleLabel.trim()
+                  }
+                  onClick={() => {
+                    void handleCreateRuleFromSelection();
+                  }}
+                >
+                  {createRuleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Créer la règle ferme
                 </Button>
                 <Button variant="outline" onClick={() => setManualArticleMode((current) => !current)}>
                   <FilePlus2 className="h-4 w-4" />
@@ -871,106 +991,6 @@ export function ZoneCalibrationWorkspace({
                   </Button>
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          <Card ref={ruleComposerRef} className="border-primary/10 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Search className="h-4 w-4 text-primary" />
-                Règle issue de l’extrait
-              </CardTitle>
-              <CardDescription>
-                Cette étape transforme l’extrait calibré en règle. La règle restera en brouillon jusqu’à publication.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex gap-2">
-                <Input
-                  value={quickRuleInput}
-                  onChange={(event) => setQuickRuleInput(event.target.value)}
-                  placeholder='Ex : "Hauteur 15 m" ou "Stationnement 2 places / logement"'
-                />
-                <Button variant="outline" onClick={applyQuickRuleInput}>
-                  <Sparkles className="h-4 w-4" />
-                  Interpréter
-                </Button>
-              </div>
-              <Select value={selectedExcerptId || "__none__"} onValueChange={(value) => setSelectedExcerptId(value === "__none__" ? null : value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Extrait calibré" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Choisir un extrait</SelectItem>
-                  {excerptChoices.map((excerpt) => (
-                    <SelectItem key={excerpt.id} value={excerpt.id}>
-                      {excerpt.articleCode ? `Art. ${excerpt.articleCode}` : "Sans article"} · {excerpt.sourcePageEnd && excerpt.sourcePageEnd > excerpt.sourcePage
-                        ? `pages ${excerpt.sourcePage} à ${excerpt.sourcePageEnd}`
-                        : `page ${excerpt.sourcePage}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={ruleDraft.themeCode || "__none__"} onValueChange={(value) => setRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Thème métier" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Aucun thème</SelectItem>
-                  {data.themes.map((theme) => (
-                    <SelectItem key={theme.code} value={theme.code}>
-                      {theme.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                value={ruleDraft.ruleLabel}
-                onChange={(event) => setRuleDraft((current) => ({ ...current, ruleLabel: event.target.value }))}
-                placeholder="Libellé de la règle"
-              />
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Input
-                  value={ruleDraft.operator}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, operator: event.target.value }))}
-                  placeholder="Opérateur"
-                />
-                <Input
-                  value={ruleDraft.valueNumeric}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, valueNumeric: event.target.value }))}
-                  placeholder="Valeur numérique"
-                />
-                <Input
-                  value={ruleDraft.unit}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, unit: event.target.value }))}
-                  placeholder="Unité"
-                />
-              </div>
-              <Textarea
-                value={ruleDraft.valueText}
-                onChange={(event) => setRuleDraft((current) => ({ ...current, valueText: event.target.value }))}
-                placeholder="Valeur textuelle"
-                rows={2}
-              />
-              <Textarea
-                value={ruleDraft.conditionText}
-                onChange={(event) => setRuleDraft((current) => ({ ...current, conditionText: event.target.value }))}
-                placeholder="Condition"
-                rows={2}
-              />
-              <Textarea
-                value={ruleDraft.interpretationNote}
-                onChange={(event) => setRuleDraft((current) => ({ ...current, interpretationNote: event.target.value }))}
-                placeholder="Note d’interprétation"
-                rows={3}
-              />
-              <Button
-                disabled={createRuleMutation.isPending || !selectedExcerptId || !ruleDraft.themeCode || !ruleDraft.ruleLabel.trim()}
-                onClick={() => createRuleMutation.mutate()}
-              >
-                {createRuleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Etape 2 · Créer la règle
-              </Button>
             </CardContent>
           </Card>
 
