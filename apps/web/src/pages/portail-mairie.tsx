@@ -2929,21 +2929,21 @@ export default function PortailMairiePage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+        <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 sm:h-12 sm:w-12">
             <Building className="w-6 h-6 text-primary" />
           </div>
           <div className="flex-1">
-            <h1 className="text-3xl font-bold tracking-tight text-primary">Portail Mairie</h1>
-            <p className="text-muted-foreground">Consultation des dossiers déposés et gestion de la base de connaissance IA.</p>
+            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Portail Mairie</h1>
+            <p className="text-sm text-muted-foreground sm:text-base">Consultation des dossiers déposés et gestion de la base de connaissance IA.</p>
           </div>
         </div>
 
         {!selectedId ? (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <TabsList className="grid w-full max-w-[650px] grid-cols-4">
+            <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
+              <TabsList className="w-full lg:max-w-[760px]">
                 <TabsTrigger value="dossiers">Dossiers CERFA</TabsTrigger>
                 <TabsTrigger value="plu" className="gap-2">Base IA (PLU)</TabsTrigger>
                 <TabsTrigger value="finance" className="gap-2"><Zap className="w-3.5 h-3.5" /> Fiscalité & Coûts</TabsTrigger>
@@ -2951,7 +2951,7 @@ export default function PortailMairiePage() {
               </TabsList>
 
               {communes.length > 0 && (activeTab === "dossiers" || activeTab === "plu" || activeTab === "config" || activeTab === "finance") && (
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                   <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Commune :</span>
                   <Select value={selectedCommune} onValueChange={setSelectedCommune}>
                     <SelectTrigger className="w-full sm:w-[200px] h-9">

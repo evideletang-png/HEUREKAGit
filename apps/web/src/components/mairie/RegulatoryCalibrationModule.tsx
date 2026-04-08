@@ -941,16 +941,16 @@ export function RegulatoryCalibrationModule({
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-      <TabsList className="grid w-full grid-cols-5">
-        <TabsTrigger value="zones">Zones</TabsTrigger>
-        <TabsTrigger value="documents">Documents</TabsTrigger>
-        <TabsTrigger value="calibration">PDF + Calibration</TabsTrigger>
-        <TabsTrigger value="library">Bibliothèque</TabsTrigger>
-        <TabsTrigger value="published">Back mairie</TabsTrigger>
+      <TabsList className="w-full justify-start rounded-2xl bg-muted/40 p-1">
+        <TabsTrigger value="zones" className="min-w-fit whitespace-nowrap px-4">Zones</TabsTrigger>
+        <TabsTrigger value="documents" className="min-w-fit whitespace-nowrap px-4">Documents</TabsTrigger>
+        <TabsTrigger value="calibration" className="min-w-fit whitespace-nowrap px-4">PDF + Calibration</TabsTrigger>
+        <TabsTrigger value="library" className="min-w-fit whitespace-nowrap px-4">Bibliothèque</TabsTrigger>
+        <TabsTrigger value="published" className="min-w-fit whitespace-nowrap px-4">Back mairie</TabsTrigger>
       </TabsList>
 
       <Card className="border-primary/10 shadow-sm">
-        <CardContent className="grid gap-3 p-4 md:grid-cols-4 xl:grid-cols-10">
+        <CardContent className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:p-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-10">
           <div className="rounded-xl border bg-muted/20 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Documents</div>
             <div className="mt-1 text-2xl font-bold">{overviewData?.summary.documentCount ?? 0}</div>
@@ -1014,7 +1014,7 @@ export function RegulatoryCalibrationModule({
             <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" /> Zones de la commune</CardTitle>
             <CardDescription>Définis la nomenclature des zones une fois, puis le calibrage vient s’y raccrocher proprement.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 lg:grid-cols-[320px,1fr]">
+          <CardContent className="grid gap-4 xl:grid-cols-[320px,minmax(0,1fr)]">
             <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
               <Input placeholder="Code zone (ex : N, UA, UDa, 1AU)" value={zoneForm.zoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, zoneCode: e.target.value }))} />
               <Input placeholder="Libellé optionnel" value={zoneForm.zoneLabel} onChange={(e) => setZoneForm((v) => ({ ...v, zoneLabel: e.target.value }))} />
@@ -1040,20 +1040,20 @@ export function RegulatoryCalibrationModule({
               )}
             </div>
 
-            <div className="space-y-3">
+            <div className="min-w-0 space-y-3">
               {loadingZones ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Lecture des zones…</div>
               ) : (zonesData?.zones || []).length > 0 ? (
                 zonesData!.zones.map((zone) => (
                   <div key={zone.id} className="rounded-xl border bg-background p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="space-y-1">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{zone.zoneCode}</Badge>
                           {zone.parentZoneCode && <Badge variant="secondary">hérite de {zone.parentZoneCode}</Badge>}
                         </div>
-                        <p className="font-medium">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
-                        {zone.guidanceNotes && <p className="text-sm text-muted-foreground">{zone.guidanceNotes}</p>}
+                        <p className="font-medium break-words">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
+                        {zone.guidanceNotes && <p className="text-sm text-muted-foreground break-words">{zone.guidanceNotes}</p>}
                         {editingZoneId === zone.id && (
                           <div className="mt-3 space-y-3 rounded-xl border bg-muted/10 p-3">
                             <Input
@@ -1115,7 +1115,7 @@ export function RegulatoryCalibrationModule({
                           </div>
                         )}
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2 lg:max-w-[260px] lg:justify-end">
                         <Button
                           variant="outline"
                           size="sm"
@@ -1154,7 +1154,7 @@ export function RegulatoryCalibrationModule({
             <CardTitle className="text-base flex items-center gap-2"><Layers3 className="w-4 h-4 text-primary" /> Couches réglementaires</CardTitle>
             <CardDescription>Les SPR, PSMV, PVAP, PPRI, PPRT, ABF et servitudes se calibrent ici comme des overlays superposés au socle de zone.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 lg:grid-cols-[340px,1fr]">
+          <CardContent className="grid gap-4 xl:grid-cols-[340px,minmax(0,1fr)]">
             <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
               <Input placeholder="Code overlay (ex : SPR-Centre, PPRI-R1)" value={overlayForm.overlayCode} onChange={(e) => setOverlayForm((v) => ({ ...v, overlayCode: e.target.value }))} />
               <Input placeholder="Libellé optionnel" value={overlayForm.overlayLabel} onChange={(e) => setOverlayForm((v) => ({ ...v, overlayLabel: e.target.value }))} />
@@ -1167,7 +1167,7 @@ export function RegulatoryCalibrationModule({
                 </SelectContent>
               </Select>
               <Input placeholder="Référence géométrique / périmètre" value={overlayForm.geometryRef} onChange={(e) => setOverlayForm((v) => ({ ...v, geometryRef: e.target.value }))} />
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 lg:grid-cols-2">
                 <Input placeholder="Priorité" value={overlayForm.priority} onChange={(e) => setOverlayForm((v) => ({ ...v, priority: e.target.value }))} />
                 <Input placeholder="Statut (draft, validated...)" value={overlayForm.status} onChange={(e) => setOverlayForm((v) => ({ ...v, status: e.target.value }))} />
               </div>
@@ -1238,7 +1238,7 @@ export function RegulatoryCalibrationModule({
                                 [overlay.id]: { ...buildOverlayEditorDraft(overlay), ...(current[overlay.id] || {}), geometryRef: e.target.value },
                               }))}
                             />
-                            <div className="grid gap-3 md:grid-cols-2">
+                            <div className="grid gap-3 lg:grid-cols-2">
                               <Input
                                 placeholder="Priorité"
                                 value={overlayEditorDrafts[overlay.id]?.priority || ""}
@@ -1356,14 +1356,14 @@ export function RegulatoryCalibrationModule({
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => { setSelectedDocumentId(doc.id); setActiveTab("calibration"); }}>
+                        <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => { setSelectedDocumentId(doc.id); setActiveTab("calibration"); }}>
                           <ScrollText className="mr-2 h-3.5 w-3.5" /> Calibrer
                         </Button>
-                        <Button variant="outline" size="sm" disabled={resegmentDocumentMutation.isPending} onClick={() => resegmentDocumentMutation.mutate(doc.id)}>
+                        <Button variant="outline" size="sm" className="w-full sm:w-auto" disabled={resegmentDocumentMutation.isPending} onClick={() => resegmentDocumentMutation.mutate(doc.id)}>
                           {resegmentDocumentMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
                           Re-segmenter
                         </Button>
-                        <Button variant="outline" size="sm" className="border-destructive/20 text-destructive hover:bg-destructive/5" onClick={() => {
+                        <Button variant="outline" size="sm" className="w-full border-destructive/20 text-destructive hover:bg-destructive/5 sm:w-auto" onClick={() => {
                           if (!window.confirm(`Supprimer ${doc.title} ?`)) return;
                           deleteDocumentMutation.mutate(doc.id);
                         }}>
@@ -1377,7 +1377,7 @@ export function RegulatoryCalibrationModule({
                         <Layers3 className="h-4 w-4 text-primary" />
                         Rattacher ce document à une couche réglementaire
                       </div>
-                      <div className="grid gap-3 md:grid-cols-4">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <Select
                           value={documentOverlayDrafts[doc.id]?.overlayId || ""}
                           onValueChange={(value) => setDocumentOverlayDrafts((current) => ({
@@ -1467,7 +1467,7 @@ export function RegulatoryCalibrationModule({
             <CardTitle className="text-base flex items-center gap-2"><Eye className="w-4 h-4 text-primary" /> Visualiseur PDF + Calibration</CardTitle>
             <CardDescription>Sélectionne le texte extrait page par page, puis rattache-le à une zone, un article et une ou plusieurs règles.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 px-3 py-4 sm:px-6">
             {!selectedDocumentId ? (
               <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">Choisis un document depuis l’onglet Documents réglementaires pour lancer le calibrage.</div>
             ) : loadingWorkspace ? (
@@ -1475,29 +1475,29 @@ export function RegulatoryCalibrationModule({
             ) : workspaceData ? (
               <>
                 <div className="grid gap-4 xl:grid-cols-[1.2fr,1fr]">
-                  <div className="rounded-xl border overflow-hidden bg-muted/20 min-h-[720px]">
+                  <div className="order-2 overflow-hidden rounded-xl border bg-muted/20 min-h-[320px] sm:min-h-[420px] lg:min-h-[560px] xl:order-1 xl:min-h-[680px]">
                     {workspaceData.document.hasStoredFile ? (
                       <iframe
                         src={`/api/mairie/documents/${workspaceData.document.id}/view#toolbar=0`}
-                        className="h-[720px] w-full border-none"
+                        className="h-[320px] w-full border-none sm:h-[420px] lg:h-[560px] xl:h-[680px]"
                         title={workspaceData.document.title}
                       />
                     ) : (
-                      <div className="flex h-[720px] items-center justify-center p-6 text-sm text-muted-foreground">
+                      <div className="flex h-[320px] items-center justify-center p-6 text-sm text-muted-foreground sm:h-[420px] lg:h-[560px] xl:h-[680px]">
                         <AlertTriangle className="mr-2 h-4 w-4" />
                         {workspaceData.document.availabilityMessage || "Fichier source indisponible"}
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-4">
+                  <div className="order-1 space-y-4 xl:order-2">
                     <div className="rounded-xl border bg-background p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                           <p className="font-medium">{workspaceData.document.title}</p>
                           <p className="text-xs text-muted-foreground">{workspaceData.pages.length} page(s) texte sélectionnable(s)</p>
                         </div>
-                        <Badge variant="outline">{workspaceData.document.documentType || "document"}</Badge>
+                        <Badge variant="outline" className="w-fit">{workspaceData.document.documentType || "document"}</Badge>
                       </div>
                       <div className="mt-3 space-y-2 rounded-xl border bg-muted/10 p-3">
                         <div className="flex items-center gap-2 text-sm font-medium">
@@ -1542,7 +1542,7 @@ export function RegulatoryCalibrationModule({
                           </div>
                         </div>
                       )}
-                      <div className="grid gap-3 md:grid-cols-3">
+                      <div className="grid gap-3 lg:grid-cols-3">
                         <Select value={selectionZoneId || "__none_zone__"} onValueChange={(value) => setSelectionZoneId(value === "__none_zone__" ? "" : value)}>
                           <SelectTrigger><SelectValue placeholder="Zone PLU (optionnelle)" /></SelectTrigger>
                           <SelectContent>
@@ -1585,16 +1585,17 @@ export function RegulatoryCalibrationModule({
                   </div>
                 </div>
 
-                <div className="grid gap-4 xl:grid-cols-[1fr,420px]">
-                  <div className="space-y-3 rounded-xl border bg-background p-4 max-h-[760px] overflow-auto">
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),minmax(0,420px)]">
+                  <div className="space-y-3 rounded-xl border bg-background p-4 max-h-[420px] overflow-auto sm:max-h-[520px] xl:max-h-[760px]">
                     <p className="text-sm font-semibold">Texte extrait sélectionnable</p>
                     {workspaceData.pages.map((page) => (
                       <div key={page.pageNumber} className="rounded-xl border bg-muted/10 p-4">
-                        <div className="mb-3 flex items-center justify-between">
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <Badge variant="outline">Page {page.pageNumber}</Badge>
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="w-full sm:w-auto"
                             onClick={() => setPendingSelection({ text: page.text, pageNumber: page.pageNumber })}
                           >
                             Sélectionner la page
@@ -1621,8 +1622,8 @@ export function RegulatoryCalibrationModule({
                       <div className="mt-3 space-y-3">
                         {workspaceData.excerpts.length > 0 ? workspaceData.excerpts.map((excerpt) => (
                           <div key={excerpt.id} className={`rounded-xl border p-3 ${activeExcerptId === excerpt.id ? "border-primary bg-primary/5" : "bg-muted/10"}`}>
-                            <div className="flex items-center justify-between gap-2">
-                              <div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
                                 <p className="font-medium">{excerpt.selectionLabel || `${excerpt.zone?.zoneCode || "Zone"} · Art. ${excerpt.articleCode || "?"}`}</p>
                                 <div className="mt-1 flex flex-wrap gap-2">
                                   {excerpt.zone && <Badge variant="outline">{excerpt.zone.zoneCode}</Badge>}
@@ -1635,7 +1636,7 @@ export function RegulatoryCalibrationModule({
                                 </div>
                                 <p className="text-xs text-muted-foreground">Page {excerpt.sourcePage}{excerpt.sourcePageEnd && excerpt.sourcePageEnd !== excerpt.sourcePage ? ` à ${excerpt.sourcePageEnd}` : ""}</p>
                               </div>
-                              <Button variant="outline" size="sm" onClick={() => setActiveExcerptId(excerpt.id)}>Règles</Button>
+                              <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setActiveExcerptId(excerpt.id)}>Règles</Button>
                             </div>
                             <p className="mt-2 text-xs text-foreground/80 line-clamp-4">{excerpt.sourceText}</p>
                           </div>
@@ -1666,7 +1667,7 @@ export function RegulatoryCalibrationModule({
                               ))}
                             </SelectContent>
                           </Select>
-                          <div className="grid gap-3 md:grid-cols-2">
+                          <div className="grid gap-3 xl:grid-cols-2">
                             <Select value={ruleDrafts[activeExcerptId]?.normativeEffect || "primary"} onValueChange={(value) => setRuleDrafts((current) => ({
                               ...current,
                               [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), normativeEffect: value },
@@ -1690,7 +1691,7 @@ export function RegulatoryCalibrationModule({
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="grid gap-3 md:grid-cols-2">
+                          <div className="grid gap-3 xl:grid-cols-2">
                             <Input placeholder="Portée (main_zone, overlay...)" value={ruleDrafts[activeExcerptId]?.applicabilityScope || "main_zone"} onChange={(e) => setRuleDrafts((current) => ({
                               ...current,
                               [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), applicabilityScope: e.target.value },
@@ -1719,7 +1720,7 @@ export function RegulatoryCalibrationModule({
                             ...current,
                             [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), ruleLabel: e.target.value },
                           }))} />
-                          <div className="grid gap-3 md:grid-cols-3">
+                          <div className="grid gap-3 xl:grid-cols-3">
                             <Input placeholder="Opérateur" value={ruleDrafts[activeExcerptId]?.operator || ""} onChange={(e) => setRuleDrafts((current) => ({
                               ...current,
                               [activeExcerptId]: { ...buildEmptyRuleDraft(), ...(current[activeExcerptId] || {}), operator: e.target.value },
@@ -2064,7 +2065,7 @@ export function RegulatoryCalibrationModule({
             <CardDescription>Le travail interne reste ici. Les brouillons n’alimentent pas le back mairie tant qu’ils ne sont pas publiés.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 lg:grid-cols-3">
               <Select value={libraryOverlayFilter} onValueChange={setLibraryOverlayFilter}>
                 <SelectTrigger><SelectValue placeholder="Filtrer par couche" /></SelectTrigger>
                 <SelectContent>
@@ -2142,7 +2143,7 @@ export function RegulatoryCalibrationModule({
                     )}
                     {editingRuleId === rule.id && (
                       <div className="space-y-3 rounded-xl border bg-muted/10 p-3">
-                        <div className="grid gap-3 md:grid-cols-2">
+                        <div className="grid gap-3 xl:grid-cols-2">
                           <Select
                             value={ruleEditorDrafts[rule.id]?.zoneId || "__none_zone__"}
                             onValueChange={(value) => setRuleEditorDrafts((current) => ({
@@ -2174,7 +2175,7 @@ export function RegulatoryCalibrationModule({
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="grid gap-3 md:grid-cols-3">
+                        <div className="grid gap-3 xl:grid-cols-3">
                           <Select
                             value={ruleEditorDrafts[rule.id]?.themeCode || ""}
                             onValueChange={(value) => setRuleEditorDrafts((current) => ({
@@ -2205,7 +2206,7 @@ export function RegulatoryCalibrationModule({
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="grid gap-3 md:grid-cols-2">
+                        <div className="grid gap-3 xl:grid-cols-2">
                           <Select
                             value={ruleEditorDrafts[rule.id]?.normativeEffect || "primary"}
                             onValueChange={(value) => setRuleEditorDrafts((current) => ({
@@ -2235,7 +2236,7 @@ export function RegulatoryCalibrationModule({
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="grid gap-3 md:grid-cols-3">
+                        <div className="grid gap-3 xl:grid-cols-3">
                           <Input
                             placeholder="Portée"
                             value={ruleEditorDrafts[rule.id]?.applicabilityScope || ""}
@@ -2283,7 +2284,7 @@ export function RegulatoryCalibrationModule({
                             [rule.id]: { ...buildRuleEditorDraft(rule), ...(current[rule.id] || {}), ruleLabel: e.target.value },
                           }))}
                         />
-                        <div className="grid gap-3 md:grid-cols-4">
+                        <div className="grid gap-3 xl:grid-cols-4">
                           <Input
                             placeholder="Opérateur"
                             value={ruleEditorDrafts[rule.id]?.operator || ""}
@@ -2369,7 +2370,7 @@ export function RegulatoryCalibrationModule({
                       </div>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-2 xl:max-w-[260px] xl:justify-end">
+                  <div className="flex flex-wrap gap-2 lg:max-w-[320px] lg:justify-end">
                     <Button
                       variant="outline"
                       size="sm"

@@ -45,12 +45,12 @@ export default function DashboardPage() {
 
   return (
     <ProtectedLayout>
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+      <div className="mb-6 flex flex-col gap-4 md:mb-8 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Tableau de bord</h1>
-          <p className="text-muted-foreground">Gérez vos études de faisabilité et lancez de nouvelles analyses.</p>
+          <h1 className="mb-2 text-2xl font-bold tracking-tight sm:text-3xl">Tableau de bord</h1>
+          <p className="max-w-2xl text-sm text-muted-foreground sm:text-base">Gérez vos études de faisabilité et lancez de nouvelles analyses.</p>
         </div>
-        <Button size="lg" className="shadow-md" asChild>
+        <Button size="lg" className="w-full shadow-md sm:w-auto" asChild>
           <Link href="/analyses/new">
             <Plus className="w-5 h-5 mr-2" />
             Nouvelle analyse
@@ -60,8 +60,8 @@ export default function DashboardPage() {
 
       {/* Admin Quick Access Portals */}
       {user?.role === "admin" && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Link href="/portail-mairie" className="group p-6 bg-green-50/50 hover:bg-green-100/60 border border-green-200 rounded-2xl shadow-sm transition-all hover:shadow-md flex items-center gap-4 group">
+        <div className="mb-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Link href="/portail-mairie" className="group flex items-start gap-4 rounded-2xl border border-green-200 bg-green-50/50 p-5 shadow-sm transition-all hover:bg-green-100/60 hover:shadow-md">
              <div className="w-12 h-12 rounded-xl bg-green-600 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                <ShieldCheck className="w-6 h-6" />
              </div>
@@ -70,7 +70,7 @@ export default function DashboardPage() {
                <p className="text-xs text-green-700/70 italic">Gestion & Pré-instruction locale</p>
              </div>
           </Link>
-          <Link href="/portail-metropole" className="group p-6 bg-indigo-50/50 hover:bg-indigo-100/60 border border-indigo-200 rounded-2xl shadow-sm transition-all hover:shadow-md flex items-center gap-4">
+          <Link href="/portail-metropole" className="group flex items-start gap-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-5 shadow-sm transition-all hover:bg-indigo-100/60 hover:shadow-md">
              <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                <Building2 className="w-6 h-6" />
              </div>
@@ -79,7 +79,7 @@ export default function DashboardPage() {
                <p className="text-xs text-indigo-700/70 italic">Instruction experte mutualisée</p>
              </div>
           </Link>
-          <Link href="/portail-abf" className="group p-6 bg-amber-50/50 hover:bg-amber-100/60 border border-amber-200 rounded-2xl shadow-sm transition-all hover:shadow-md flex items-center gap-4">
+          <Link href="/portail-abf" className="group flex items-start gap-4 rounded-2xl border border-amber-200 bg-amber-50/50 p-5 shadow-sm transition-all hover:bg-amber-100/60 hover:shadow-md">
              <div className="w-12 h-12 rounded-xl bg-amber-700 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                <Scale className="w-6 h-6" />
              </div>
@@ -96,11 +96,11 @@ export default function DashboardPage() {
           <Loader2 className="w-8 h-8 animate-spin text-primary/50" />
         </div>
       ) : data?.analyses?.length === 0 ? (
-        <div className="bg-card rounded-2xl border border-dashed border-border/60 p-12 text-center shadow-sm flex flex-col items-center max-w-2xl mx-auto mt-12">
+        <div className="mx-auto mt-8 flex max-w-2xl flex-col items-center rounded-2xl border border-dashed border-border/60 bg-card p-6 text-center shadow-sm sm:p-10 lg:mt-12 lg:p-12">
           <img 
             src={`${import.meta.env.BASE_URL}images/empty-analyses.png`} 
             alt="Aucune analyse" 
-            className="w-48 h-48 mb-6 opacity-90 mix-blend-multiply"
+            className="mb-6 h-36 w-36 opacity-90 mix-blend-multiply sm:h-48 sm:w-48"
           />
           <h3 className="text-xl font-bold mb-2 text-primary">Aucune analyse pour le moment</h3>
           <p className="text-muted-foreground mb-6 max-w-md mx-auto">
@@ -114,9 +114,9 @@ export default function DashboardPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {data?.analyses?.map((analysis) => (
-            <div key={analysis.id} className="bg-card rounded-2xl p-6 shadow-sm border border-border/50 hover:shadow-md transition-all group flex flex-col h-full relative overflow-hidden">
+            <div key={analysis.id} className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card p-4 shadow-sm transition-all hover:shadow-md sm:p-6">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-accent opacity-0 group-hover:opacity-100 transition-opacity"></div>
               
               <div className="flex justify-between items-start mb-4">

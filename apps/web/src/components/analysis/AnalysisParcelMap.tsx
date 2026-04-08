@@ -129,13 +129,13 @@ export function AnalysisParcelMap({
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl bg-slate-100">
-      <div className="absolute left-4 right-4 top-4 z-[1000] flex flex-wrap items-start justify-between gap-3">
+      <div className="absolute left-3 right-3 top-3 z-[1000] flex flex-col gap-2 sm:left-4 sm:right-4 sm:top-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-3">
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             size="sm"
             variant="secondary"
-            className="h-9 rounded-full border border-slate-200 bg-white/92 px-3 shadow-lg backdrop-blur"
+            className="h-10 rounded-full border border-slate-200 bg-white/92 px-3 shadow-lg backdrop-blur"
             onClick={() => setShowOptionsPanel((value) => !value)}
           >
             <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
@@ -146,7 +146,7 @@ export function AnalysisParcelMap({
             type="button"
             size="sm"
             variant="secondary"
-            className="h-9 rounded-full border border-slate-200 bg-white/92 px-3 shadow-lg backdrop-blur"
+            className="h-10 rounded-full border border-slate-200 bg-white/92 px-3 shadow-lg backdrop-blur"
             onClick={() => setShowInfoPanel((value) => !value)}
           >
             <Info className="mr-1.5 h-3.5 w-3.5" />
@@ -154,7 +154,7 @@ export function AnalysisParcelMap({
             {showInfoPanel ? <ChevronUp className="ml-1.5 h-3.5 w-3.5" /> : <ChevronDown className="ml-1.5 h-3.5 w-3.5" />}
           </Button>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
           <Badge className="border-red-200 bg-red-50 text-red-700">Parcelle</Badge>
           {showBuildings && <Badge className="border-slate-300 bg-slate-100 text-slate-700">Bâti existant</Badge>}
           {isCornerPlot && (
@@ -166,7 +166,7 @@ export function AnalysisParcelMap({
         </div>
       </div>
 
-      <div className="absolute left-4 top-16 z-[1000] flex max-w-[360px] flex-col gap-3">
+      <div className="absolute left-3 right-3 top-[7rem] z-[1000] flex flex-col gap-3 sm:left-4 sm:right-auto sm:top-16 sm:max-w-[360px]">
         {showOptionsPanel && (
           <div className="rounded-2xl border border-slate-200/80 bg-white/92 p-3 shadow-lg backdrop-blur">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
@@ -183,7 +183,7 @@ export function AnalysisParcelMap({
                     type="button"
                     size="sm"
                     variant={isActive ? "default" : "outline"}
-                    className="h-8 gap-1.5 rounded-full px-3 text-xs"
+                    className="h-9 gap-1.5 rounded-full px-3 text-xs"
                     onClick={() => setBaseLayer(key)}
                   >
                     <Icon className="h-3.5 w-3.5" />
@@ -197,7 +197,7 @@ export function AnalysisParcelMap({
                 type="button"
                 size="sm"
                 variant={showBuildings ? "secondary" : "outline"}
-                className="h-7 rounded-full px-3 text-xs"
+                className="h-8 rounded-full px-3 text-xs"
                 onClick={() => setShowBuildings((value) => !value)}
               >
                 <Building2 className="mr-1.5 h-3.5 w-3.5" />
@@ -207,7 +207,7 @@ export function AnalysisParcelMap({
                 type="button"
                 size="sm"
                 variant={showCentroid ? "secondary" : "outline"}
-                className="h-7 rounded-full px-3 text-xs"
+                className="h-8 rounded-full px-3 text-xs"
                 onClick={() => setShowCentroid((value) => !value)}
               >
                 <MapPinned className="mr-1.5 h-3.5 w-3.5" />
@@ -217,7 +217,7 @@ export function AnalysisParcelMap({
                 type="button"
                 size="sm"
                 variant={showParcelLabel ? "secondary" : "outline"}
-                className="h-7 rounded-full px-3 text-xs"
+                className="h-8 rounded-full px-3 text-xs"
                 onClick={() => setShowParcelLabel((value) => !value)}
               >
                 <Info className="mr-1.5 h-3.5 w-3.5" />
@@ -275,7 +275,7 @@ export function AnalysisParcelMap({
               offset={[0, 0]}
               className="border-0 bg-transparent p-0 shadow-none"
             >
-              <div className="rounded-md border border-white/80 bg-white/90 px-2 py-1 text-xs font-semibold text-red-700 shadow-sm backdrop-blur-sm">
+              <div className="rounded-md border border-white/80 bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 shadow-sm backdrop-blur-sm sm:px-2 sm:py-1 sm:text-xs">
                 {parcelSurfaceM2 ? `${parcelSurfaceM2} m²` : "Parcelle"}
               </div>
             </LeafletTooltip>

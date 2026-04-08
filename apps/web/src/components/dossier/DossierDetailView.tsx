@@ -36,20 +36,20 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
   if (!detail) return <div className="p-20 text-center text-slate-500 font-bold">Dossier introuvable.</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-black tracking-tight text-slate-900">{detail.title}</h2>
+    <div className="space-y-6 pb-28 md:pb-32">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="min-w-0 text-xl font-black tracking-tight text-slate-900 sm:text-2xl">{detail.title}</h2>
             <Badge variant="outline" className="font-mono text-[10px] border-slate-200">
               {detail.dossierNumber || "SANS NUMÉRO"}
             </Badge>
           </div>
-          <p className="text-slate-500 flex items-center gap-1.5 text-sm font-medium">
+          <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-slate-500">
             <MapPin className="w-3.5 h-3.5" /> {detail.address}, {detail.commune}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col gap-2 md:items-end">
           <Badge className="h-7 px-3 text-[10px] font-black uppercase tracking-widest bg-primary shadow-sm border-none">
             {detail.status?.replace(/_/g, ' ')}
           </Badge>
@@ -60,7 +60,7 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="bg-slate-100/50 p-1 rounded-xl h-12 border border-slate-200/50">
+        <TabsList className="bg-slate-100/50 p-1 rounded-xl border border-slate-200/50">
           <TabsTrigger value="summary" className="px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary font-bold text-xs">Synthèse</TabsTrigger>
           <TabsTrigger value="analysis" className="px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary font-bold text-xs">Conformité PLU</TabsTrigger>
           <TabsTrigger value="documents" className="px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-primary font-bold text-xs">Pièces ({detail.documents?.length})</TabsTrigger>
@@ -111,13 +111,13 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
         <TabsContent value="documents" className="pt-4 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
            <div className="divide-y divide-slate-50">
              {detail.documents?.map((doc: any) => (
-               <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 transition-colors cursor-pointer group">
-                  <div className="flex items-center gap-3">
+               <div key={doc.id} className="p-4 flex flex-col gap-3 hover:bg-slate-50/50 transition-colors cursor-pointer group sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-primary/10 transition-colors">
                        <FileText className="w-4 h-4 text-slate-400 group-hover:text-primary transition-colors" />
                     </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 leading-none mb-1">{doc.title}</p>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 leading-none mb-1 break-words">{doc.title}</p>
                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest font-mono">{doc.pieceCode || "ANNEXE"}</p>
                     </div>
                   </div>
@@ -187,31 +187,31 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
 
       {/* Action Bar for Instructors & Admin */}
       {(userRole !== "citoyen") && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-slate-200 p-2 rounded-2xl shadow-2xl flex items-center gap-2 z-50 animate-in slide-in-from-bottom-8 duration-1000 ring-4 ring-slate-900/5">
+        <div className="fixed inset-x-3 bottom-3 z-50 flex max-h-[calc(100vh-1.5rem)] flex-wrap items-stretch justify-center gap-2 overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-2xl ring-4 ring-slate-900/5 backdrop-blur-xl animate-in slide-in-from-bottom-8 duration-1000 md:bottom-6 md:left-1/2 md:right-auto md:w-[min(92vw,980px)] md:-translate-x-1/2">
            {(userRole === "mairie" || userRole === "admin") && (
              <>
-               <Button className="rounded-xl h-12 px-6 gap-2 bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 text-sm font-bold" onClick={() => handleTransmit(dossierId)}>
+               <Button className="min-h-12 flex-1 rounded-xl px-4 text-sm font-bold shadow-lg shadow-indigo-200 sm:flex-none sm:px-6 bg-indigo-600 hover:bg-indigo-700" onClick={() => handleTransmit(dossierId)}>
                  <Building2 className="w-4 h-4" /> Transmettre à la Métropole
                </Button>
                {!detail.isAbfConcerned && (
-                 <Button variant="outline" className="rounded-xl h-12 px-6 gap-2 border-amber-200 text-amber-700 hover:bg-amber-50 text-sm font-bold" onClick={() => handleRequestABF(dossierId)}>
+                 <Button variant="outline" className="min-h-12 flex-1 rounded-xl px-4 text-sm font-bold border-amber-200 text-amber-700 hover:bg-amber-50 sm:flex-none sm:px-6" onClick={() => handleRequestABF(dossierId)}>
                    <Landmark className="w-4 h-4" /> Saisir l'ABF
                  </Button>
                )}
              </>
            )}
            {(userRole === "abf" || userRole === "admin") && detail.isAbfConcerned && (
-             <Button className="rounded-xl h-12 px-6 gap-2 bg-amber-700 hover:bg-amber-800 shadow-lg shadow-amber-200 text-sm font-bold">
+             <Button className="min-h-12 flex-1 rounded-xl px-4 text-sm font-bold shadow-lg shadow-amber-200 sm:flex-none sm:px-6 bg-amber-700 hover:bg-amber-800">
                <Shield className="w-4 h-4" /> Rendre un avis conforme
              </Button>
            )}
            {(userRole === "metropole" || userRole === "admin") && (
-             <Button className="rounded-xl h-12 px-6 gap-2 bg-slate-900 hover:bg-black shadow-lg shadow-slate-200 text-sm font-bold" onClick={() => handleGenerateDecision(dossierId)}>
+             <Button className="min-h-12 flex-1 rounded-xl px-4 text-sm font-bold shadow-lg shadow-slate-200 sm:flex-none sm:px-6 bg-slate-900 hover:bg-black" onClick={() => handleGenerateDecision(dossierId)}>
                <Gavel className="w-4 h-4" /> Gérer la décision
              </Button>
            )}
-           <div className="w-[1px] h-8 bg-slate-200 mx-1" />
-           <Button variant="ghost" className="rounded-xl h-12 px-4 text-slate-500 hover:text-slate-900 font-bold text-xs" onClick={() => window.print()}>
+           <div className="hidden h-8 w-[1px] bg-slate-200 mx-1 md:block" />
+           <Button variant="ghost" className="min-h-12 w-full rounded-xl px-4 text-xs font-bold text-slate-500 hover:text-slate-900 sm:w-auto" onClick={() => window.print()}>
              Exporter PDF
            </Button>
         </div>
@@ -339,7 +339,7 @@ function MessagerieSection({ dossierId, currentRole }: { dossierId: string; curr
   };
 
   return (
-    <div className="space-y-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/20 h-[600px] flex flex-col">
+    <div className="flex min-h-[420px] flex-col space-y-4 rounded-3xl border border-slate-100 bg-white p-4 shadow-xl shadow-slate-200/20 h-[min(70vh,600px)] sm:p-6">
        <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
           {messages.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center text-center p-10 opacity-40 grayscale">
@@ -357,14 +357,14 @@ function MessagerieSection({ dossierId, currentRole }: { dossierId: string; curr
             </div>
           ))}
        </div>
-       <div className="pt-2 flex gap-2">
+       <div className="flex flex-wrap gap-2 pt-2">
           {["@ABF", "@Metropole", "@Mairie"].map(m => (
             <button key={m} onClick={() => insertMention(m)} className="px-3 py-1 bg-slate-50 border border-slate-100 rounded-full text-[10px] font-bold text-slate-500 hover:bg-primary/10 hover:text-primary transition-colors">
               {m}
             </button>
           ))}
        </div>
-       <div className="flex gap-2 pt-2 border-t border-slate-50">
+       <div className="flex flex-col gap-2 border-t border-slate-50 pt-2 sm:flex-row">
           <Input 
             value={msg} 
             onChange={(e) => setMsg(e.target.value)} 
@@ -372,7 +372,7 @@ function MessagerieSection({ dossierId, currentRole }: { dossierId: string; curr
             className="h-14 rounded-2xl bg-slate-50 border-none focus-visible:ring-primary shadow-inner" 
             onKeyDown={(e) => e.key === 'Enter' && sendMutation.mutate(msg)}
           />
-          <Button className="h-14 w-14 rounded-2xl bg-primary shadow-lg shadow-indigo-200 active:scale-95 transition-transform" onClick={() => sendMutation.mutate(msg)}>
+          <Button className="h-14 w-full rounded-2xl bg-primary shadow-lg shadow-indigo-200 active:scale-95 transition-transform sm:w-14" onClick={() => sendMutation.mutate(msg)}>
             <Send className="w-5 h-5" />
           </Button>
        </div>
