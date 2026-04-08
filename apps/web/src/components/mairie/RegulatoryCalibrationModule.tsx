@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Search, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Search, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -254,6 +254,78 @@ type OverviewResponse = {
   };
 };
 
+type DetectedZoneReviewSection = {
+  id: string;
+  zoneCode: string;
+  parentZoneCode: string | null;
+  heading: string;
+  startPage: number | null;
+  endPage: number | null;
+  sourceText: string | null;
+  isSubZone: boolean;
+  reviewStatus: "auto" | "validated" | "to_review" | "rejected";
+  reviewNotes: string | null;
+  document: {
+    id: string;
+    title: string;
+    documentType: string | null;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    isOpposable: boolean | null;
+  } | null;
+};
+
+type DetectedZoneReviewData = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    zoneSectionCount: number;
+    validatedZoneCount: number;
+    pendingZoneCount: number;
+    readyStatus: "missing" | "ready" | "partial" | "needs_review";
+  };
+  sections: DetectedZoneReviewSection[];
+};
+
+type DetectedRuleReview = {
+  id: string;
+  zoneCode: string | null;
+  themeKey: string;
+  themeLabel: string;
+  title: string;
+  articleNumber: number | null;
+  sourceText: string;
+  confidence: string;
+  reviewStatus: "auto" | "validated" | "to_review" | "rejected";
+  reviewNotes: string | null;
+  startPage: number | null;
+  endPage: number | null;
+  valueHint?: string | null;
+  requiresManualValidation?: boolean;
+  conflictFlag?: boolean;
+  sourceExcerpt?: string | null;
+  document: {
+    id: string;
+    title: string;
+    documentType: string | null;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    isOpposable: boolean | null;
+  } | null;
+};
+
+type DetectedRuleReviewData = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    ruleCount: number;
+    validatedRuleCount: number;
+    pendingRuleCount: number;
+    readyStatus: "missing" | "ready" | "partial" | "needs_review";
+  };
+  rules: DetectedRuleReview[];
+};
+
 async function apiFetch(path: string, options: RequestInit = {}) {
   const response = await fetch(path, {
     headers: {
@@ -281,6 +353,19 @@ function getStatusBadge(status: string) {
       return { label: "En revue", className: "bg-amber-50 text-amber-700 border-amber-200" };
     default:
       return { label: "Brouillon", className: "bg-muted text-muted-foreground border-border" };
+  }
+}
+
+function getZoneReviewStatusMeta(status?: string) {
+  switch (status) {
+    case "validated":
+      return { label: "Validé", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "to_review":
+      return { label: "À revoir", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    case "rejected":
+      return { label: "Écarté", className: "bg-rose-50 text-rose-700 border-rose-200" };
+    default:
+      return { label: "Auto-détecté", className: "bg-sky-50 text-sky-700 border-sky-200" };
   }
 }
 
@@ -360,6 +445,65 @@ function detectRelationSignalsFromText(text: string) {
   ];
 
   return patterns.flatMap((entry) => entry.pattern.test(text) ? [{ relationType: entry.relationType, label: entry.label }] : []);
+}
+
+function normalizeZoneKey(zoneCode: string | null | undefined) {
+  return (zoneCode || "").replace(/\s+/g, "").trim().toUpperCase();
+}
+
+function extractKeywordHitsFromSource(sourceText: string | null | undefined, keywords: string[]) {
+  if (!sourceText || keywords.length === 0) return [];
+
+  const normalizedKeywords = keywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length > 0);
+  if (normalizedKeywords.length === 0) return [];
+
+  const lines = sourceText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return normalizedKeywords.flatMap((keyword) => {
+    const normalizedKeyword = normalizeSearchText(keyword);
+    return lines.flatMap((line, index) => {
+      if (!normalizeSearchText(line).includes(normalizedKeyword)) return [];
+      const snippet = buildZoneKeywordMatchSnippet(lines, index);
+      return [{
+        keyword,
+        snippet,
+        articleCode: inferArticleCodeFromText(snippet),
+      }];
+    });
+  }).filter((hit, index, all) => all.findIndex((candidate) => candidate.keyword === hit.keyword && candidate.snippet === hit.snippet) === index);
+}
+
+function extractArticleAnchorsFromSource(sourceText: string | null | undefined) {
+  if (!sourceText) return [];
+
+  const lines = sourceText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return lines.flatMap((line) => {
+    const articleCode = inferArticleCodeFromText(line);
+    if (!articleCode) return [];
+    return [{
+      articleCode,
+      label: line.replace(/\s+/g, " ").trim(),
+    }];
+  }).filter((anchor, index, all) => all.findIndex((candidate) => candidate.articleCode === anchor.articleCode && candidate.label === anchor.label) === index);
+}
+
+function buildDetectedRuleEditorDraft(rule: DetectedRuleReview) {
+  return {
+    reviewedZoneCode: rule.zoneCode || "",
+    articleNumber: typeof rule.articleNumber === "number" ? String(rule.articleNumber) : "",
+    title: rule.title || "",
+    sourceText: rule.sourceText || "",
+    reviewNotes: rule.reviewNotes || "",
+  };
 }
 
 function getRuleTargetLabel(rule: Pick<LibraryResponse["rules"][number], "zoneCode" | "overlayCode" | "overlayType">) {
@@ -602,7 +746,9 @@ export function RegulatoryCalibrationModule({
   const [libraryNormativeFilter, setLibraryNormativeFilter] = useState("all");
   const [libraryProceduralFilter, setLibraryProceduralFilter] = useState("all");
   const [quickRuleInputs, setQuickRuleInputs] = useState<Record<string, string>>({});
-  const [expandedGuidanceZoneIds, setExpandedGuidanceZoneIds] = useState<string[]>([]);
+  const [managedZoneId, setManagedZoneId] = useState<string | null>(null);
+  const [editingDetectedRuleId, setEditingDetectedRuleId] = useState<string | null>(null);
+  const [detectedRuleDrafts, setDetectedRuleDrafts] = useState<Record<string, ReturnType<typeof buildDetectedRuleEditorDraft>>>({});
   const [ruleDrafts, setRuleDrafts] = useState<Record<string, {
     themeCode: string;
     ruleLabel: string;
@@ -662,6 +808,18 @@ export function RegulatoryCalibrationModule({
     enabled: currentCommune !== "all",
   });
 
+  const { data: detectedZonesData, isLoading: loadingDetectedZones } = useQuery<DetectedZoneReviewData>({
+    queryKey: ["reg-calibration-zone-reviews", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-zone-reviews?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
+  const { data: detectedRulesData, isLoading: loadingDetectedRules } = useQuery<DetectedRuleReviewData>({
+    queryKey: ["reg-calibration-rule-reviews", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-rule-reviews?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
   const refreshCalibration = () => {
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-overview", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-zones", currentCommune] });
@@ -669,6 +827,8 @@ export function RegulatoryCalibrationModule({
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-workspace", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-library", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["mairie-documents", currentCommune] });
+    queryClient.invalidateQueries({ queryKey: ["reg-calibration-zone-reviews", currentCommune] });
+    queryClient.invalidateQueries({ queryKey: ["reg-calibration-rule-reviews", currentCommune] });
   };
 
   const createZoneMutation = useMutation({
@@ -703,8 +863,9 @@ export function RegulatoryCalibrationModule({
 
   const deleteZoneMutation = useMutation({
     mutationFn: async (zoneId: string) => apiFetch(`/api/mairie/regulatory-calibration/zones/${zoneId}?commune=${encodeURIComponent(currentCommune)}`, { method: "DELETE" }),
-    onSuccess: () => {
+    onSuccess: (_payload, zoneId) => {
       refreshCalibration();
+      setManagedZoneId((current) => (current === zoneId ? null : current));
       toast({ title: "Zone supprimée" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -907,6 +1068,60 @@ export function RegulatoryCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const reviewDetectedZoneMutation = useMutation({
+    mutationFn: async ({
+      id,
+      reviewStatus,
+      reviewedZoneCode,
+      reviewedStartPage,
+      reviewedEndPage,
+    }: {
+      id: string;
+      reviewStatus: "validated" | "to_review" | "rejected";
+      reviewedZoneCode?: string;
+      reviewedStartPage?: number | null;
+      reviewedEndPage?: number | null;
+    }) => apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "POST",
+      body: JSON.stringify({ reviewStatus, reviewedZoneCode, reviewedStartPage, reviewedEndPage }),
+    }),
+    onSuccess: () => {
+      refreshCalibration();
+      toast({ title: "Zone détectée mise à jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteDetectedZoneMutation = useMutation({
+    mutationFn: async (sectionId: string) => apiFetch(`/api/mairie/plu-zone-reviews/${sectionId}?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "DELETE",
+    }),
+    onSuccess: () => {
+      refreshCalibration();
+      toast({ title: "Zone détectée supprimée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateDetectedRuleMutation = useMutation({
+    mutationFn: async ({ ruleId, draft }: { ruleId: string; draft: ReturnType<typeof buildDetectedRuleEditorDraft> }) => apiFetch(`/api/mairie/plu-rule-reviews/${ruleId}?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        reviewedZoneCode: draft.reviewedZoneCode || null,
+        articleNumber: draft.articleNumber || null,
+        title: draft.title,
+        sourceText: draft.sourceText,
+        reviewNotes: draft.reviewNotes,
+      }),
+    }),
+    onSuccess: (_payload, variables) => {
+      refreshCalibration();
+      setEditingDetectedRuleId((current) => (current === variables.ruleId ? null : current));
+      toast({ title: "Article détecté mis à jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const createRelationMutation = useMutation({
     mutationFn: async ({ ruleId, draft }: { ruleId: string; draft: ReturnType<typeof buildEmptyRelationDraft> }) => apiFetch(`/api/mairie/regulatory-calibration/rules/${ruleId}/relations`, {
       method: "POST",
@@ -1077,64 +1292,64 @@ export function RegulatoryCalibrationModule({
       });
   }, [workspaceData?.zones, zonesData?.zones]);
 
-  const zoneGuidanceCards = useMemo(() => {
-    if (!workspaceData) return [];
+  const pendingDetectedSections = useMemo(() => {
+    return (detectedZonesData?.sections || []).filter((section) => section.reviewStatus !== "validated");
+  }, [detectedZonesData?.sections]);
 
-    return configuredZones.map((zone) => {
-      const pageStart = zone.referenceStartPage || 1;
-      const pageEnd = zone.referenceEndPage || workspaceData.pages.at(-1)?.pageNumber || pageStart;
-      const pagesInRange = workspaceData.pages.filter((page) => page.pageNumber >= pageStart && page.pageNumber <= pageEnd);
-      const normalizedKeywords = (zone.searchKeywords || [])
-        .map((keyword) => keyword.trim())
-        .filter((keyword) => keyword.length > 0);
+  const detectedRulesByZone = useMemo(() => {
+    const map = new Map<string, DetectedRuleReview[]>();
+    for (const rule of detectedRulesData?.rules || []) {
+      if (rule.reviewStatus === "rejected") continue;
+      const key = normalizeZoneKey(rule.zoneCode);
+      if (!key) continue;
+      const existing = map.get(key) || [];
+      existing.push(rule);
+      map.set(key, existing);
+    }
+    return map;
+  }, [detectedRulesData?.rules]);
 
-      const articleAnchors = pagesInRange.flatMap((page) => {
-        return page.text
-          .split(/\n+/)
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0)
-          .flatMap((line) => {
-            const articleCode = inferArticleCodeFromText(line);
-            if (!articleCode) return [];
-            return [{
-              articleCode,
-              pageNumber: page.pageNumber,
-              label: line.replace(/\s+/g, " ").trim(),
-            }];
-          });
-      }).filter((anchor, index, all) => all.findIndex((candidate) => candidate.articleCode === anchor.articleCode && candidate.pageNumber === anchor.pageNumber) === index);
+  const detectedSectionsByZone = useMemo(() => {
+    const map = new Map<string, DetectedZoneReviewSection[]>();
+    for (const section of pendingDetectedSections) {
+      const key = normalizeZoneKey(section.zoneCode);
+      if (!key) continue;
+      const existing = map.get(key) || [];
+      existing.push(section);
+      map.set(key, existing);
+    }
+    return map;
+  }, [pendingDetectedSections]);
 
-      const keywordMatches = normalizedKeywords.flatMap((keyword) => {
-        const normalizedKeyword = normalizeSearchText(keyword);
-        return pagesInRange.flatMap((page) => {
-          const lines = page.text
-            .split(/\n+/)
-            .map((line) => line.trim())
-            .filter((line) => line.length > 0);
+  const managedZone = useMemo(
+    () => configuredZones.find((zone) => zone.id === managedZoneId) || null,
+    [configuredZones, managedZoneId],
+  );
+  const managedZoneKey = normalizeZoneKey(managedZone?.zoneCode);
+  const managedZoneSections = managedZoneKey ? (detectedSectionsByZone.get(managedZoneKey) || []) : [];
+  const managedZoneDetectedRules = managedZoneKey ? (detectedRulesByZone.get(managedZoneKey) || []) : [];
 
-          return lines.flatMap((line, index) => {
-            if (!normalizeSearchText(line).includes(normalizedKeyword)) return [];
-            const snippet = buildZoneKeywordMatchSnippet(lines, index);
-            return [{
-              keyword,
-              pageNumber: page.pageNumber,
-              snippet,
-              articleCode: inferArticleCodeFromText(snippet),
-            }];
-          });
-        });
-      }).filter((match, index, all) => all.findIndex((candidate) => candidate.keyword === match.keyword && candidate.pageNumber === match.pageNumber && candidate.snippet === match.snippet) === index);
-
-      return {
-        zone,
-        pageStart,
-        pageEnd,
-        pagesInRangeCount: pagesInRange.length,
-        articleAnchors,
-        keywordMatches,
-      };
-    });
-  }, [configuredZones, workspaceData]);
+  const openCalibrationForZone = (args: {
+    documentId?: string | null;
+    zone: ZoneItem;
+    articleCode?: string | null;
+    sourceText?: string | null;
+    pageNumber?: number | null;
+    label?: string | null;
+  }) => {
+    if (args.documentId) {
+      setSelectedDocumentId(args.documentId);
+    }
+    setActiveTab("calibration");
+    setSelectionZoneId(args.zone.id);
+    setSelectionOverlayId("");
+    setSelectionArticleCode(args.articleCode || "");
+    setSelectionLabel(args.label || "");
+    setActiveExcerptId(null);
+    if (args.sourceText && typeof args.pageNumber === "number") {
+      setPendingSelection({ text: args.sourceText, pageNumber: args.pageNumber });
+    }
+  };
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -1206,6 +1421,335 @@ export function RegulatoryCalibrationModule({
       )}
 
       <TabsContent value="zones" className="space-y-4">
+        {managedZone && (
+          <Card className="border-primary/10 shadow-sm">
+            <CardHeader className="pb-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1">
+                  <Button variant="ghost" size="sm" className="w-fit px-0 text-muted-foreground hover:text-foreground" onClick={() => setManagedZoneId(null)}>
+                    <ChevronRight className="mr-2 h-4 w-4 rotate-180" />
+                    Retour aux zones
+                  </Button>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <ScrollText className="w-4 h-4 text-primary" />
+                    Administrer la zone {managedZone.zoneCode}
+                  </CardTitle>
+                  <CardDescription>
+                    Les détections, articles auto-identifiés et actions de calibrage sont regroupés ici pour cette zone uniquement.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(managedZone.referenceStartPage || managedZone.referenceEndPage) && (
+                    <Badge variant="outline">
+                      Pages {managedZone.referenceStartPage || "?"}{managedZone.referenceEndPage && managedZone.referenceEndPage !== managedZone.referenceStartPage ? ` à ${managedZone.referenceEndPage}` : ""}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200">
+                    {managedZoneSections.length} zone(s) détectée(s)
+                  </Badge>
+                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                    {managedZoneDetectedRules.length} article(s) identifiés
+                  </Badge>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border bg-muted/10 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{managedZone.zoneCode}</Badge>
+                  {managedZone.parentZoneCode && <Badge variant="secondary">hérite de {managedZone.parentZoneCode}</Badge>}
+                </div>
+                <p className="mt-3 font-medium">{managedZone.zoneLabel || `Zone ${managedZone.zoneCode}`}</p>
+                {managedZone.guidanceNotes && <p className="mt-2 text-sm text-muted-foreground">{managedZone.guidanceNotes}</p>}
+                {managedZone.searchKeywords.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {managedZone.searchKeywords.map((keyword) => (
+                      <Badge key={`${managedZone.id}-${keyword}`} variant="outline" className="text-[11px]">
+                        <Search className="mr-1 h-3 w-3" />
+                        {keyword}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => openCalibrationForZone({
+                    documentId: managedZoneSections[0]?.document?.id || managedZoneDetectedRules[0]?.document?.id || null,
+                    zone: managedZone,
+                    label: `${managedZone.zoneCode} · Nouvel article`,
+                  })}
+                >
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  Ajouter un article manquant
+                </Button>
+              </div>
+
+              <Card className="border-primary/10 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Zones détectées liées</CardTitle>
+                  <CardDescription>Les détections automatiques de cette zone restent ici, sans polluer la liste principale.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {loadingDetectedZones ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Lecture des détections…</div>
+                  ) : managedZoneSections.length > 0 ? managedZoneSections.map((section) => {
+                    const statusMeta = getZoneReviewStatusMeta(section.reviewStatus);
+                    const keywordHits = extractKeywordHitsFromSource(section.sourceText, managedZone.searchKeywords || []);
+                    const articleAnchors = extractArticleAnchorsFromSource(section.sourceText);
+                    return (
+                      <div key={section.id} className="rounded-xl border bg-muted/10 p-3">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className={statusMeta.className}>{statusMeta.label}</Badge>
+                              {section.document?.documentType && <Badge variant="secondary">{section.document.documentType}</Badge>}
+                              <Badge variant="outline">Pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}</Badge>
+                            </div>
+                            <p className="font-medium">{section.heading}</p>
+                            {section.document?.title && <p className="text-xs text-muted-foreground">{section.document.title}</p>}
+                            {articleAnchors.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {articleAnchors.slice(0, 8).map((anchor) => (
+                                  <Badge key={`${section.id}-${anchor.articleCode}-${anchor.label}`} variant="outline">Art. {anchor.articleCode}</Badge>
+                                ))}
+                              </div>
+                            )}
+                            {keywordHits.length > 0 && (
+                              <div className="space-y-2 rounded-lg border bg-background p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Textes retrouvés via les filtres</p>
+                                {keywordHits.slice(0, 4).map((hit, index) => (
+                                  <div key={`${section.id}-${hit.keyword}-${index}`} className="rounded-lg border bg-muted/10 px-3 py-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge variant="outline">{hit.keyword}</Badge>
+                                      {hit.articleCode && <Badge variant="secondary">Art. {hit.articleCode}</Badge>}
+                                    </div>
+                                    <p className="mt-2 text-xs text-foreground/85">{hit.snippet}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 lg:max-w-[320px] lg:justify-end">
+                            {section.document?.id && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedDocumentId(section.document?.id || null);
+                                    setActiveTab("calibration");
+                                  }}
+                                >
+                                  <Eye className="mr-2 h-3.5 w-3.5" />
+                                  Ouvrir
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={resegmentDocumentMutation.isPending}
+                                  onClick={() => resegmentDocumentMutation.mutate(section.document!.id)}
+                                >
+                                  {resegmentDocumentMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
+                                  Re-segmenter
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                              disabled={reviewDetectedZoneMutation.isPending}
+                              onClick={() => reviewDetectedZoneMutation.mutate({ id: section.id, reviewStatus: "validated" })}
+                            >
+                              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                              Valider
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                              disabled={reviewDetectedZoneMutation.isPending}
+                              onClick={() => reviewDetectedZoneMutation.mutate({ id: section.id, reviewStatus: "to_review" })}
+                            >
+                              <AlertTriangle className="mr-2 h-3.5 w-3.5" />
+                              À revoir
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-destructive/20 text-destructive hover:bg-destructive/5"
+                              disabled={deleteDetectedZoneMutation.isPending}
+                              onClick={() => {
+                                if (!window.confirm(`Supprimer définitivement la détection ${section.heading} ?`)) return;
+                                deleteDetectedZoneMutation.mutate(section.id);
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-3.5 w-3.5" />
+                              Supprimer
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }) : (
+                    <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                      Aucune zone détectée en attente n’est actuellement rattachée à {managedZone.zoneCode}.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-primary/10 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm">Articles identifiés pour cette zone</CardTitle>
+                  <CardDescription>Corrige ici les articles trouvés avant de les transformer en règles calibrées.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {loadingDetectedRules ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Lecture des articles identifiés…</div>
+                  ) : managedZoneDetectedRules.length > 0 ? managedZoneDetectedRules.map((rule) => (
+                    <div key={rule.id} className="rounded-xl border bg-muted/10 p-3">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="secondary">{rule.themeLabel}</Badge>
+                            {typeof rule.articleNumber === "number" && <Badge variant="outline">Art. {rule.articleNumber}</Badge>}
+                            <Badge variant="outline" className={getZoneReviewStatusMeta(rule.reviewStatus).className}>{getZoneReviewStatusMeta(rule.reviewStatus).label}</Badge>
+                          </div>
+                          <p className="font-medium">{rule.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {rule.document?.title ? `${rule.document.title} · ` : ""}
+                            Pages {rule.startPage ?? "?"}{rule.endPage && rule.endPage !== rule.startPage ? ` à ${rule.endPage}` : ""}
+                          </p>
+                          {editingDetectedRuleId === rule.id ? (
+                            <div className="space-y-3 rounded-xl border bg-background p-3">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <Input
+                                  placeholder="Code zone"
+                                  value={detectedRuleDrafts[rule.id]?.reviewedZoneCode || ""}
+                                  onChange={(e) => setDetectedRuleDrafts((current) => ({
+                                    ...current,
+                                    [rule.id]: { ...buildDetectedRuleEditorDraft(rule), ...(current[rule.id] || {}), reviewedZoneCode: e.target.value },
+                                  }))}
+                                />
+                                <Input
+                                  placeholder="Article"
+                                  value={detectedRuleDrafts[rule.id]?.articleNumber || ""}
+                                  onChange={(e) => setDetectedRuleDrafts((current) => ({
+                                    ...current,
+                                    [rule.id]: { ...buildDetectedRuleEditorDraft(rule), ...(current[rule.id] || {}), articleNumber: e.target.value },
+                                  }))}
+                                />
+                              </div>
+                              <Input
+                                placeholder="Titre / libellé"
+                                value={detectedRuleDrafts[rule.id]?.title || ""}
+                                onChange={(e) => setDetectedRuleDrafts((current) => ({
+                                  ...current,
+                                  [rule.id]: { ...buildDetectedRuleEditorDraft(rule), ...(current[rule.id] || {}), title: e.target.value },
+                                }))}
+                              />
+                              <Textarea
+                                placeholder="Texte source"
+                                value={detectedRuleDrafts[rule.id]?.sourceText || ""}
+                                onChange={(e) => setDetectedRuleDrafts((current) => ({
+                                  ...current,
+                                  [rule.id]: { ...buildDetectedRuleEditorDraft(rule), ...(current[rule.id] || {}), sourceText: e.target.value },
+                                }))}
+                              />
+                              <Textarea
+                                placeholder="Note de revue"
+                                value={detectedRuleDrafts[rule.id]?.reviewNotes || ""}
+                                onChange={(e) => setDetectedRuleDrafts((current) => ({
+                                  ...current,
+                                  [rule.id]: { ...buildDetectedRuleEditorDraft(rule), ...(current[rule.id] || {}), reviewNotes: e.target.value },
+                                }))}
+                              />
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  size="sm"
+                                  disabled={updateDetectedRuleMutation.isPending || !(detectedRuleDrafts[rule.id]?.title || "").trim() || !(detectedRuleDrafts[rule.id]?.sourceText || "").trim()}
+                                  onClick={() => updateDetectedRuleMutation.mutate({
+                                    ruleId: rule.id,
+                                    draft: detectedRuleDrafts[rule.id] || buildDetectedRuleEditorDraft(rule),
+                                  })}
+                                >
+                                  {updateDetectedRuleMutation.isPending ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-2 h-3.5 w-3.5" />}
+                                  Enregistrer
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingDetectedRuleId(null);
+                                    setDetectedRuleDrafts((current) => {
+                                      const next = { ...current };
+                                      delete next[rule.id];
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  Annuler
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="rounded-lg bg-background px-3 py-2 text-sm text-foreground/90">{rule.sourceText}</div>
+                              {rule.reviewNotes && <p className="rounded-lg bg-background px-3 py-2 text-xs text-muted-foreground">{rule.reviewNotes}</p>}
+                            </>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 lg:max-w-[320px] lg:justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={updateDetectedRuleMutation.isPending}
+                            onClick={() => {
+                              if (editingDetectedRuleId === rule.id) {
+                                setEditingDetectedRuleId(null);
+                                return;
+                              }
+                              setDetectedRuleDrafts((current) => ({ ...current, [rule.id]: buildDetectedRuleEditorDraft(rule) }));
+                              setEditingDetectedRuleId(rule.id);
+                            }}
+                          >
+                            <FilePenLine className="mr-2 h-3.5 w-3.5" />
+                            {editingDetectedRuleId === rule.id ? "Fermer" : "Modifier"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openCalibrationForZone({
+                              documentId: rule.document?.id || null,
+                              zone: managedZone,
+                              articleCode: typeof rule.articleNumber === "number" ? String(rule.articleNumber) : null,
+                              sourceText: rule.sourceText,
+                              pageNumber: rule.startPage,
+                              label: rule.title,
+                            })}
+                          >
+                            <ScrollText className="mr-2 h-3.5 w-3.5" />
+                            Calibrer
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-lg border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                      Aucun article auto-identifié pour cette zone pour l’instant. Utilise `Ajouter un article manquant` pour le créer depuis le calibrage.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </CardContent>
+          </Card>
+        )}
+
+        {!managedZone && (
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" /> Zones de la commune</CardTitle>
@@ -1246,7 +1790,11 @@ export function RegulatoryCalibrationModule({
               {loadingZones ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Lecture des zones…</div>
               ) : (zonesData?.zones || []).length > 0 ? (
-                zonesData!.zones.map((zone) => (
+                zonesData!.zones.map((zone) => {
+                  const zoneKey = normalizeZoneKey(zone.zoneCode);
+                  const zoneSections = detectedSectionsByZone.get(zoneKey) || [];
+                  const zoneDetectedRules = detectedRulesByZone.get(zoneKey) || [];
+                  return (
                   <div key={zone.id} className="rounded-xl border bg-background p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="min-w-0 space-y-1">
@@ -1256,6 +1804,16 @@ export function RegulatoryCalibrationModule({
                           {(zone.referenceStartPage || zone.referenceEndPage) && (
                             <Badge variant="outline">
                               Pages {zone.referenceStartPage || "?"}{zone.referenceEndPage && zone.referenceEndPage !== zone.referenceStartPage ? ` à ${zone.referenceEndPage}` : ""}
+                            </Badge>
+                          )}
+                          {zoneSections.length > 0 && (
+                            <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200">
+                              {zoneSections.length} zone(s) détectée(s)
+                            </Badge>
+                          )}
+                          {zoneDetectedRules.length > 0 && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                              {zoneDetectedRules.length} article(s) identifiés
                             </Badge>
                           )}
                         </div>
@@ -1363,6 +1921,25 @@ export function RegulatoryCalibrationModule({
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => setManagedZoneId(zone.id)}
+                        >
+                          <ScrollText className="mr-2 h-3.5 w-3.5" />
+                          Administrer
+                        </Button>
+                        {zoneSections.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-sky-200 text-sky-700 hover:bg-sky-50"
+                            onClick={() => setManagedZoneId(zone.id)}
+                          >
+                            <Eye className="mr-2 h-3.5 w-3.5" />
+                            Voir les détections
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
                           disabled={updateZoneMutation.isPending || deleteZoneMutation.isPending}
                           onClick={() => {
                             if (editingZoneId === zone.id) {
@@ -1385,14 +1962,16 @@ export function RegulatoryCalibrationModule({
                       </div>
                     </div>
                   </div>
-                ))
+                )})
               ) : (
                 <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">Aucune zone configurée pour cette commune.</div>
               )}
             </div>
           </CardContent>
         </Card>
+        )}
 
+        {!managedZone && (
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2"><Layers3 className="w-4 h-4 text-primary" /> Couches réglementaires</CardTitle>
@@ -1575,6 +2154,7 @@ export function RegulatoryCalibrationModule({
             </div>
           </CardContent>
         </Card>
+        )}
       </TabsContent>
 
       <TabsContent value="documents" className="space-y-4">
@@ -1826,125 +2406,6 @@ export function RegulatoryCalibrationModule({
                       </Button>
                     </div>
 
-                  </div>
-                </div>
-
-                <div className="rounded-xl border bg-background p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold">Guidage par zone</p>
-                      <p className="text-xs text-muted-foreground">Le calibrage s’appuie ici uniquement sur les zones configurées dans l’onglet `Zones`, leurs pages de référence et leurs mots-clés.</p>
-                    </div>
-                    <Badge variant="outline" className="w-fit">
-                      {configuredZones.length} zone(s) configurée(s)
-                    </Badge>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {zoneGuidanceCards.length > 0 ? zoneGuidanceCards.map(({ zone, pageStart, pageEnd, pagesInRangeCount, articleAnchors, keywordMatches }) => {
-                      const isExpanded = expandedGuidanceZoneIds.includes(zone.id);
-                      return (
-                        <div key={zone.id} className="rounded-xl border bg-muted/10 p-3">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="min-w-0 space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{zone.zoneCode}</Badge>
-                                <Badge variant="outline">
-                                  Pages {zone.referenceStartPage || "?"}{zone.referenceEndPage && zone.referenceEndPage !== zone.referenceStartPage ? ` à ${zone.referenceEndPage}` : zone.referenceEndPage ? "" : " à ?"}
-                                </Badge>
-                                {zone.parentZoneCode && <Badge variant="secondary">hérite de {zone.parentZoneCode}</Badge>}
-                                <Badge variant="outline">{pagesInRangeCount} page(s) analysée(s)</Badge>
-                              </div>
-                              <p className="font-medium">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
-                              {zone.searchKeywords.length > 0 ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {zone.searchKeywords.map((keyword) => (
-                                    <Badge key={`${zone.id}-${keyword}`} variant="outline" className="text-[11px]">
-                                      <Search className="mr-1 h-3 w-3" />
-                                      {keyword}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-xs text-amber-700">Ajoute des mots-clés pour guider la recherche dans les pages {pageStart} à {pageEnd}.</p>
-                              )}
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setExpandedGuidanceZoneIds((current) => (
-                                current.includes(zone.id)
-                                  ? current.filter((id) => id !== zone.id)
-                                  : [...current, zone.id]
-                              ))}
-                            >
-                              {isExpanded ? <ChevronDown className="mr-2 h-3.5 w-3.5" /> : <ChevronRight className="mr-2 h-3.5 w-3.5" />}
-                              {isExpanded ? "Replier" : "Déployer la zone"}
-                            </Button>
-                          </div>
-
-                          {isExpanded && (
-                            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                              <div className="space-y-3 rounded-xl border bg-background p-3">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Articles repérés dans la plage</p>
-                                {articleAnchors.length > 0 ? (
-                                  <div className="space-y-2">
-                                    {articleAnchors.map((anchor) => (
-                                      <div key={`${zone.id}-${anchor.articleCode}-${anchor.pageNumber}-${anchor.label}`} className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <Badge variant="outline">Art. {anchor.articleCode}</Badge>
-                                          <Badge variant="secondary">Page {anchor.pageNumber}</Badge>
-                                        </div>
-                                        <p className="mt-2 text-foreground/85">{anchor.label}</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">Aucun article clairement repéré dans cette plage pour le moment.</p>
-                                )}
-                              </div>
-
-                              <div className="space-y-3 rounded-xl border bg-background p-3">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Textes retrouvés via les mots-clés</p>
-                                {keywordMatches.length > 0 ? (
-                                  <div className="space-y-2">
-                                    {keywordMatches.map((match) => (
-                                      <div key={`${zone.id}-${match.keyword}-${match.pageNumber}-${match.snippet}`} className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <Badge variant="outline">{match.keyword}</Badge>
-                                          <Badge variant="secondary">Page {match.pageNumber}</Badge>
-                                          {match.articleCode && <Badge variant="outline">Art. {match.articleCode}</Badge>}
-                                        </div>
-                                        <p className="mt-2 text-foreground/90">{match.snippet}</p>
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => {
-                                              setPendingSelection({ text: match.snippet, pageNumber: match.pageNumber });
-                                              setSelectionZoneId(zone.id);
-                                              if (match.articleCode) setSelectionArticleCode(match.articleCode);
-                                            }}
-                                          >
-                                            Utiliser cet extrait
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">Aucun texte retrouvé à partir des mots-clés dans la plage sélectionnée.</p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }) : (
-                      <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                        Configure d’abord des zones dans l’onglet `Zones`, puis calibre leurs pages et leurs mots-clés pour guider l’analyse.
-                      </div>
-                    )}
                   </div>
                 </div>
 

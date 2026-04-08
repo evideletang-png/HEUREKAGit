@@ -1902,7 +1902,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </Card>
       )}
 
-      {currentCommune !== "all" && (
+      {!useRegulatoryCalibrationModule && currentCommune !== "all" && (
         <Card className="border-primary/15 shadow-sm">
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">

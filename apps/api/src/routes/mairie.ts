@@ -587,6 +587,25 @@ function normalizeOptionalPositivePage(raw: unknown): number | null {
   return value > 0 ? value : null;
 }
 
+function normalizeReviewedArticleNumber(raw: unknown): string | null {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return String(Math.trunc(raw));
+  }
+
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.toLowerCase() === "manual") return "manual";
+
+  const digits = trimmed.match(/\d{1,2}/)?.[0];
+  return digits || null;
+}
+
+function buildReviewedSourceArticle(articleNumber: string | null) {
+  if (!articleNumber || articleNumber === "manual") return null;
+  return `Article ${articleNumber}`;
+}
+
 function normalizeDocumentFingerprintPart(raw: string | null | undefined) {
   return (raw || "")
     .toLowerCase()
@@ -4775,6 +4794,81 @@ router.post("/plu-rule-reviews/:id/review", async (req: AuthRequest, res) => {
     return res.json({ success: true });
   } catch (err) {
     logger.error("[mairie/plu-rule-reviews POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.patch("/plu-rule-reviews/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const {
+      reviewedZoneCode,
+      articleNumber,
+      title,
+      sourceText,
+      reviewNotes,
+    } = req.body || {};
+
+    const [rule] = await db.select({
+      id: urbanRulesTable.id,
+      municipalityId: urbanRulesTable.municipalityId,
+      zoneCode: urbanRulesTable.zoneCode,
+      ruleLabel: urbanRulesTable.ruleLabel,
+      ruleTextRaw: urbanRulesTable.ruleTextRaw,
+      sourceArticle: urbanRulesTable.sourceArticle,
+      validationNote: urbanRulesTable.validationNote,
+    }).from(urbanRulesTable)
+      .where(eq(urbanRulesTable.id, id))
+      .limit(1);
+
+    if (!rule) {
+      return res.status(404).json({ error: "RULE_NOT_FOUND" });
+    }
+
+    const access = await resolveAuthorizedTownHallCommune(
+      req.user!.userId,
+      req.query.commune as string | undefined || rule.municipalityId,
+    );
+    if (!access.ok) {
+      return res.status(access.status).json(access.error);
+    }
+
+    const nextZoneCode = normalizeConfiguredZoneCode(reviewedZoneCode) || rule.zoneCode;
+    const normalizedArticleNumber = normalizeReviewedArticleNumber(articleNumber);
+    const nextSourceText =
+      typeof sourceText === "string" && sourceText.trim().length > 0
+        ? sourceText.trim()
+        : rule.ruleTextRaw;
+    const nextTitle =
+      typeof title === "string" && title.trim().length > 0
+        ? title.trim()
+        : rule.ruleLabel;
+    const nextSourceArticle =
+      articleNumber === undefined
+        ? rule.sourceArticle
+        : buildReviewedSourceArticle(normalizedArticleNumber);
+    const nextReviewNotes =
+      reviewNotes === undefined
+        ? rule.validationNote
+        : (typeof reviewNotes === "string" ? reviewNotes.trim() || null : null);
+
+    await db.update(urbanRulesTable)
+      .set({
+        zoneCode: nextZoneCode,
+        subzoneCode: deriveParentZoneCode(nextZoneCode) ? nextZoneCode : null,
+        sourceArticle: nextSourceArticle,
+        ruleLabel: nextTitle,
+        ruleTextRaw: nextSourceText,
+        sourceExcerpt: nextSourceText.slice(0, 800),
+        validationNote: nextReviewNotes,
+        validatedByUser: req.user!.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(urbanRulesTable.id, id));
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/plu-rule-reviews PATCH]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
