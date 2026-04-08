@@ -19,6 +19,13 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -273,6 +280,7 @@ export function ZoneCalibrationWorkspace({
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
+  const [detailRule, setDetailRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
   const [manualArticleMode, setManualArticleMode] = useState(false);
   const [manualArticle, setManualArticle] = useState({
     articleCode: "",
@@ -1069,18 +1077,35 @@ export function ZoneCalibrationWorkspace({
                   {data.rules.length > 0 ? data.rules.map((rule) => {
                     const badge = getStatusBadge(rule.status);
                     return (
-                      <div key={rule.id} className="rounded-xl border bg-muted/10 p-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">Art. {rule.articleCode}</Badge>
-                          <Badge variant="secondary">{rule.ruleLabel}</Badge>
-                          <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
+                      <div key={rule.id} className="overflow-hidden rounded-xl border bg-muted/10 p-3">
+                        <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-start">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">Art. {rule.articleCode}</Badge>
+                            <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
+                          </div>
+                          <div className="min-w-0 space-y-2">
+                            <p className="text-sm font-semibold leading-snug text-primary break-words">
+                              {rule.ruleLabel}
+                            </p>
+                            <p className="text-sm font-medium leading-snug break-words whitespace-pre-wrap">
+                              {formatRuleValue(rule)}
+                            </p>
+                            {rule.conditionText && (
+                              <p className="text-xs leading-snug text-muted-foreground break-words whitespace-pre-wrap">
+                                {rule.conditionText}
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                              {rule.document?.title ? `${rule.document.title} · ` : ""}
+                              page {rule.sourcePage}
+                            </p>
+                          </div>
+                          <div className="flex md:justify-end">
+                            <Button size="sm" variant="outline" onClick={() => setDetailRule(rule)}>
+                              Voir le détail
+                            </Button>
+                          </div>
                         </div>
-                        <p className="mt-2 text-sm font-medium">{formatRuleValue(rule)}</p>
-                        {rule.conditionText && <p className="mt-1 text-xs text-muted-foreground">{rule.conditionText}</p>}
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {rule.document?.title ? `${rule.document.title} · ` : ""}
-                          page {rule.sourcePage}
-                        </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {rule.status !== "validated" && (
                             <Button
@@ -1113,6 +1138,56 @@ export function ZoneCalibrationWorkspace({
               </ScrollArea>
             </CardContent>
           </Card>
+
+          <Dialog open={!!detailRule} onOpenChange={(open) => !open && setDetailRule(null)}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Détail de la règle</DialogTitle>
+                <DialogDescription>
+                  Lecture complète de la règle sans étirer la zone de travail.
+                </DialogDescription>
+              </DialogHeader>
+              {detailRule && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">Art. {detailRule.articleCode}</Badge>
+                    <Badge variant="outline" className={getStatusBadge(detailRule.status).className}>
+                      {getStatusBadge(detailRule.status).label}
+                    </Badge>
+                  </div>
+                  <div className="space-y-2 rounded-xl border bg-muted/10 p-4">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Libellé</div>
+                      <p className="mt-1 text-sm font-medium leading-snug break-words whitespace-pre-wrap">{detailRule.ruleLabel}</p>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valeur interprétée</div>
+                      <p className="mt-1 text-sm leading-snug break-words whitespace-pre-wrap">{formatRuleValue(detailRule)}</p>
+                    </div>
+                    {detailRule.conditionText && (
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Condition</div>
+                        <p className="mt-1 text-sm leading-snug break-words whitespace-pre-wrap">{detailRule.conditionText}</p>
+                      </div>
+                    )}
+                    {detailRule.interpretationNote && (
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Interprétation</div>
+                        <p className="mt-1 text-sm leading-snug break-words whitespace-pre-wrap">{detailRule.interpretationNote}</p>
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Source</div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {detailRule.document?.title ? `${detailRule.document.title} · ` : ""}
+                        page {detailRule.sourcePage}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>
