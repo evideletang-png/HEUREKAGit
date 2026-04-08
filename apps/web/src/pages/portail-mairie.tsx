@@ -1600,7 +1600,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const useRegulatoryCalibrationModule = true;
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="w-full space-y-6">
       <input
         id="batch-upload"
         type="file"
