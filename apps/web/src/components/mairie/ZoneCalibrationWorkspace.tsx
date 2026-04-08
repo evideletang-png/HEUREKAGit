@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  CircleHelp,
   FilePlus2,
   FolderSearch,
   Loader2,
@@ -31,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { ZonePdfViewer } from "@/components/mairie/ZonePdfViewer";
 
@@ -260,6 +262,41 @@ function getStatusBadge(status: string) {
     default:
       return { label: "Brouillon", className: "bg-muted text-muted-foreground border-border" };
   }
+}
+
+function RuleFieldHelp({
+  label,
+  help,
+  children,
+}: {
+  label: string;
+  help: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label={`Aide : ${label}`}
+            >
+              <CircleHelp className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs whitespace-pre-line text-left leading-relaxed">
+            {help}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 function parsePositiveInt(raw: string) {
@@ -962,88 +999,140 @@ export function ZoneCalibrationWorkspace({
                 ) : null}
                 {selectedExcerptId ? <span>extrait calibré déjà enregistré</span> : <span>sélection non enregistrée</span>}
               </div>
-              <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
-                <div className="text-sm font-medium">Interprétation et règle ferme</div>
-                <div className="flex gap-2">
-                  <Input
-                    value={quickRuleInput}
-                    disabled={!data.permissions.canEditCalibration}
-                    onChange={(event) => setQuickRuleInput(event.target.value)}
-                    placeholder='Ex : "Hauteur 15 m" ou "Stationnement 2 places / logement"'
-                  />
-                  <Button variant="outline" onClick={applyQuickRuleInput} disabled={!data.permissions.canEditCalibration}>
-                    <Sparkles className="h-4 w-4" />
-                    Interpréter
-                  </Button>
+              <TooltipProvider delayDuration={120}>
+                <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
+                  <div className="text-sm font-medium">Interprétation et règle ferme</div>
+                  <RuleFieldHelp
+                    label="Saisie rapide"
+                    help={`Parle naturellement au système pour préremplir la règle.\nExemples : "Hauteur 15 m", "Recul voie 5 m", "2 places par logement".`}
+                  >
+                    <div className="flex gap-2">
+                      <Input
+                        value={quickRuleInput}
+                        disabled={!data.permissions.canEditCalibration}
+                        onChange={(event) => setQuickRuleInput(event.target.value)}
+                        placeholder='Ex : "Hauteur 15 m" ou "Stationnement 2 places / logement"'
+                      />
+                      <Button variant="outline" onClick={applyQuickRuleInput} disabled={!data.permissions.canEditCalibration}>
+                        <Sparkles className="h-4 w-4" />
+                        Interpréter
+                      </Button>
+                    </div>
+                  </RuleFieldHelp>
+                  <RuleFieldHelp
+                    label="Thème métier"
+                    help={`Classe la règle dans la bonne famille pour l'analyse.\nExemples : hauteur, stationnement, emprise au sol, recul voie, aspect extérieur.`}
+                  >
+                    <Select value={ruleDraft.themeCode || "__none__"} disabled={!data.permissions.canEditCalibration} onValueChange={(value) => setRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Thème métier" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Aucun thème</SelectItem>
+                        {data.themes.map((theme) => (
+                          <SelectItem key={theme.code} value={theme.code}>
+                            {theme.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </RuleFieldHelp>
+                  <RuleFieldHelp
+                    label="Libellé de la règle"
+                    help={`Titre court et lisible de la règle.\nExemples : "Hauteur maximale", "Stationnement logements", "Occupations interdites".`}
+                  >
+                    <Input
+                      value={ruleDraft.ruleLabel}
+                      disabled={!data.permissions.canEditCalibration}
+                      onChange={(event) => setRuleDraft((current) => ({ ...current, ruleLabel: event.target.value }))}
+                      placeholder="Libellé de la règle"
+                    />
+                  </RuleFieldHelp>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <RuleFieldHelp
+                      label="Opérateur"
+                      help={`Définit la logique de la règle.\nExemples : =, <=, >=, interdit, autorisé, soumis à condition.`}
+                    >
+                      <Input
+                        value={ruleDraft.operator}
+                        disabled={!data.permissions.canEditCalibration}
+                        onChange={(event) => setRuleDraft((current) => ({ ...current, operator: event.target.value }))}
+                        placeholder="Opérateur"
+                      />
+                    </RuleFieldHelp>
+                    <RuleFieldHelp
+                      label="Valeur numérique"
+                      help={`À renseigner si la règle porte sur un chiffre.\nExemples : 15, 5, 2, 30.`}
+                    >
+                      <Input
+                        value={ruleDraft.valueNumeric}
+                        disabled={!data.permissions.canEditCalibration}
+                        onChange={(event) => setRuleDraft((current) => ({ ...current, valueNumeric: event.target.value }))}
+                        placeholder="Valeur numérique"
+                      />
+                    </RuleFieldHelp>
+                    <RuleFieldHelp
+                      label="Unité"
+                      help={`Unité associée à la valeur numérique.\nExemples : m, m², %, place/logement, place/50 m².`}
+                    >
+                      <Input
+                        value={ruleDraft.unit}
+                        disabled={!data.permissions.canEditCalibration}
+                        onChange={(event) => setRuleDraft((current) => ({ ...current, unit: event.target.value }))}
+                        placeholder="Unité"
+                      />
+                    </RuleFieldHelp>
+                  </div>
+                  <RuleFieldHelp
+                    label="Valeur textuelle"
+                    help={`À utiliser quand la règle ne se résume pas à un chiffre.\nExemples : "2 places par logement", "Aucune place exigée", "Construction interdite".`}
+                  >
+                    <Textarea
+                      value={ruleDraft.valueText}
+                      disabled={!data.permissions.canEditCalibration}
+                      onChange={(event) => setRuleDraft((current) => ({ ...current, valueText: event.target.value }))}
+                      placeholder="Valeur textuelle"
+                      rows={2}
+                    />
+                  </RuleFieldHelp>
+                  <RuleFieldHelp
+                    label="Condition"
+                    help={`À remplir si la règle ne s'applique que dans un cas particulier.\nExemples : "en cas de changement de destination", "pour les logements de deux pièces et plus".`}
+                  >
+                    <Textarea
+                      value={ruleDraft.conditionText}
+                      disabled={!data.permissions.canEditCalibration}
+                      onChange={(event) => setRuleDraft((current) => ({ ...current, conditionText: event.target.value }))}
+                      placeholder="Condition"
+                      rows={2}
+                    />
+                  </RuleFieldHelp>
+                  <RuleFieldHelp
+                    label="Interprétation réglementaire"
+                    help={`Ta reformulation métier de la règle en français simple.\nElle sert à clarifier le sens de l'article pour les futures analyses.`}
+                  >
+                    <Textarea
+                      value={ruleDraft.interpretationNote}
+                      disabled={!data.permissions.canEditCalibration}
+                      onChange={(event) => setRuleDraft((current) => ({ ...current, interpretationNote: event.target.value }))}
+                      placeholder="Interprétation réglementaire"
+                      rows={3}
+                    />
+                  </RuleFieldHelp>
+                  <RuleFieldHelp
+                    label="Pièce visuelle / croquis"
+                    help={`Décris ici le schéma, croquis ou détail graphique utile à la règle.\nExemples : "croquis montrant une bande de recul", "profil de hauteur", "schéma d'implantation".`}
+                  >
+                    <Textarea
+                      value={visualSupportNote}
+                      disabled={!data.permissions.canEditCalibration}
+                      onChange={(event) => setVisualSupportNote(event.target.value)}
+                      placeholder="Pièce visuelle / croquis si besoin : décris ici l’élément graphique à prendre en compte"
+                      rows={2}
+                    />
+                  </RuleFieldHelp>
                 </div>
-                <Select value={ruleDraft.themeCode || "__none__"} disabled={!data.permissions.canEditCalibration} onValueChange={(value) => setRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Thème métier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Aucun thème</SelectItem>
-                    {data.themes.map((theme) => (
-                      <SelectItem key={theme.code} value={theme.code}>
-                        {theme.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={ruleDraft.ruleLabel}
-                  disabled={!data.permissions.canEditCalibration}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, ruleLabel: event.target.value }))}
-                  placeholder="Libellé de la règle"
-                />
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Input
-                    value={ruleDraft.operator}
-                    disabled={!data.permissions.canEditCalibration}
-                    onChange={(event) => setRuleDraft((current) => ({ ...current, operator: event.target.value }))}
-                    placeholder="Opérateur"
-                  />
-                  <Input
-                    value={ruleDraft.valueNumeric}
-                    disabled={!data.permissions.canEditCalibration}
-                    onChange={(event) => setRuleDraft((current) => ({ ...current, valueNumeric: event.target.value }))}
-                    placeholder="Valeur numérique"
-                  />
-                  <Input
-                    value={ruleDraft.unit}
-                    disabled={!data.permissions.canEditCalibration}
-                    onChange={(event) => setRuleDraft((current) => ({ ...current, unit: event.target.value }))}
-                    placeholder="Unité"
-                  />
-                </div>
-                <Textarea
-                  value={ruleDraft.valueText}
-                  disabled={!data.permissions.canEditCalibration}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, valueText: event.target.value }))}
-                  placeholder="Valeur textuelle"
-                  rows={2}
-                />
-                <Textarea
-                  value={ruleDraft.conditionText}
-                  disabled={!data.permissions.canEditCalibration}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, conditionText: event.target.value }))}
-                  placeholder="Condition"
-                  rows={2}
-                />
-                <Textarea
-                  value={ruleDraft.interpretationNote}
-                  disabled={!data.permissions.canEditCalibration}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, interpretationNote: event.target.value }))}
-                  placeholder="Interprétation réglementaire"
-                  rows={3}
-                />
-                <Textarea
-                  value={visualSupportNote}
-                  disabled={!data.permissions.canEditCalibration}
-                  onChange={(event) => setVisualSupportNote(event.target.value)}
-                  placeholder="Pièce visuelle / croquis si besoin : décris ici l’élément graphique à prendre en compte"
-                  rows={2}
-                />
-              </div>
+              </TooltipProvider>
               <div className="flex flex-wrap gap-2">
                 <Button
                   disabled={!data.permissions.canEditCalibration || createExcerptMutation.isPending || !selection?.text || !selection?.pageNumber}
