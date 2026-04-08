@@ -580,6 +580,13 @@ function normalizeZoneSearchKeywords(raw: unknown): string[] {
   return [];
 }
 
+function normalizeOptionalPositivePage(raw: unknown): number | null {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return null;
+  const value = Math.trunc(numeric);
+  return value > 0 ? value : null;
+}
+
 function normalizeDocumentFingerprintPart(raw: string | null | undefined) {
   return (raw || "")
     .toLowerCase()
@@ -615,9 +622,20 @@ function isLikelyPluZoneCode(raw: unknown, options?: { allowSingleLetter?: boole
     "SUP",
     "EBC",
     "ER",
+    "ARTICLE",
+    "AVEC",
+    "AVOIR",
+    "AYANT",
+    "UNE",
+    "NON",
+    "NUM",
+    "PAGES",
+    "PAGE",
+    "COMMUNE",
   ]);
 
   if (blockedCodes.has(normalized)) return null;
+  if (normalized.includes("ARTICLE")) return null;
   if (/^(ART|ANN|PAGE|PLAN|CARTE|ZONE)\b/.test(normalized)) return null;
   if (/^\d{1,2}AU[A-Z0-9-]*$/.test(normalized)) return normalized;
   if (/^[UNA][A-Z0-9-]{1,4}$/.test(normalized)) return normalized;
@@ -682,9 +700,23 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
     const maxLineLength = options?.zoningLike ? 96 : 36;
     if (!trimmed || trimmed.length > maxLineLength) continue;
 
+    const headingMatch = trimmed.match(/^(?:r[ée]glement\s+de\s+la\s+zone|dispositions\s+applicables\s+(?:à|a)\s+la\s+zone|zone)\s+([A-Z0-9-]+)$/i);
+    if (headingMatch?.[1]) {
+      addZoneCode(headingMatch[1], { allowSingleLetter: true });
+      continue;
+    }
+
     const prefixedMatch = trimmed.match(/^zone\s+([A-Z0-9-]+)$/i);
     if (prefixedMatch?.[1]) {
       addZoneCode(prefixedMatch[1], { allowSingleLetter: true });
+      continue;
+    }
+
+    if (!options?.zoningLike) {
+      const standaloneZoneMatch = trimmed.match(/^((?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*)$/i);
+      if (standaloneZoneMatch?.[1]) {
+        addZoneCode(standaloneZoneMatch[1], { allowSingleLetter: true });
+      }
       continue;
     }
 
@@ -692,8 +724,6 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
     if (lineLeadMatch?.[1]) {
       addZoneCode(lineLeadMatch[1], { allowSingleLetter: true });
     }
-
-    if (!options?.zoningLike && !/^[A-Z0-9 -]+$/.test(trimmed.toUpperCase())) continue;
 
     const tokens = trimmed.toUpperCase().match(/\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g) || [];
     for (const token of tokens) {
@@ -3014,6 +3044,8 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
           sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
           guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
           searchKeywords: normalizeZoneSearchKeywords(req.body.searchKeywords),
+          referenceStartPage: normalizeOptionalPositivePage(req.body.referenceStartPage),
+          referenceEndPage: normalizeOptionalPositivePage(req.body.referenceEndPage),
           displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
           isActive: req.body.isActive === false ? false : true,
           updatedBy: req.user!.userId,
@@ -3039,6 +3071,8 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
         guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
         searchKeywords: normalizeZoneSearchKeywords(req.body.searchKeywords),
+        referenceStartPage: normalizeOptionalPositivePage(req.body.referenceStartPage),
+        referenceEndPage: normalizeOptionalPositivePage(req.body.referenceEndPage),
         displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
         isActive: req.body.isActive === false ? false : true,
         createdBy: req.user!.userId,
@@ -3082,6 +3116,8 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
         sectorCode: req.body.sectorCode === undefined ? zone.sectorCode : (typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null),
         guidanceNotes: req.body.guidanceNotes === undefined ? zone.guidanceNotes : (typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null),
         searchKeywords: req.body.searchKeywords === undefined ? zone.searchKeywords : normalizeZoneSearchKeywords(req.body.searchKeywords),
+        referenceStartPage: req.body.referenceStartPage === undefined ? zone.referenceStartPage : normalizeOptionalPositivePage(req.body.referenceStartPage),
+        referenceEndPage: req.body.referenceEndPage === undefined ? zone.referenceEndPage : normalizeOptionalPositivePage(req.body.referenceEndPage),
         displayOrder: req.body.displayOrder === undefined ? zone.displayOrder : (Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : zone.displayOrder),
         isActive: req.body.isActive === undefined ? zone.isActive : !!req.body.isActive,
         updatedBy: req.user!.userId,

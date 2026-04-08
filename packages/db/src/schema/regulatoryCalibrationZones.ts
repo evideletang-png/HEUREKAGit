@@ -11,6 +11,8 @@ export const regulatoryCalibrationZonesTable = pgTable("regulatory_calibration_z
   sectorCode: text("sector_code"),
   guidanceNotes: text("guidance_notes"),
   searchKeywords: jsonb("search_keywords").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  referenceStartPage: integer("reference_start_page"),
+  referenceEndPage: integer("reference_end_page"),
   displayOrder: integer("display_order").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
   createdBy: text("created_by"),

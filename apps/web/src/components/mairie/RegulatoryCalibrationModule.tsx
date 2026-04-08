@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CheckCircle2, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Search, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,8 @@ type ZoneItem = {
   sectorCode: string | null;
   guidanceNotes: string | null;
   searchKeywords: string[];
+  referenceStartPage: number | null;
+  referenceEndPage: number | null;
   displayOrder: number;
   isActive: boolean;
 };
@@ -401,6 +403,8 @@ function buildZoneEditorDraft(zone: ZoneItem) {
     parentZoneCode: zone.parentZoneCode || "",
     guidanceNotes: zone.guidanceNotes || "",
     searchKeywordsText: (zone.searchKeywords || []).join(", "),
+    referenceStartPage: zone.referenceStartPage ? String(zone.referenceStartPage) : "",
+    referenceEndPage: zone.referenceEndPage ? String(zone.referenceEndPage) : "",
   };
 }
 
@@ -520,6 +524,28 @@ function buildQuickRuleDraft(input: string, themes: ThemeItem[]) {
   };
 }
 
+function parseOptionalPositiveInteger(raw: string) {
+  const value = Number.parseInt(raw.trim(), 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function normalizeSearchText(raw: string) {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function inferArticleCodeFromText(raw: string) {
+  const articleMatch = raw.match(/\b(?:[A-Z0-9-]+\s*-\s*)?ARTICLE\s*(\d{1,2})\b/i) || raw.match(/\bART\.?\s*(\d{1,2})\b/i);
+  return articleMatch?.[1] || null;
+}
+
+function buildZoneKeywordMatchSnippet(lines: string[], index: number) {
+  const window = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 2));
+  return window.join(" ").replace(/\s+/g, " ").trim();
+}
+
 export function RegulatoryCalibrationModule({
   currentCommune,
   documents,
@@ -533,7 +559,15 @@ export function RegulatoryCalibrationModule({
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("zones");
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [zoneForm, setZoneForm] = useState({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "", searchKeywordsText: "" });
+  const [zoneForm, setZoneForm] = useState({
+    zoneCode: "",
+    zoneLabel: "",
+    parentZoneCode: "",
+    guidanceNotes: "",
+    searchKeywordsText: "",
+    referenceStartPage: "",
+    referenceEndPage: "",
+  });
   const [overlayForm, setOverlayForm] = useState({
     overlayCode: "",
     overlayLabel: "",
@@ -568,6 +602,7 @@ export function RegulatoryCalibrationModule({
   const [libraryNormativeFilter, setLibraryNormativeFilter] = useState("all");
   const [libraryProceduralFilter, setLibraryProceduralFilter] = useState("all");
   const [quickRuleInputs, setQuickRuleInputs] = useState<Record<string, string>>({});
+  const [expandedGuidanceZoneIds, setExpandedGuidanceZoneIds] = useState<string[]>([]);
   const [ruleDrafts, setRuleDrafts] = useState<Record<string, {
     themeCode: string;
     ruleLabel: string;
@@ -646,10 +681,20 @@ export function RegulatoryCalibrationModule({
         parentZoneCode: zoneForm.parentZoneCode,
         guidanceNotes: zoneForm.guidanceNotes,
         searchKeywords: zoneForm.searchKeywordsText,
+        referenceStartPage: parseOptionalPositiveInteger(zoneForm.referenceStartPage),
+        referenceEndPage: parseOptionalPositiveInteger(zoneForm.referenceEndPage),
       }),
     }),
     onSuccess: () => {
-      setZoneForm({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "", searchKeywordsText: "" });
+      setZoneForm({
+        zoneCode: "",
+        zoneLabel: "",
+        parentZoneCode: "",
+        guidanceNotes: "",
+        searchKeywordsText: "",
+        referenceStartPage: "",
+        referenceEndPage: "",
+      });
       refreshCalibration();
       toast({ title: "Zone créée", description: "La zone est prête pour le calibrage." });
     },
@@ -738,6 +783,8 @@ export function RegulatoryCalibrationModule({
         parentZoneCode: draft.parentZoneCode,
         guidanceNotes: draft.guidanceNotes,
         searchKeywords: draft.searchKeywordsText,
+        referenceStartPage: parseOptionalPositiveInteger(draft.referenceStartPage),
+        referenceEndPage: parseOptionalPositiveInteger(draft.referenceEndPage),
       }),
     }),
     onSuccess: (_payload, variables) => {
@@ -1018,6 +1065,77 @@ export function RegulatoryCalibrationModule({
     };
   }, [publishedData?.rules]);
 
+  const configuredZones = useMemo(() => {
+    const zones = zonesData?.zones || workspaceData?.zones || [];
+    return zones
+      .filter((zone) => zone.isActive !== false)
+      .slice()
+      .sort((left, right) => {
+        const orderDelta = (left.displayOrder || 0) - (right.displayOrder || 0);
+        if (orderDelta !== 0) return orderDelta;
+        return `${left.zoneCode} ${left.zoneLabel || ""}`.localeCompare(`${right.zoneCode} ${right.zoneLabel || ""}`, "fr");
+      });
+  }, [workspaceData?.zones, zonesData?.zones]);
+
+  const zoneGuidanceCards = useMemo(() => {
+    if (!workspaceData) return [];
+
+    return configuredZones.map((zone) => {
+      const pageStart = zone.referenceStartPage || 1;
+      const pageEnd = zone.referenceEndPage || workspaceData.pages.at(-1)?.pageNumber || pageStart;
+      const pagesInRange = workspaceData.pages.filter((page) => page.pageNumber >= pageStart && page.pageNumber <= pageEnd);
+      const normalizedKeywords = (zone.searchKeywords || [])
+        .map((keyword) => keyword.trim())
+        .filter((keyword) => keyword.length > 0);
+
+      const articleAnchors = pagesInRange.flatMap((page) => {
+        return page.text
+          .split(/\n+/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .flatMap((line) => {
+            const articleCode = inferArticleCodeFromText(line);
+            if (!articleCode) return [];
+            return [{
+              articleCode,
+              pageNumber: page.pageNumber,
+              label: line.replace(/\s+/g, " ").trim(),
+            }];
+          });
+      }).filter((anchor, index, all) => all.findIndex((candidate) => candidate.articleCode === anchor.articleCode && candidate.pageNumber === anchor.pageNumber) === index);
+
+      const keywordMatches = normalizedKeywords.flatMap((keyword) => {
+        const normalizedKeyword = normalizeSearchText(keyword);
+        return pagesInRange.flatMap((page) => {
+          const lines = page.text
+            .split(/\n+/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+
+          return lines.flatMap((line, index) => {
+            if (!normalizeSearchText(line).includes(normalizedKeyword)) return [];
+            const snippet = buildZoneKeywordMatchSnippet(lines, index);
+            return [{
+              keyword,
+              pageNumber: page.pageNumber,
+              snippet,
+              articleCode: inferArticleCodeFromText(snippet),
+            }];
+          });
+        });
+      }).filter((match, index, all) => all.findIndex((candidate) => candidate.keyword === match.keyword && candidate.pageNumber === match.pageNumber && candidate.snippet === match.snippet) === index);
+
+      return {
+        zone,
+        pageStart,
+        pageEnd,
+        pagesInRangeCount: pagesInRange.length,
+        articleAnchors,
+        keywordMatches,
+      };
+    });
+  }, [configuredZones, workspaceData]);
+
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
       <TabsList className="w-full justify-start rounded-2xl bg-muted/40 p-1">
@@ -1098,6 +1216,10 @@ export function RegulatoryCalibrationModule({
               <Input placeholder="Code zone (ex : N, UA, UDa, 1AU)" value={zoneForm.zoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, zoneCode: e.target.value }))} />
               <Input placeholder="Libellé optionnel" value={zoneForm.zoneLabel} onChange={(e) => setZoneForm((v) => ({ ...v, zoneLabel: e.target.value }))} />
               <Input placeholder="Zone mère optionnelle" value={zoneForm.parentZoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, parentZoneCode: e.target.value }))} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input placeholder="Page début (ex : 12)" inputMode="numeric" value={zoneForm.referenceStartPage} onChange={(e) => setZoneForm((v) => ({ ...v, referenceStartPage: e.target.value }))} />
+                <Input placeholder="Page fin (ex : 18)" inputMode="numeric" value={zoneForm.referenceEndPage} onChange={(e) => setZoneForm((v) => ({ ...v, referenceEndPage: e.target.value }))} />
+              </div>
               <Textarea placeholder="Notes de guidage (pages, secteur, nuances utiles)" value={zoneForm.guidanceNotes} onChange={(e) => setZoneForm((v) => ({ ...v, guidanceNotes: e.target.value }))} />
               <Textarea placeholder="Mots-clés de recherche (stationnement, changement de destination, article 12...)" value={zoneForm.searchKeywordsText} onChange={(e) => setZoneForm((v) => ({ ...v, searchKeywordsText: e.target.value }))} />
               <Button
@@ -1131,6 +1253,11 @@ export function RegulatoryCalibrationModule({
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{zone.zoneCode}</Badge>
                           {zone.parentZoneCode && <Badge variant="secondary">hérite de {zone.parentZoneCode}</Badge>}
+                          {(zone.referenceStartPage || zone.referenceEndPage) && (
+                            <Badge variant="outline">
+                              Pages {zone.referenceStartPage || "?"}{zone.referenceEndPage && zone.referenceEndPage !== zone.referenceStartPage ? ` à ${zone.referenceEndPage}` : ""}
+                            </Badge>
+                          )}
                         </div>
                         <p className="font-medium break-words">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
                         {zone.guidanceNotes && <p className="text-sm text-muted-foreground break-words">{zone.guidanceNotes}</p>}
@@ -1169,6 +1296,26 @@ export function RegulatoryCalibrationModule({
                                 [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), parentZoneCode: e.target.value },
                               }))}
                             />
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <Input
+                                placeholder="Page début"
+                                inputMode="numeric"
+                                value={zoneEditorDrafts[zone.id]?.referenceStartPage || ""}
+                                onChange={(e) => setZoneEditorDrafts((current) => ({
+                                  ...current,
+                                  [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), referenceStartPage: e.target.value },
+                                }))}
+                              />
+                              <Input
+                                placeholder="Page fin"
+                                inputMode="numeric"
+                                value={zoneEditorDrafts[zone.id]?.referenceEndPage || ""}
+                                onChange={(e) => setZoneEditorDrafts((current) => ({
+                                  ...current,
+                                  [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), referenceEndPage: e.target.value },
+                                }))}
+                              />
+                            </div>
                             <Textarea
                               placeholder="Notes de guidage"
                               value={zoneEditorDrafts[zone.id]?.guidanceNotes || ""}
@@ -1622,7 +1769,7 @@ export function RegulatoryCalibrationModule({
                     <div className="rounded-xl border bg-background p-4 space-y-3">
                       <div>
                         <p className="text-sm font-semibold">Sélection courante</p>
-                        <p className="text-xs text-muted-foreground">Sélectionne du texte dans les pages ci-dessous, puis rattache-le à une zone, une couche réglementaire ou les deux.</p>
+                        <p className="text-xs text-muted-foreground">Sélectionne du texte dans les pages ci-dessous, puis rattache-le à une zone du référentiel `Zones`, une couche réglementaire ou les deux.</p>
                       </div>
                       <div className="rounded-lg border bg-muted/20 p-3 text-sm min-h-[120px]">
                         {pendingSelection ? pendingSelection.text : "Aucune sélection active"}
@@ -1644,7 +1791,7 @@ export function RegulatoryCalibrationModule({
                           <SelectTrigger><SelectValue placeholder="Zone PLU (optionnelle)" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none_zone__">Aucune zone</SelectItem>
-                            {workspaceData.zones.map((zone) => (
+                            {configuredZones.map((zone) => (
                               <SelectItem key={zone.id} value={zone.id}>{zone.zoneCode}{zone.zoneLabel ? ` · ${zone.zoneLabel}` : ""}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1679,6 +1826,125 @@ export function RegulatoryCalibrationModule({
                       </Button>
                     </div>
 
+                  </div>
+                </div>
+
+                <div className="rounded-xl border bg-background p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold">Guidage par zone</p>
+                      <p className="text-xs text-muted-foreground">Le calibrage s’appuie ici uniquement sur les zones configurées dans l’onglet `Zones`, leurs pages de référence et leurs mots-clés.</p>
+                    </div>
+                    <Badge variant="outline" className="w-fit">
+                      {configuredZones.length} zone(s) configurée(s)
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    {zoneGuidanceCards.length > 0 ? zoneGuidanceCards.map(({ zone, pageStart, pageEnd, pagesInRangeCount, articleAnchors, keywordMatches }) => {
+                      const isExpanded = expandedGuidanceZoneIds.includes(zone.id);
+                      return (
+                        <div key={zone.id} className="rounded-xl border bg-muted/10 p-3">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{zone.zoneCode}</Badge>
+                                <Badge variant="outline">
+                                  Pages {zone.referenceStartPage || "?"}{zone.referenceEndPage && zone.referenceEndPage !== zone.referenceStartPage ? ` à ${zone.referenceEndPage}` : zone.referenceEndPage ? "" : " à ?"}
+                                </Badge>
+                                {zone.parentZoneCode && <Badge variant="secondary">hérite de {zone.parentZoneCode}</Badge>}
+                                <Badge variant="outline">{pagesInRangeCount} page(s) analysée(s)</Badge>
+                              </div>
+                              <p className="font-medium">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
+                              {zone.searchKeywords.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                  {zone.searchKeywords.map((keyword) => (
+                                    <Badge key={`${zone.id}-${keyword}`} variant="outline" className="text-[11px]">
+                                      <Search className="mr-1 h-3 w-3" />
+                                      {keyword}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-amber-700">Ajoute des mots-clés pour guider la recherche dans les pages {pageStart} à {pageEnd}.</p>
+                              )}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setExpandedGuidanceZoneIds((current) => (
+                                current.includes(zone.id)
+                                  ? current.filter((id) => id !== zone.id)
+                                  : [...current, zone.id]
+                              ))}
+                            >
+                              {isExpanded ? <ChevronDown className="mr-2 h-3.5 w-3.5" /> : <ChevronRight className="mr-2 h-3.5 w-3.5" />}
+                              {isExpanded ? "Replier" : "Déployer la zone"}
+                            </Button>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                              <div className="space-y-3 rounded-xl border bg-background p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Articles repérés dans la plage</p>
+                                {articleAnchors.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {articleAnchors.map((anchor) => (
+                                      <div key={`${zone.id}-${anchor.articleCode}-${anchor.pageNumber}-${anchor.label}`} className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Badge variant="outline">Art. {anchor.articleCode}</Badge>
+                                          <Badge variant="secondary">Page {anchor.pageNumber}</Badge>
+                                        </div>
+                                        <p className="mt-2 text-foreground/85">{anchor.label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">Aucun article clairement repéré dans cette plage pour le moment.</p>
+                                )}
+                              </div>
+
+                              <div className="space-y-3 rounded-xl border bg-background p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Textes retrouvés via les mots-clés</p>
+                                {keywordMatches.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {keywordMatches.map((match) => (
+                                      <div key={`${zone.id}-${match.keyword}-${match.pageNumber}-${match.snippet}`} className="rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Badge variant="outline">{match.keyword}</Badge>
+                                          <Badge variant="secondary">Page {match.pageNumber}</Badge>
+                                          {match.articleCode && <Badge variant="outline">Art. {match.articleCode}</Badge>}
+                                        </div>
+                                        <p className="mt-2 text-foreground/90">{match.snippet}</p>
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                              setPendingSelection({ text: match.snippet, pageNumber: match.pageNumber });
+                                              setSelectionZoneId(zone.id);
+                                              if (match.articleCode) setSelectionArticleCode(match.articleCode);
+                                            }}
+                                          >
+                                            Utiliser cet extrait
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground">Aucun texte retrouvé à partir des mots-clés dans la plage sélectionnée.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }) : (
+                      <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                        Configure d’abord des zones dans l’onglet `Zones`, puis calibre leurs pages et leurs mots-clés pour guider l’analyse.
+                      </div>
+                    )}
                   </div>
                 </div>
 
