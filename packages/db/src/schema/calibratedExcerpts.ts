@@ -4,12 +4,14 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { townHallDocumentsTable } from "./townHallDocuments";
 import { regulatoryCalibrationZonesTable } from "./regulatoryCalibrationZones";
 import { regulatoryOverlaysTable } from "./regulatoryOverlays";
+import { zoneThematicSegmentsTable } from "./zoneThematicSegments";
 
 export const calibratedExcerptsTable = pgTable("calibrated_excerpts", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   communeId: text("commune_id").notNull(),
   zoneId: uuid("zone_id").references(() => regulatoryCalibrationZonesTable.id, { onDelete: "cascade" }),
   overlayId: uuid("overlay_id").references(() => regulatoryOverlaysTable.id, { onDelete: "cascade" }),
+  segmentId: uuid("segment_id").references(() => zoneThematicSegmentsTable.id, { onDelete: "set null" }),
   documentId: uuid("document_id").references(() => townHallDocumentsTable.id, { onDelete: "cascade" }).notNull(),
   articleCode: text("article_code"),
   selectionLabel: text("selection_label"),
@@ -32,6 +34,7 @@ export const calibratedExcerptsTable = pgTable("calibrated_excerpts", {
   communeIdx: index("calibrated_excerpts_commune_idx").on(table.communeId),
   zoneIdx: index("calibrated_excerpts_zone_idx").on(table.zoneId),
   overlayIdx: index("calibrated_excerpts_overlay_idx").on(table.overlayId),
+  segmentIdx: index("calibrated_excerpts_segment_idx").on(table.segmentId),
   documentIdx: index("calibrated_excerpts_document_idx").on(table.documentId),
   statusIdx: index("calibrated_excerpts_status_idx").on(table.status),
 }));

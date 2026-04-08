@@ -141,6 +141,20 @@
       "when": 1775671200000,
       "tag": "0019_regulatory_calibration_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1775689200000,
+      "tag": "0020_zone_thematic_segments",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1775696400000,
+      "tag": "0021_nullable_indexed_rule_article",
+      "breakpoints": true
     }
   ]
 }

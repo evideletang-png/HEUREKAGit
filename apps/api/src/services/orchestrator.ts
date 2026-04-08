@@ -34,6 +34,7 @@ import { withRetry } from "../utils/retry.js";
 import { evaluateRequiredPieces, PIECE_LABELS } from "./pieceRules.js";
 import { BusinessDecisionSchema, SYSTEM_PROMPTS, JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { communesTable } from "@workspace/db";
+import { loadZoneSegmentsForCommuneZone } from "./expertZoneAnalysisService.js";
 
 import { geocodeAddress } from "./geocoding.js";
 import { getZoningByCoords } from "./planning.js";
@@ -341,6 +342,65 @@ function buildFallbackZoneArticlesFromParsedRules(parsedRules: any[]) {
       };
     })
     .filter(Boolean);
+}
+
+function buildRuleArticlesFromExpertBlocks(blocks: Array<{
+  articleCode: string | null;
+  themeCode: string;
+  themeLabel: string;
+  anchorType: string;
+  anchorLabel: string | null;
+  ruleResumee: string;
+  detailUtile: string;
+  exceptionsConditions: string | null;
+  effetConcretConstructibilite: string;
+  niveauVigilance: "faible" | "moyen" | "fort";
+  qualification: string;
+  sources: Array<{
+    documentTitle: string | null;
+    pageStart: number | null;
+    pageEnd: number | null;
+    anchorType: string | null;
+    anchorLabel: string | null;
+    sourceType: "published_rule" | "segment";
+  }>;
+  supportingRuleIds: string[];
+  segmentIds: string[];
+}>) {
+  return blocks.map((block, index) => {
+    const articleNumber = Number.parseInt(String(block.articleCode || "").replace(/\D+/g, ""), 10);
+    const primarySource = block.sources[0] || null;
+    const title = block.articleCode
+      ? `Article ${block.articleCode} — ${block.themeLabel}`
+      : `${block.themeLabel}${block.anchorLabel ? ` — ${block.anchorLabel}` : ""}`;
+
+    return {
+      articleNumber: Number.isFinite(articleNumber) ? articleNumber : 1000 + index,
+      title,
+      sourceText: block.detailUtile || block.ruleResumee || "",
+      summary: block.ruleResumee || "",
+      impactText: block.effetConcretConstructibilite || "",
+      vigilanceText: [
+        `Vigilance ${block.niveauVigilance}`,
+        block.qualification,
+        block.exceptionsConditions || "",
+      ].filter(Boolean).join(" · "),
+      confidence: block.niveauVigilance === "fort" ? "medium" : "high",
+      structuredJson: JSON.stringify({
+        themeCode: block.themeCode,
+        themeLabel: block.themeLabel,
+        anchorType: block.anchorType,
+        anchorLabel: block.anchorLabel,
+        qualification: block.qualification,
+        exceptionsConditions: block.exceptionsConditions,
+        supportingRuleIds: block.supportingRuleIds,
+        segmentIds: block.segmentIds,
+        primarySource,
+        sources: block.sources,
+        expertBlock: block,
+      }),
+    };
+  });
 }
 
 /**
@@ -1359,6 +1419,49 @@ export async function orchestrateDossierAnalysis(
       fullZoneAnalysis.digest = buildDeterministicZoneDigest(fullZoneAnalysis.articles, finalZone);
     }
 
+    const communeAliases = Array.from(new Set([
+      regulatoryCommune,
+      currentCommune,
+      communeName,
+      regulatoryCommuneName,
+      String(jurisdictionContext.commune_insee || ""),
+      String(jurisdictionContext.name || ""),
+    ].map((value) => String(value || "").trim()).filter(Boolean)));
+
+    const zoneWorkspaceGraph = await loadZoneSegmentsForCommuneZone({
+      communeAliases,
+      commune: communeName,
+      zoneCode: finalZone,
+      structuredRules: structuredUrbanRules,
+    });
+    const persistedExpertAnalysis = zoneWorkspaceGraph.expertAnalysis
+      ? {
+          ...zoneWorkspaceGraph.expertAnalysis,
+          digest: fullZoneAnalysis.digest || null,
+          issues: fullZoneAnalysis.issues || [],
+        }
+      : (fullZoneAnalysis.digest || {});
+    const articlesToPersist = zoneWorkspaceGraph.expertAnalysis?.articleOrThemeBlocks?.length
+      ? buildRuleArticlesFromExpertBlocks(zoneWorkspaceGraph.expertAnalysis.articleOrThemeBlocks)
+      : (fullZoneAnalysis.articles || []).map((r: any) => {
+          const rawArt = String(r.article || r.articleNumber || 0);
+          const artNum = parseInt(rawArt.replace(/[^0-9]/g, ""));
+          return {
+            articleNumber: isNaN(artNum) ? 0 : artNum,
+            title: r.title || `Article ${rawArt}`,
+            sourceText: r.sourceText || r.operational_rule || "",
+            summary: r.summary || r.interpretation || "",
+            impactText: r.impactText || r.impact || "",
+            vigilanceText: r.vigilanceText || r.vigilance || "",
+            confidence: r.confidence || "unknown",
+            structuredJson: JSON.stringify({
+              relevanceScore: r.relevanceScore,
+              relevanceReason: r.relevanceReason,
+              ...r.structuredData,
+            }),
+          };
+        });
+
     const [existingZone] = await db.select().from(zoneAnalysesTable)
       .where(eq(zoneAnalysesTable.analysisId, analysisId)).limit(1);
     
@@ -1369,7 +1472,7 @@ export async function orchestrateDossierAnalysis(
         zoneCode: finalZone,
         zoneLabel: fullZoneAnalysis.zoneLabel || `${finalZone} : Zone identifiée`,
         sourceExcerpt: regulatoryContext.substring(0, 50000),
-        structuredJson: JSON.stringify(fullZoneAnalysis.digest || {}), // Store Digest here
+        structuredJson: JSON.stringify(persistedExpertAnalysis),
         issuesJson: JSON.stringify(fullZoneAnalysis.issues || []),
       }).returning();
       zoneAnalysisId = newZone.id;
@@ -1377,7 +1480,7 @@ export async function orchestrateDossierAnalysis(
        await db.update(zoneAnalysesTable).set({ 
          zoneCode: finalZone, 
          zoneLabel: fullZoneAnalysis.zoneLabel || `${finalZone} : Zone identifiée`,
-         structuredJson: JSON.stringify(fullZoneAnalysis.digest || {}),
+         structuredJson: JSON.stringify(persistedExpertAnalysis),
          issuesJson: JSON.stringify(fullZoneAnalysis.issues || []),
          updatedAt: new Date() 
        }).where(eq(zoneAnalysesTable.id, zoneAnalysisId));
@@ -1385,29 +1488,14 @@ export async function orchestrateDossierAnalysis(
 
     // Persist Ranked Articles
     await db.delete(ruleArticlesTable).where(eq(ruleArticlesTable.zoneAnalysisId, zoneAnalysisId));
-    
-    const articlesToSave = fullZoneAnalysis.articles || [];
-    if (articlesToSave.length > 0) {
-      await db.insert(ruleArticlesTable).values(articlesToSave.map((r: any) => {
-        const rawArt = String(r.article || r.articleNumber || 0);
-        const artNum = parseInt(rawArt.replace(/[^0-9]/g, ''));
-        
-        return {
+
+    if (articlesToPersist.length > 0) {
+      await db.insert(ruleArticlesTable).values(
+        articlesToPersist.map((article: (typeof articlesToPersist)[number]) => ({
           zoneAnalysisId,
-          articleNumber: isNaN(artNum) ? 0 : artNum,
-          title: r.title || `Article ${rawArt}`,
-          sourceText: r.sourceText || r.operational_rule || "",
-          summary: r.summary || r.interpretation || "",
-          impactText: r.impactText || r.impact || "",
-          vigilanceText: r.vigilanceText || r.vigilance || "",
-          confidence: r.confidence || "unknown",
-          structuredJson: JSON.stringify({
-            relevanceScore: r.relevanceScore,
-            relevanceReason: r.relevanceReason,
-            ...r.structuredData
-          })
-        };
-      }));
+          ...article,
+        })),
+      );
     }
   }
 

@@ -213,7 +213,7 @@ function toPublishedIndexedRule(row: {
   resolutionStatus: string | null;
   linkedRuleCount: number;
   relations: PublishedIndexedRule["relations"];
-  articleCode: string;
+  articleCode: string | null;
   themeCode: string;
   ruleLabel: string;
   operator: string | null;

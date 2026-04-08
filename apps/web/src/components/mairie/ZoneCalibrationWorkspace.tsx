@@ -80,6 +80,54 @@ type ZoneWorkspaceResponse = {
   themes: ThemeItem[];
   articleReference: Array<{ code: string; label: string }>;
   pages: Array<{ pageNumber: number; text: string; startOffset: number; endOffset: number }>;
+  segments: Array<{
+    id: string;
+    zoneId: string;
+    overlayId: string | null;
+    documentId: string;
+    sourcePageStart: number;
+    sourcePageEnd: number | null;
+    anchorType: string;
+    anchorLabel: string | null;
+    articleCode: string | null;
+    themeCode: string;
+    themeLabel: string;
+    sourceTextFull: string;
+    previewText: string;
+    status: string;
+    derivedFromAi: boolean;
+    visualAttachmentMeta?: {
+      visualCapture?: VisualCaptureMetadata | null;
+    } | null;
+    document: { id: string; title: string | null; fileName: string | null } | null;
+  }>;
+  expertAnalysis: {
+    analysisVersion: string;
+    articleOrThemeBlocks: Array<{
+      key: string;
+      articleCode: string | null;
+      themeCode: string;
+      themeLabel: string;
+      anchorType: string;
+      anchorLabel: string | null;
+      ruleResumee: string;
+      detailUtile: string;
+      exceptionsConditions: string | null;
+      effetConcretConstructibilite: string;
+      niveauVigilance: "faible" | "moyen" | "fort";
+      qualification: string;
+    }>;
+    crossEffects: string[];
+    professionalInterpretation: string;
+    operationalConclusion: {
+      zonePlutot: string;
+      logiqueDominante: string;
+      facteursLimitantsPrincipaux: string[];
+      opportunitesPossibles: string[];
+      pointsBloquantsPotentiels: string[];
+      pointsAConfirmerSurPlanOuAnnexe: string[];
+    };
+  } | null;
   articleAnchors: Array<{ articleCode: string; pageNumber: number; label: string; snippet: string }>;
   keywordMatches: Array<{ keyword: string; pageNumber: number; snippet: string; articleCode: string | null }>;
   detectedSections: Array<{
@@ -104,6 +152,7 @@ type ZoneWorkspaceResponse = {
   }>;
   excerpts: Array<{
     id: string;
+    segmentId?: string | null;
     articleCode: string | null;
     selectionLabel: string | null;
     sourceText: string;
@@ -116,7 +165,7 @@ type ZoneWorkspaceResponse = {
     document: { id: string; title: string | null; fileName: string | null } | null;
     rules: Array<{
       id: string;
-      articleCode: string;
+      articleCode: string | null;
       themeCode: string;
       ruleLabel: string;
       operator: string | null;
@@ -135,7 +184,8 @@ type ZoneWorkspaceResponse = {
   }>;
   rules: Array<{
     id: string;
-    articleCode: string;
+    segmentId?: string | null;
+    articleCode: string | null;
     themeCode: string;
     ruleLabel: string;
     operator: string | null;
@@ -342,6 +392,7 @@ export function ZoneCalibrationWorkspace({
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [detailRule, setDetailRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
   const [editingRule, setEditingRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
   const [manualArticleMode, setManualArticleMode] = useState(false);
@@ -436,6 +487,7 @@ export function ZoneCalibrationWorkspace({
 
   const createExcerptMutation = useMutation({
     mutationFn: async (payload: {
+      segmentId: string | null;
       sourceText: string;
       sourcePage: number;
       sourcePageEnd: number | null;
@@ -447,6 +499,7 @@ export function ZoneCalibrationWorkspace({
       body: JSON.stringify({
         commune: currentCommune,
         zoneId,
+        segmentId: payload.segmentId,
         documentId: data?.zone.referenceDocumentId || data?.referenceDocument?.id,
         articleCode: payload.articleCode || null,
         selectionLabel: payload.selectionLabel || null,
@@ -459,11 +512,92 @@ export function ZoneCalibrationWorkspace({
     onSuccess: (payload) => {
       refreshAll();
       setSelectedExcerptId(payload.excerpt.id);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const createSegmentMutation = useMutation({
+    mutationFn: async (payload: {
+      sourceTextFull: string;
+      sourcePageStart: number;
+      sourcePageEnd: number | null;
+      themeCode: string;
+      anchorType: string;
+      anchorLabel: string | null;
+      visualAttachmentMeta?: Record<string, unknown>;
+    }) => apiFetch(`/api/mairie/regulatory-calibration/zones/${zoneId}/segments`, {
+      method: "POST",
+      body: JSON.stringify({
+        commune: currentCommune,
+        documentId: data?.zone.referenceDocumentId || data?.referenceDocument?.id,
+        sourceTextFull: payload.sourceTextFull,
+        sourcePageStart: payload.sourcePageStart,
+        sourcePageEnd: payload.sourcePageEnd,
+        themeCode: payload.themeCode,
+        anchorType: payload.anchorType,
+        anchorLabel: payload.anchorLabel,
+        visualAttachmentMeta: payload.visualAttachmentMeta || {},
+      }),
+    }),
+    onSuccess: (payload) => {
+      refreshAll();
+      setSelectedSegmentId(payload.segment.id);
       setManualArticleMode(false);
       setManualArticle({ articleCode: "", label: "", sourcePage: "", sourceText: "" });
       toast({
-        title: "Extrait enregistré",
-        description: "Le texte est stocké comme extrait calibré. Tu peux maintenant créer la règle directement dans ce même bloc.",
+        title: "Segment enregistré",
+        description: "Le bloc thématique source est maintenant stabilisé pour cette zone.",
+      });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateSegmentMutation = useMutation({
+    mutationFn: async (payload: {
+      segmentId: string;
+      sourceTextFull: string;
+      sourcePageStart: number;
+      sourcePageEnd: number | null;
+      themeCode: string;
+      anchorType: string;
+      anchorLabel: string | null;
+      visualAttachmentMeta?: Record<string, unknown>;
+    }) => apiFetch(`/api/mairie/regulatory-calibration/segments/${payload.segmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        commune: currentCommune,
+        sourceTextFull: payload.sourceTextFull,
+        sourcePageStart: payload.sourcePageStart,
+        sourcePageEnd: payload.sourcePageEnd,
+        themeCode: payload.themeCode,
+        anchorType: payload.anchorType,
+        anchorLabel: payload.anchorLabel,
+        visualAttachmentMeta: payload.visualAttachmentMeta || {},
+      }),
+    }),
+    onSuccess: (payload) => {
+      refreshAll();
+      setSelectedSegmentId(payload.segment.id);
+      toast({
+        title: "Segment mis à jour",
+        description: "Le bloc thématique a été recalé directement depuis le PDF.",
+      });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteSegmentMutation = useMutation({
+    mutationFn: async (segmentId: string) => apiFetch(`/api/mairie/regulatory-calibration/segments/${segmentId}?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "DELETE",
+    }),
+    onSuccess: (_payload, segmentId) => {
+      refreshAll();
+      if (selectedSegmentId === segmentId) {
+        setSelectedSegmentId(null);
+      }
+      toast({
+        title: "Segment supprimé",
+        description: "Le bloc thématique n’alimente plus cette zone.",
       });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -471,15 +605,21 @@ export function ZoneCalibrationWorkspace({
 
   const createRuleMutation = useMutation({
     mutationFn: async ({ excerptId }: { excerptId: string }) => {
-      if (!excerptId) throw new Error("Choisis d’abord un extrait calibré.");
+      if (!excerptId) throw new Error("Choisis d’abord un segment source enregistré.");
       const interpretationParts = [
         ruleDraft.interpretationNote?.trim(),
         visualSupportNote.trim() ? `Repère visuel / croquis : ${visualSupportNote.trim()}` : "",
       ].filter(Boolean);
       const normalizedArticleCode = selectionArticleCode.trim() || null;
+      const selectedSegment = selectedSegmentId
+        ? data?.segments.find((segment) => segment.id === selectedSegmentId) || null
+        : null;
       const normalizedAnchorLabel = normalizedArticleCode
         ? `Article ${normalizedArticleCode}`
-        : (selectionLabel.trim() || null);
+        : (selectionLabel.trim() || selectedSegment?.anchorLabel || null);
+      const normalizedAnchorType = normalizedArticleCode
+        ? "article"
+        : (selectedSegment?.anchorType || "free_text_block");
       return apiFetch(`/api/mairie/regulatory-calibration/excerpts/${excerptId}/rules`, {
         method: "POST",
         body: JSON.stringify({
@@ -496,7 +636,7 @@ export function ZoneCalibrationWorkspace({
           normativeEffect: "primary",
           proceduralEffect: "none",
           applicabilityScope: "main_zone",
-          ruleAnchorType: "article",
+          ruleAnchorType: normalizedAnchorType,
           ruleAnchorLabel: normalizedAnchorLabel,
           conflictResolutionStatus: "none",
           rawSuggestion: {
@@ -592,7 +732,7 @@ export function ZoneCalibrationWorkspace({
     if (!nextDraft) {
       toast({
         title: "Interprétation impossible",
-        description: "Saisis une consigne rapide ou sélectionne un extrait dans le PDF avant d’interpréter.",
+        description: "Saisis une consigne rapide ou sélectionne un texte directement dans le PDF avant d’interpréter.",
         variant: "destructive",
       });
       return;
@@ -612,24 +752,56 @@ export function ZoneCalibrationWorkspace({
     });
   };
 
-  const saveCurrentExcerpt = async () => {
+  const saveCurrentSegment = async () => {
     if (!selection?.text || !selection?.pageNumber) {
-      throw new Error("Sélectionne d’abord un extrait dans le PDF ou dans les textes retrouvés.");
+      throw new Error("Sélectionne d’abord un texte ou un bloc source dans le PDF.");
+    }
+    if (!ruleDraft.themeCode) {
+      throw new Error("Choisis d’abord le thème métier du segment.");
+    }
+
+    const payload = {
+      sourceTextFull: selection.text,
+      sourcePageStart: selection.pageNumber,
+      sourcePageEnd: selection.pageEndNumber,
+      themeCode: ruleDraft.themeCode,
+      anchorType: selectionArticleCode ? "article" : "free_text_block",
+      anchorLabel: selectionArticleCode ? `Article ${selectionArticleCode}` : (selectionLabel.trim() || null),
+      visualAttachmentMeta: selection.visualCapture ? { visualCapture: selection.visualCapture } : {},
+    };
+
+    if (selectedSegmentId) {
+      await updateSegmentMutation.mutateAsync({
+        segmentId: selectedSegmentId,
+        ...payload,
+      });
+      return selectedSegmentId;
+    }
+
+    const created = await createSegmentMutation.mutateAsync(payload);
+    return created.segment.id as string;
+  };
+
+  const saveCurrentExcerpt = async (segmentId: string) => {
+    if (!selection?.text || !selection?.pageNumber) {
+      throw new Error("Sélectionne d’abord un texte ou un bloc source dans le PDF.");
     }
     const payload = await createExcerptMutation.mutateAsync({
+      segmentId,
       sourceText: selection.text,
       sourcePage: selection.pageNumber,
       sourcePageEnd: selection.pageEndNumber,
       articleCode: selectionArticleCode,
       selectionLabel,
-      metadata: selection.visualCapture ? { visualCapture: selection.visualCapture } : {},
+      metadata: selection.visualCapture ? { visualCapture: selection.visualCapture, segmentId } : { segmentId },
     });
     return payload.excerpt.id as string;
   };
 
   const handleCreateRuleFromSelection = async () => {
     try {
-      const excerptId = selectedExcerptId || await saveCurrentExcerpt();
+      const segmentId = await saveCurrentSegment();
+      const excerptId = selectedExcerptId || await saveCurrentExcerpt(segmentId);
       await createRuleMutation.mutateAsync({ excerptId });
     } catch (err: any) {
       toast({
@@ -653,9 +825,31 @@ export function ZoneCalibrationWorkspace({
       pageEndNumber: candidate.pageEndNumber ?? null,
       visualCapture: null,
     });
+    setSelectedSegmentId(null);
     setSelectedExcerptId(null);
     setSelectionArticleCode(candidate.articleCode || "");
     setSelectionLabel(candidate.label || candidate.text.slice(0, 80));
+    requestAnimationFrame(() => {
+      selectionEditorRef.current?.focus();
+      selectionEditorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
+
+  const applySegmentCandidate = (segment: ZoneWorkspaceResponse["segments"][number]) => {
+    setSelectedSegmentId(segment.id);
+    setSelectedExcerptId(null);
+    setSelection({
+      text: segment.sourceTextFull,
+      pageNumber: segment.sourcePageStart,
+      pageEndNumber: segment.sourcePageEnd,
+      visualCapture: segment.visualAttachmentMeta?.visualCapture || null,
+    });
+    setSelectionArticleCode(segment.articleCode || "");
+    setSelectionLabel(segment.anchorLabel || segment.previewText.slice(0, 80));
+    setRuleDraft((current) => ({
+      ...current,
+      themeCode: segment.themeCode || current.themeCode,
+    }));
     requestAnimationFrame(() => {
       selectionEditorRef.current?.focus();
       selectionEditorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -705,7 +899,14 @@ export function ZoneCalibrationWorkspace({
   const selectedExcerpt = selectedExcerptId
     ? data.excerpts.find((excerpt) => excerpt.id === selectedExcerptId) || null
     : null;
-  const activeVisualCapture = selection?.visualCapture || selectedExcerpt?.metadata?.visualCapture || null;
+  const selectedSegment = selectedSegmentId
+    ? data.segments.find((segment) => segment.id === selectedSegmentId) || null
+    : null;
+  const activeVisualCapture =
+    selection?.visualCapture
+    || selectedSegment?.visualAttachmentMeta?.visualCapture
+    || selectedExcerpt?.metadata?.visualCapture
+    || null;
 
   return (
     <div className="space-y-6">
@@ -820,42 +1021,67 @@ export function ZoneCalibrationWorkspace({
           </Card>
 
           <Accordion type="multiple" className="space-y-4">
-            <AccordionItem value="articles" className="rounded-xl border bg-background shadow-sm">
+            <AccordionItem value="themes" className="rounded-xl border bg-background shadow-sm">
               <AccordionTrigger className="px-5 text-sm font-semibold">
-                Articles identifiés
+                Thèmes détectés dans la zone
               </AccordionTrigger>
               <AccordionContent className="px-5 pb-5">
                 <div className="space-y-3">
-                  {data.articleAnchors.length > 0 ? data.articleAnchors.map((anchor, index) => (
-                    <div key={`${anchor.articleCode}-${anchor.pageNumber}-${index}`} className="rounded-xl border bg-muted/10 p-3">
+                  {data.expertAnalysis?.articleOrThemeBlocks?.length ? data.expertAnalysis.articleOrThemeBlocks.map((block) => (
+                    <div key={block.key} className="rounded-xl border bg-muted/10 p-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">Art. {anchor.articleCode}</Badge>
-                        <Badge variant="secondary">page {anchor.pageNumber}</Badge>
+                        {block.articleCode ? <Badge variant="outline">Art. {block.articleCode}</Badge> : null}
+                        <Badge variant="secondary">{block.themeLabel}</Badge>
+                        <Badge variant="outline">{block.niveauVigilance}</Badge>
                       </div>
-                      <p className="mt-2 text-sm">{anchor.label}</p>
-                      {anchor.snippet && (
-                        <p className="mt-2 text-sm text-muted-foreground">{anchor.snippet}</p>
-                      )}
+                      <p className="mt-2 text-sm font-medium">{block.anchorLabel || block.themeLabel}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{block.ruleResumee}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">{block.qualification}</p>
+                    </div>
+                  )) : (
+                    <p className="text-sm text-muted-foreground">Aucun thème cohérent n’a encore été stabilisé dans cette plage.</p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="segments" className="rounded-xl border bg-background shadow-sm">
+              <AccordionTrigger className="px-5 text-sm font-semibold">
+                Segments source de la zone
+              </AccordionTrigger>
+              <AccordionContent className="px-5 pb-5">
+                <div className="space-y-3">
+                  {data.segments.length > 0 ? data.segments.map((segment) => (
+                    <div key={segment.id} className={`rounded-xl border p-3 ${selectedSegmentId === segment.id ? "border-primary bg-primary/5" : "bg-muted/10"}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {segment.articleCode ? <Badge variant="outline">Art. {segment.articleCode}</Badge> : null}
+                        <Badge variant="secondary">{segment.themeLabel}</Badge>
+                        <Badge variant="outline">
+                          {segment.sourcePageEnd && segment.sourcePageEnd > segment.sourcePageStart
+                            ? `pages ${segment.sourcePageStart} à ${segment.sourcePageEnd}`
+                            : `page ${segment.sourcePageStart}`}
+                        </Badge>
+                        {segment.derivedFromAi ? <Badge variant="outline">IA</Badge> : <Badge variant="outline">manuel</Badge>}
+                      </div>
+                      <p className="mt-2 text-sm font-medium">{segment.anchorLabel || segment.themeLabel}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{segment.previewText}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            applySelectionCandidate({
-                              text: anchor.snippet || anchor.label,
-                              pageNumber: anchor.pageNumber,
-                              pageEndNumber: null,
-                              articleCode: anchor.articleCode,
-                              label: anchor.label,
-                            });
-                          }}
+                          onClick={() => applySegmentCandidate(segment)}
                         >
                           Utiliser
                         </Button>
+                        {data.permissions.canEditCalibration && (
+                          <Button variant="outline" size="sm" onClick={() => deleteSegmentMutation.mutate(segment.id)} disabled={deleteSegmentMutation.isPending}>
+                            Supprimer
+                          </Button>
+                        )}
                       </div>
                     </div>
                   )) : (
-                    <p className="text-sm text-muted-foreground">Aucun article détecté automatiquement dans cette plage pour l’instant.</p>
+                    <p className="text-sm text-muted-foreground">Aucun segment thématique n’est encore enregistré pour cette zone.</p>
                   )}
                 </div>
               </AccordionContent>
@@ -900,6 +1126,28 @@ export function ZoneCalibrationWorkspace({
               </AccordionContent>
             </AccordionItem>
           </Accordion>
+
+          {data.expertAnalysis && (
+            <Card className="border-primary/10 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Lecture experte de la zone</CardTitle>
+                <CardDescription>
+                  Synthèse continue, thème par thème, produite à partir des segments et des règles publiées de la zone.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p className="leading-relaxed text-muted-foreground">{data.expertAnalysis.professionalInterpretation}</p>
+                {data.expertAnalysis.crossEffects.length > 0 && (
+                  <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Effets croisés</div>
+                    {data.expertAnalysis.crossEffects.slice(0, 3).map((effect, index) => (
+                      <p key={`${effect}-${index}`} className="text-sm text-muted-foreground">{effect}</p>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -921,6 +1169,7 @@ export function ZoneCalibrationWorkspace({
                   pageNumbers={pageNumbers}
                   fallbackPages={data.pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text }))}
                   onTextSelected={({ text, pageNumber, pageEndNumber }) => {
+                    setSelectedSegmentId(null);
                     setSelectedExcerptId(null);
                     setSelection({ text, pageNumber, pageEndNumber, visualCapture: null });
                     if (!selectionLabel) {
@@ -928,6 +1177,7 @@ export function ZoneCalibrationWorkspace({
                     }
                   }}
                   onVisualSelected={({ pageNumber, previewDataUrl, box }) => {
+                    setSelectedSegmentId(null);
                     setSelectedExcerptId(null);
                     setSelection({
                       text: selection?.text?.trim()
@@ -976,7 +1226,7 @@ export function ZoneCalibrationWorkspace({
                 Sélection courante
               </CardTitle>
               <CardDescription>
-                C’est ici que tu ajustes l’extrait, son interprétation et la règle à créer.
+                C’est ici que tu ajustes le segment source, son interprétation et la règle à créer.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -991,10 +1241,10 @@ export function ZoneCalibrationWorkspace({
                     setSelection((current) => current ? { ...current, text: event.target.value } : current);
                     }}
                     rows={8}
-                    placeholder="Le texte de l’extrait peut être corrigé, complété ou simplifié ici avant enregistrement."
+                    placeholder="Le texte source du segment peut être corrigé, complété ou simplifié ici avant enregistrement."
                     className="min-h-[180px] resize-y border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
                   />
-                ) : "Sélectionne directement un extrait dans le PDF ou utilise un texte retrouvé à gauche."}
+                ) : "Sélectionne directement un texte dans le PDF ou utilise un segment retrouvé à gauche."}
               </div>
               {activeVisualCapture ? (
                 <div className="rounded-2xl border bg-muted/10 p-3">
@@ -1037,7 +1287,7 @@ export function ZoneCalibrationWorkspace({
                     setSelectedExcerptId(null);
                     setSelectionLabel(event.target.value);
                   }}
-                  placeholder="Libellé de l’extrait"
+                  placeholder="Ancre ou libellé du segment"
                 />
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -1048,7 +1298,7 @@ export function ZoneCalibrationWorkspace({
                       : `page ${selection.pageNumber}`}
                   </span>
                 ) : null}
-                {selectedExcerptId ? <span>extrait calibré déjà enregistré</span> : <span>sélection non enregistrée</span>}
+                {selectedSegmentId ? <span>segment source déjà enregistré</span> : <span>segment source non enregistré</span>}
               </div>
               <TooltipProvider delayDuration={120}>
                 <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
@@ -1192,20 +1442,13 @@ export function ZoneCalibrationWorkspace({
               </TooltipProvider>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={!data.permissions.canEditCalibration || createExcerptMutation.isPending || !selection?.text || !selection?.pageNumber}
+                  disabled={!data.permissions.canEditCalibration || createSegmentMutation.isPending || updateSegmentMutation.isPending || !selection?.text || !selection?.pageNumber || !ruleDraft.themeCode}
                   onClick={() => {
-                    if (!selection) return;
-                    createExcerptMutation.mutate({
-                      sourceText: selection.text,
-                      sourcePage: selection.pageNumber,
-                      sourcePageEnd: selection.pageEndNumber,
-                      articleCode: selectionArticleCode,
-                      selectionLabel,
-                    });
+                    void saveCurrentSegment();
                   }}
                 >
-                  {createExcerptMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Enregistrer l’extrait
+                  {createSegmentMutation.isPending || updateSegmentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Enregistrer le segment
                 </Button>
                 <Button
                   disabled={
@@ -1223,11 +1466,11 @@ export function ZoneCalibrationWorkspace({
                   }}
                 >
                   {createRuleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Créer la règle ferme
+                  Créer / mettre à jour la règle
                 </Button>
                 <Button variant="outline" disabled={!data.permissions.canEditCalibration} onClick={() => setManualArticleMode((current) => !current)}>
                   <FilePlus2 className="h-4 w-4" />
-                  Ajouter un article manquant
+                  Ajouter un ancrage manquant
                 </Button>
               </div>
 
@@ -1239,13 +1482,13 @@ export function ZoneCalibrationWorkspace({
 
               {manualArticleMode && (
                 <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
-                  <div className="text-sm font-medium">Article manuel</div>
+                  <div className="text-sm font-medium">Ancrage manuel</div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Input
                       value={manualArticle.articleCode}
                       disabled={!data.permissions.canEditCalibration}
                       onChange={(event) => setManualArticle((current) => ({ ...current, articleCode: event.target.value }))}
-                      placeholder="Article (ex : 12)"
+                      placeholder="Article ou ancre (ex : 12, Stationnement, OAP 1)"
                     />
                     <Input
                       value={manualArticle.sourcePage}
@@ -1259,7 +1502,7 @@ export function ZoneCalibrationWorkspace({
                     value={manualArticle.label}
                     disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setManualArticle((current) => ({ ...current, label: event.target.value }))}
-                    placeholder="Libellé de l’article"
+                      placeholder="Libellé de l’ancre source"
                   />
                   <Textarea
                     value={manualArticle.sourceText}
@@ -1269,21 +1512,22 @@ export function ZoneCalibrationWorkspace({
                     rows={6}
                   />
                   <Button
-                    disabled={!data.permissions.canEditCalibration || createExcerptMutation.isPending || !manualArticle.sourceText.trim() || !parsePositiveInt(manualArticle.sourcePage)}
+                    disabled={!data.permissions.canEditCalibration || createSegmentMutation.isPending || !manualArticle.sourceText.trim() || !parsePositiveInt(manualArticle.sourcePage)}
                     onClick={() => {
                       const sourcePage = parsePositiveInt(manualArticle.sourcePage);
                       if (!sourcePage) return;
-                      createExcerptMutation.mutate({
-                        sourceText: manualArticle.sourceText,
-                        sourcePage,
+                      createSegmentMutation.mutate({
+                        sourceTextFull: manualArticle.sourceText,
+                        sourcePageStart: sourcePage,
                         sourcePageEnd: null,
-                        articleCode: manualArticle.articleCode,
-                        selectionLabel: manualArticle.label,
+                        themeCode: ruleDraft.themeCode || "conditions_particulieres",
+                        anchorType: manualArticle.articleCode.trim() ? "article" : "free_text_block",
+                        anchorLabel: manualArticle.label || (manualArticle.articleCode.trim() ? `Article ${manualArticle.articleCode.trim()}` : null),
                       });
                     }}
                   >
-                    {createExcerptMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Créer l’article
+                    {createSegmentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Enregistrer le segment manuel
                   </Button>
                 </div>
               )}
@@ -1309,7 +1553,7 @@ export function ZoneCalibrationWorkspace({
                       <div key={rule.id} className="overflow-hidden rounded-xl border bg-muted/10 p-3">
                         <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-start">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline">Art. {rule.articleCode}</Badge>
+                            <Badge variant="outline">{rule.articleCode ? `Art. ${rule.articleCode}` : "Ancre libre"}</Badge>
                             <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
                           </div>
                           <div className="min-w-0 space-y-2">
@@ -1406,7 +1650,7 @@ export function ZoneCalibrationWorkspace({
               {detailRule && (
                 <div className="space-y-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">Art. {detailRule.articleCode}</Badge>
+                    <Badge variant="outline">{detailRule.articleCode ? `Art. ${detailRule.articleCode}` : "Ancre libre"}</Badge>
                     <Badge variant="outline" className={getStatusBadge(detailRule.status).className}>
                       {getStatusBadge(detailRule.status).label}
                     </Badge>
@@ -1470,9 +1714,9 @@ export function ZoneCalibrationWorkspace({
             <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Modifier la règle</DialogTitle>
-                <DialogDescription>
-                  Ajuste le contenu structuré de la règle sans recréer l’extrait.
-                </DialogDescription>
+                  <DialogDescription>
+                  Ajuste le contenu structuré de la règle sans recréer le segment source.
+                  </DialogDescription>
               </DialogHeader>
               {editingRule && (
                 <div className="space-y-4">

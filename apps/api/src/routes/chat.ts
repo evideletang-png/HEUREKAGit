@@ -316,10 +316,28 @@ async function buildSystemPrompt(args: {
   const tp = gc.topography ?? {};
   const nc = gc.neighbour_context ?? {};
 
+  const parsedZoneStructured = (() => {
+    try {
+      if (!(zoneAnalysis as any)?.structuredJson) return null;
+      return typeof (zoneAnalysis as any).structuredJson === "string"
+        ? JSON.parse((zoneAnalysis as any).structuredJson)
+        : (zoneAnalysis as any).structuredJson;
+    } catch {
+      return null;
+    }
+  })();
+  const expertZoneAnalysis = parsedZoneStructured?.analysisVersion === "expert_zone_analysis_v1"
+    ? parsedZoneStructured
+    : null;
+
   const articlesSafe = Array.isArray(articles) ? articles : [];
-  const articlesSummary = articlesSafe.map(a =>
-    `Art. ${a.articleNumber} — ${a.title}: ${a.summary ?? ""}${a.vigilanceText ? ` | Vigilance: ${a.vigilanceText}` : ""}`
-  ).join("\n");
+  const articlesSummary = expertZoneAnalysis?.articleOrThemeBlocks?.length
+    ? expertZoneAnalysis.articleOrThemeBlocks.map((block: any) =>
+        `- ${block.articleCode ? `Article ${block.articleCode}` : `Thème ${block.themeLabel}`} — ${block.anchorLabel || block.themeLabel}: ${block.ruleResumee}${block.exceptionsConditions ? ` | Conditions: ${block.exceptionsConditions}` : ""}${block.qualification ? ` | Qualification: ${block.qualification}` : ""}`,
+      ).join("\n")
+    : articlesSafe.map(a =>
+        `Art. ${a.articleNumber} — ${a.title}: ${a.summary ?? ""}${a.vigilanceText ? ` | Vigilance: ${a.vigilanceText}` : ""}`
+      ).join("\n");
 
   const constraintsList = constraints.map(c =>
     `• [${c.severity?.toUpperCase()}] ${c.title}: ${c.description ?? ""}${c.source ? ` (source: ${c.source})` : ""}`
@@ -334,8 +352,25 @@ async function buildSystemPrompt(args: {
     : "Aucune memoire territoriale disponible.";
 
   const customInstructions = await loadPrompt("chat_system");
+  const expertInstructions = await loadPrompt("expert_zone_analysis_system");
+  const expertAnalysisSummary = expertZoneAnalysis
+    ? [
+        `Identification: zone ${expertZoneAnalysis.identification?.zoneCode || zoneAnalysis?.zoneCode || "N/D"}${expertZoneAnalysis.identification?.zoneLabel ? ` — ${expertZoneAnalysis.identification.zoneLabel}` : ""}.`,
+        expertZoneAnalysis.crossEffects?.length
+          ? `Effets croisés: ${expertZoneAnalysis.crossEffects.join(" ")}`
+          : "",
+        expertZoneAnalysis.professionalInterpretation
+          ? `Lecture professionnelle: ${expertZoneAnalysis.professionalInterpretation}`
+          : "",
+        expertZoneAnalysis.operationalConclusion
+          ? `Conclusion opérationnelle: zone plutôt ${expertZoneAnalysis.operationalConclusion.zonePlutot}; logique dominante ${expertZoneAnalysis.operationalConclusion.logiqueDominante}.`
+          : "",
+      ].filter(Boolean).join("\n")
+    : "Aucune analyse experte persistée pour cette zone.";
 
   return `${customInstructions}
+
+${expertInstructions}
 
 REGLES DE REPONSE :
 - Reponds uniquement a partir du contexte fourni ci-dessous.
@@ -371,6 +406,9 @@ ZONAGE ET CONSTRUCTIBILITE :
 
 ARTICLES PLU STRUCTURES :
 ${articlesSummary || "Aucun article structure disponible."}
+
+LECTURE EXPERTE DE ZONE :
+${expertAnalysisSummary}
 
 CONTRAINTES IDENTIFIEES :
 ${constraintsList || "Aucune contrainte critique identifiee."}

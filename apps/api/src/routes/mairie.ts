@@ -34,6 +34,7 @@ import { regulatoryCalibrationPermissionsTable } from "../../../../packages/db/s
 import { ruleRelationsTable } from "../../../../packages/db/src/schema/ruleRelations.js";
 import { regulatoryValidationHistoryTable } from "../../../../packages/db/src/schema/regulatoryValidationHistory.js";
 import { regulatoryRuleConflictsTable } from "../../../../packages/db/src/schema/regulatoryRuleConflicts.js";
+import { zoneThematicSegmentsTable } from "../../../../packages/db/src/schema/zoneThematicSegments.js";
 import { createHash } from "crypto";
 import { logger } from "../utils/logger.js";
 import { processDocumentForRAG } from "../services/baseIAIngestion.js";
@@ -63,6 +64,12 @@ import {
   splitDocumentIntoCalibrationPages,
   validateIndexedRuleForPublication,
 } from "../services/regulatoryCalibrationService.js";
+import {
+  buildExpertZoneAnalysis,
+  buildZoneThematicSegmentsFromPages,
+  listZoneThematicSegments,
+  rebuildThematicSegmentsForZone,
+} from "../services/expertZoneAnalysisService.js";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import multer from "multer";
 import fs from "fs";
@@ -1329,7 +1336,7 @@ function denyCalibrationPermission(res: any, message: string) {
 
 async function safeRecordRegulatoryValidationHistory(args: {
   communeId: string;
-  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict" | "relation";
+  entityType: "zone" | "overlay" | "binding" | "segment" | "excerpt" | "rule" | "conflict" | "relation";
   entityId: string;
   fromStatus?: string | null;
   toStatus?: string | null;
@@ -3652,6 +3659,20 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
       });
     }
 
+    if (zone.referenceDocumentId) {
+      const [referenceDocument] = await db.select()
+        .from(townHallDocumentsTable)
+        .where(eq(townHallDocumentsTable.id, zone.referenceDocumentId))
+        .limit(1);
+      if (referenceDocument) {
+        await rebuildThematicSegmentsForZone({
+          zone,
+          referenceDocument,
+          userId: req.user!.userId,
+        });
+      }
+    }
+
     return res.json({ zone });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zones POST]", err);
@@ -3718,6 +3739,20 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
       userId: req.user!.userId,
       snapshot: updated as Record<string, unknown>,
     });
+
+    if (updated.referenceDocumentId) {
+      const [referenceDocument] = await db.select()
+        .from(townHallDocumentsTable)
+        .where(eq(townHallDocumentsTable.id, updated.referenceDocumentId))
+        .limit(1);
+      if (referenceDocument) {
+        await rebuildThematicSegmentsForZone({
+          zone: updated,
+          referenceDocument,
+          userId: req.user!.userId,
+        });
+      }
+    }
 
     return res.json({ zone: updated });
   } catch (err) {
@@ -3844,7 +3879,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       };
     });
 
-    const [zoneExcerpts, zoneRules, overlays] = await Promise.all([
+    const [zoneExcerpts, zoneRules, overlays, persistedSegments] = await Promise.all([
       db.select()
         .from(calibratedExcerptsTable)
         .where(eq(calibratedExcerptsTable.zoneId, zone.id))
@@ -3854,11 +3889,49 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         .where(eq(indexedRegulatoryRulesTable.zoneId, zone.id))
         .orderBy(indexedRegulatoryRulesTable.articleCode, indexedRegulatoryRulesTable.sourcePage, indexedRegulatoryRulesTable.updatedAt),
       listCommuneRegulatoryOverlays(communeAliases),
+      listZoneThematicSegments(zone.id),
     ]);
+
+    const derivedSegments = persistedSegments.length > 0
+      ? persistedSegments
+      : (
+        referenceDocumentId && workspacePages.length > 0
+          ? buildZoneThematicSegmentsFromPages({
+              communeId: communeKey,
+              zoneId: zone.id,
+              documentId: referenceDocumentId,
+              pages: workspacePages.map((page) => ({
+                pageNumber: page.pageNumber,
+                text: page.text,
+              })),
+            }).map((segment) => ({
+              id: `generated-${segment.zoneId}-${segment.themeCode}-${segment.sourcePageStart}-${segment.anchorLabel || "segment"}`,
+              communeId: segment.communeId,
+              zoneId: segment.zoneId,
+              overlayId: segment.overlayId,
+              documentId: segment.documentId,
+              sourcePageStart: segment.sourcePageStart,
+              sourcePageEnd: segment.sourcePageEnd ?? null,
+              anchorType: segment.anchorType,
+              anchorLabel: segment.anchorLabel ?? null,
+              themeCode: segment.themeCode,
+              sourceTextFull: segment.sourceTextFull,
+              sourceTextNormalized: segment.sourceTextNormalized ?? null,
+              visualAttachmentMeta: segment.visualAttachmentMeta ?? {},
+              derivedFromAi: true,
+              status: "suggested",
+              createdBy: null,
+              updatedBy: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }))
+          : []
+      );
 
     const excerptDocumentIds = Array.from(new Set(zoneExcerpts.map((excerpt) => excerpt.documentId).filter((value): value is string => !!value)));
     const ruleDocumentIds = Array.from(new Set(zoneRules.map((rule) => rule.documentId).filter((value): value is string => !!value)));
-    const documentIds = Array.from(new Set([referenceDocumentId, ...excerptDocumentIds, ...ruleDocumentIds].filter((value): value is string => !!value)));
+    const segmentDocumentIds = Array.from(new Set(derivedSegments.map((segment) => segment.documentId).filter((value): value is string => !!value)));
+    const documentIds = Array.from(new Set([referenceDocumentId, ...excerptDocumentIds, ...ruleDocumentIds, ...segmentDocumentIds].filter((value): value is string => !!value)));
     const documentMap = new Map(
       availableDocuments
         .filter((doc) => documentIds.includes(doc.id))
@@ -3905,6 +3978,76 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       keywords: zone.searchKeywords || [],
     }).sort((left, right) => left.pageNumber - right.pageNumber);
     const excerptMap = new Map(zoneExcerpts.map((excerpt) => [excerpt.id, excerpt] as const));
+    const themeMap = new Map(themes.map((theme) => [theme.code, theme]));
+    const activeOverlays = overlays.filter((overlay) =>
+      zoneRules.some((rule) => rule.overlayId === overlay.id)
+      || derivedSegments.some((segment) => segment.overlayId === overlay.id),
+    );
+    const expertAnalysis = buildExpertZoneAnalysis({
+      commune: access.targetCommune,
+      zone: {
+        zoneCode: zone.zoneCode,
+        zoneLabel: zone.zoneLabel,
+        parentZoneCode: zone.parentZoneCode,
+      },
+      referenceDocument: referenceDocument
+        ? {
+            id: referenceDocument.id,
+            title: referenceDocument.title,
+            fileName: referenceDocument.fileName,
+            documentType: referenceDocument.documentType,
+          }
+        : null,
+      overlays: activeOverlays,
+      segments: derivedSegments.map((segment) => ({
+        ...segment,
+        documentTitle: documentMap.get(segment.documentId)?.title || documentMap.get(segment.documentId)?.fileName || null,
+      })),
+      rules: zoneRules.map((rule) => ({
+        id: rule.id,
+        zoneCode: zone.zoneCode,
+        zoneLabel: zone.zoneLabel,
+        overlayId: rule.overlayId,
+        overlayCode: rule.overlayId ? (activeOverlays.find((overlay) => overlay.id === rule.overlayId)?.overlayCode || null) : null,
+        overlayLabel: rule.overlayId ? (activeOverlays.find((overlay) => overlay.id === rule.overlayId)?.overlayLabel || null) : null,
+        overlayType: rule.overlayType,
+        normativeEffect: rule.normativeEffect,
+        proceduralEffect: rule.proceduralEffect,
+        applicabilityScope: rule.applicabilityScope,
+        ruleAnchorType: rule.ruleAnchorType,
+        ruleAnchorLabel: rule.ruleAnchorLabel,
+        isRelationalRule: rule.isRelationalRule,
+        requiresCrossDocumentResolution: rule.requiresCrossDocumentResolution,
+        resolutionStatus: rule.resolutionStatus,
+        linkedRuleCount: rule.linkedRuleCount,
+        relationResolutionNote: null,
+        relations: [],
+        ruleFamily: rule.themeCode,
+        ruleTopic: rule.themeCode,
+        ruleLabel: rule.ruleLabel,
+        ruleTextRaw: rule.sourceText,
+        ruleSummary: rule.interpretationNote,
+        ruleValueType: rule.operator ? "structured" : null,
+        ruleValueMin: null,
+        ruleValueMax: null,
+        ruleValueExact: sanitizeZoneRuleValueNumeric(rule),
+        ruleUnit: rule.unit,
+        ruleCondition: rule.conditionText,
+        ruleException: null,
+        sourcePage: rule.sourcePage,
+        sourceArticle: rule.articleCode,
+        sourceExcerpt: rule.sourceText,
+        confidenceScore: rule.confidenceScore,
+        reviewStatus: rule.status,
+        requiresManualValidation: rule.status !== "published",
+        ruleConflictFlag: rule.conflictFlag,
+        sourceDocumentId: rule.documentId,
+        sourceDocumentKind: documentMap.get(rule.documentId)?.documentType || null,
+        sourceDocumentName: documentMap.get(rule.documentId)?.title || documentMap.get(rule.documentId)?.fileName || null,
+        visualCapture: null,
+        visualSupportNote: null,
+      })),
+    });
 
     return res.json({
       commune: access.targetCommune,
@@ -3945,6 +4088,14 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         startOffset: page.startOffset,
         endOffset: page.endOffset,
       })),
+      segments: derivedSegments.map((segment) => ({
+        ...segment,
+        themeLabel: themeMap.get(segment.themeCode)?.label || segment.themeCode,
+        articleCode: inferArticleCodeFromCalibrationText(segment.anchorLabel || segment.sourceTextFull),
+        previewText: segment.sourceTextFull.length > 280 ? `${segment.sourceTextFull.slice(0, 277)}...` : segment.sourceTextFull,
+        document: documentMap.get(segment.documentId) || null,
+      })),
+      expertAnalysis,
       articleAnchors,
       keywordMatches,
       detectedSections: zoneSections.map((section) => ({
@@ -3967,6 +4118,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         }),
       excerpts: zoneExcerpts.map((excerpt) => ({
         ...excerpt,
+        segmentId: excerpt.segmentId,
         document: documentMap.get(excerpt.documentId) || null,
         rules: zoneRules
           .filter((rule) => rule.excerptId === excerpt.id)
@@ -3981,6 +4133,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         const rawSuggestion = rule.rawSuggestion && typeof rule.rawSuggestion === "object" ? rule.rawSuggestion as Record<string, unknown> : null;
         return {
           ...rule,
+          segmentId: rule.segmentId,
           valueNumeric: sanitizeZoneRuleValueNumeric(rule),
           document: documentMap.get(rule.documentId) || null,
           excerptSelectionLabel: excerpt?.selectionLabel || null,
@@ -3996,6 +4149,203 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zone-workspace GET]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/zones/:id/segments", async (req: AuthRequest, res) => {
+  try {
+    const zoneId = req.params.id as string;
+    const [zone] = await db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, zoneId)).limit(1);
+    if (!zone) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || zone.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour créer des segments thématiques.");
+    }
+
+    let documentId = zone.referenceDocumentId;
+    try {
+      if (req.body.documentId !== undefined) {
+        const { communeAliases } = await resolveCommuneAliases(access.targetCommune);
+        documentId = await resolveCalibrationReferenceDocumentId({
+          communeAliases,
+          requestedId: req.body.documentId,
+        });
+      }
+    } catch {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Document source invalide pour cette commune." });
+    }
+
+    const sourceTextFull = typeof req.body.sourceTextFull === "string" ? req.body.sourceTextFull.trim() : "";
+    const sourcePageStart = normalizeOptionalPositivePage(req.body.sourcePageStart);
+    const sourcePageEnd = normalizeOptionalPositivePage(req.body.sourcePageEnd);
+    const themeCode = typeof req.body.themeCode === "string" ? req.body.themeCode.trim() : "";
+    const anchorType = typeof req.body.anchorType === "string" && req.body.anchorType.trim()
+      ? req.body.anchorType.trim()
+      : "manual";
+    const anchorLabel = typeof req.body.anchorLabel === "string" ? req.body.anchorLabel.trim() || null : null;
+
+    if (!documentId) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Document de référence obligatoire pour créer un segment." });
+    }
+    if (!sourceTextFull || sourceTextFull.length < 20) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Le texte source du segment est obligatoire." });
+    }
+    if (!sourcePageStart) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Page de début obligatoire." });
+    }
+    if (!themeCode) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Thème métier obligatoire." });
+    }
+
+    const [segment] = await db.insert(zoneThematicSegmentsTable).values({
+      communeId: zone.communeId,
+      zoneId: zone.id,
+      overlayId: typeof req.body.overlayId === "string" && req.body.overlayId.trim() ? req.body.overlayId.trim() : null,
+      documentId,
+      sourcePageStart,
+      sourcePageEnd: sourcePageEnd && sourcePageEnd >= sourcePageStart ? sourcePageEnd : null,
+      anchorType,
+      anchorLabel,
+      themeCode,
+      sourceTextFull,
+      sourceTextNormalized: normalizeExtractedText(sourceTextFull),
+      visualAttachmentMeta: req.body.visualAttachmentMeta && typeof req.body.visualAttachmentMeta === "object" ? req.body.visualAttachmentMeta : {},
+      derivedFromAi: req.body.derivedFromAi === true,
+      status: typeof req.body.status === "string" && req.body.status.trim() ? req.body.status.trim() : "confirmed",
+      createdBy: req.user!.userId,
+      updatedBy: req.user!.userId,
+    }).returning();
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: zone.communeId,
+      entityType: "segment",
+      entityId: segment.id,
+      action: "segment_created",
+      toStatus: segment.status,
+      userId: req.user!.userId,
+      snapshot: segment as Record<string, unknown>,
+    });
+
+    return res.json({ segment });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/segments POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de créer ce segment thématique." });
+  }
+});
+
+router.patch("/regulatory-calibration/segments/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [segment] = await db.select().from(zoneThematicSegmentsTable).where(eq(zoneThematicSegmentsTable.id, id)).limit(1);
+    if (!segment) return res.status(404).json({ error: "SEGMENT_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || segment.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour modifier ce segment thématique.");
+    }
+
+    const sourcePageStart = req.body.sourcePageStart === undefined
+      ? segment.sourcePageStart
+      : normalizeOptionalPositivePage(req.body.sourcePageStart);
+    if (!sourcePageStart) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Page de début invalide." });
+    }
+    const sourcePageEnd = req.body.sourcePageEnd === undefined
+      ? segment.sourcePageEnd
+      : normalizeOptionalPositivePage(req.body.sourcePageEnd);
+    const sourceTextFull = req.body.sourceTextFull === undefined
+      ? segment.sourceTextFull
+      : (typeof req.body.sourceTextFull === "string" ? req.body.sourceTextFull.trim() : "");
+    if (!sourceTextFull || sourceTextFull.length < 20) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Le texte source du segment est obligatoire." });
+    }
+
+    const [updated] = await db.update(zoneThematicSegmentsTable)
+      .set({
+        overlayId: req.body.overlayId === undefined ? segment.overlayId : (typeof req.body.overlayId === "string" && req.body.overlayId.trim() ? req.body.overlayId.trim() : null),
+        documentId: req.body.documentId === undefined ? segment.documentId : (typeof req.body.documentId === "string" && req.body.documentId.trim() ? req.body.documentId.trim() : segment.documentId),
+        sourcePageStart,
+        sourcePageEnd: sourcePageEnd && sourcePageEnd >= sourcePageStart ? sourcePageEnd : null,
+        anchorType: req.body.anchorType === undefined ? segment.anchorType : (typeof req.body.anchorType === "string" && req.body.anchorType.trim() ? req.body.anchorType.trim() : segment.anchorType),
+        anchorLabel: req.body.anchorLabel === undefined ? segment.anchorLabel : (typeof req.body.anchorLabel === "string" ? req.body.anchorLabel.trim() || null : null),
+        themeCode: req.body.themeCode === undefined ? segment.themeCode : (typeof req.body.themeCode === "string" && req.body.themeCode.trim() ? req.body.themeCode.trim() : segment.themeCode),
+        sourceTextFull,
+        sourceTextNormalized: normalizeExtractedText(sourceTextFull),
+        visualAttachmentMeta: req.body.visualAttachmentMeta === undefined
+          ? segment.visualAttachmentMeta
+          : (req.body.visualAttachmentMeta && typeof req.body.visualAttachmentMeta === "object" ? req.body.visualAttachmentMeta : {}),
+        derivedFromAi: req.body.derivedFromAi === undefined ? segment.derivedFromAi : !!req.body.derivedFromAi,
+        status: req.body.status === undefined ? segment.status : (typeof req.body.status === "string" && req.body.status.trim() ? req.body.status.trim() : segment.status),
+        updatedBy: req.user!.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(zoneThematicSegmentsTable.id, id))
+      .returning();
+
+    await safeRecordRegulatoryValidationHistory({
+      communeId: updated.communeId,
+      entityType: "segment",
+      entityId: updated.id,
+      action: "segment_updated",
+      fromStatus: segment.status,
+      toStatus: updated.status,
+      userId: req.user!.userId,
+      snapshot: updated as Record<string, unknown>,
+    });
+
+    return res.json({ segment: updated });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/segments PATCH]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de modifier ce segment thématique." });
+  }
+});
+
+router.delete("/regulatory-calibration/segments/:id", async (req: AuthRequest, res) => {
+  try {
+    const id = req.params.id as string;
+    const [segment] = await db.select().from(zoneThematicSegmentsTable).where(eq(zoneThematicSegmentsTable.id, id)).limit(1);
+    if (!segment) return res.status(404).json({ error: "SEGMENT_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || segment.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour supprimer ce segment thématique.");
+    }
+
+    await db.delete(zoneThematicSegmentsTable).where(eq(zoneThematicSegmentsTable.id, id));
+    await safeRecordRegulatoryValidationHistory({
+      communeId: segment.communeId,
+      entityType: "segment",
+      entityId: segment.id,
+      action: "segment_deleted",
+      fromStatus: segment.status,
+      toStatus: null,
+      userId: req.user!.userId,
+      snapshot: segment as Record<string, unknown>,
+    });
+
+    return res.json({ deleted: true, segmentId: id });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/segments DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Suppression du segment impossible." });
   }
 });
 
@@ -4084,6 +4434,26 @@ router.post("/regulatory-calibration/rebuild", async (req: AuthRequest, res) => 
       });
     }
 
+    const rebuiltZones = await db.select()
+      .from(regulatoryCalibrationZonesTable)
+      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases));
+
+    let rebuiltSegmentCount = 0;
+    for (const zone of rebuiltZones) {
+      if (!zone.referenceDocumentId) continue;
+      const [referenceDocument] = await db.select()
+        .from(townHallDocumentsTable)
+        .where(eq(townHallDocumentsTable.id, zone.referenceDocumentId))
+        .limit(1);
+      if (!referenceDocument) continue;
+      const rebuilt = await rebuildThematicSegmentsForZone({
+        zone,
+        referenceDocument,
+        userId: req.user!.userId,
+      });
+      rebuiltSegmentCount += rebuilt.createdCount;
+    }
+
     const zoneCount = await db.select({ id: regulatoryCalibrationZonesTable.id })
       .from(regulatoryCalibrationZonesTable)
       .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases));
@@ -4092,6 +4462,7 @@ router.post("/regulatory-calibration/rebuild", async (req: AuthRequest, res) => 
       success: true,
       processedDocumentCount,
       zoneCount: zoneCount.length,
+      segmentCount: rebuiltSegmentCount,
     });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/rebuild POST]", err);
@@ -4419,6 +4790,7 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
       documentId,
       articleCode,
       selectionLabel,
+      segmentId,
       sourceText,
       sourcePage,
       sourcePageEnd,
@@ -4445,16 +4817,23 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
       overlayId ? db.select().from(regulatoryOverlaysTable).where(eq(regulatoryOverlaysTable.id, overlayId)).limit(1) : Promise.resolve([]),
       db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, documentId)).limit(1),
     ]);
+    const [segment] = typeof segmentId === "string" && segmentId.trim()
+      ? await db.select().from(zoneThematicSegmentsTable).where(eq(zoneThematicSegmentsTable.id, segmentId.trim())).limit(1)
+      : [];
 
     if (!zone[0] && !overlay[0]) return res.status(400).json({ error: "BAD_REQUEST", message: "Zone ou couche réglementaire obligatoire." });
     if (zoneId && !zone[0]) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
     if (overlayId && !overlay[0]) return res.status(404).json({ error: "OVERLAY_NOT_FOUND" });
+    if (segmentId && !segment) return res.status(404).json({ error: "SEGMENT_NOT_FOUND" });
     if (!doc[0]) return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
     if (zone[0] && zone[0].communeId !== communeKey) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Zone invalide pour cette commune." });
     }
     if (overlay[0] && overlay[0].communeId !== communeKey) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Couche réglementaire invalide pour cette commune." });
+    }
+    if (segment && segment.communeId !== communeKey) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Segment invalide pour cette commune." });
     }
     if (!sourceText || String(sourceText).trim().length < 8) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Sélection de texte obligatoire." });
@@ -4467,6 +4846,7 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
       communeId: communeKey,
       zoneId: zone[0]?.id || null,
       overlayId: overlay[0]?.id || null,
+      segmentId: segment?.id || null,
       documentId,
       articleCode: typeof articleCode === "string" ? articleCode.trim() || null : null,
       selectionLabel: typeof selectionLabel === "string" ? selectionLabel.trim() || null : null,
@@ -4559,12 +4939,16 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
           typeof ruleAnchorLabel === "string" && ruleAnchorLabel.trim()
             ? ruleAnchorLabel
             : `${ruleLabel}\n${excerpt.sourceText || ""}`,
-        ) || "manual");
+        ) || null);
 
     const normalizedRuleAnchorLabel =
       typeof ruleAnchorLabel === "string" && ruleAnchorLabel.trim()
         ? ruleAnchorLabel.trim()
         : (buildReviewedSourceArticle(normalizedArticleCode) || ruleLabel.trim());
+    const normalizedRuleAnchorType =
+      typeof ruleAnchorType === "string" && ruleAnchorType.trim()
+        ? ruleAnchorType.trim()
+        : (normalizedArticleCode ? "article" : "free_text_block");
 
     const excerptMetadata = excerpt.metadata && typeof excerpt.metadata === "object"
       ? excerpt.metadata as Record<string, unknown>
@@ -4577,9 +4961,10 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       communeId: excerpt.communeId,
       zoneId: excerpt.zoneId,
       overlayId: excerpt.overlayId,
+      segmentId: excerpt.segmentId,
       documentId: excerpt.documentId,
       excerptId: excerpt.id,
-      articleCode: normalizedArticleCode,
+      articleCode: normalizedArticleCode ?? undefined,
       themeCode: themeCode.trim(),
       ruleLabel: ruleLabel.trim(),
       operator: typeof operator === "string" ? operator.trim() || null : null,
@@ -4593,7 +4978,7 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       normativeEffect: typeof normativeEffect === "string" && normativeEffect.trim() ? normativeEffect.trim() : "primary",
       proceduralEffect: typeof proceduralEffect === "string" && proceduralEffect.trim() ? proceduralEffect.trim() : "none",
       applicabilityScope: typeof applicabilityScope === "string" && applicabilityScope.trim() ? applicabilityScope.trim() : "main_zone",
-      ruleAnchorType: typeof ruleAnchorType === "string" && ruleAnchorType.trim() ? ruleAnchorType.trim() : "article",
+      ruleAnchorType: normalizedRuleAnchorType,
       ruleAnchorLabel: normalizedRuleAnchorLabel,
       conflictResolutionStatus: typeof conflictResolutionStatus === "string" && conflictResolutionStatus.trim() ? conflictResolutionStatus.trim() : "none",
       sourceText: excerpt.sourceText,
@@ -4794,7 +5179,9 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
     const [updated] = await db.update(indexedRegulatoryRulesTable)
       .set({
         articleCode: inferredArticleCode || rule.articleCode,
-        ruleAnchorType: inferredRuleAnchorLabel ? (rule.ruleAnchorType || "article") : rule.ruleAnchorType,
+        ruleAnchorType: inferredRuleAnchorLabel
+          ? (rule.ruleAnchorType || (inferredArticleCode ? "article" : "free_text_block"))
+          : rule.ruleAnchorType,
         ruleAnchorLabel: inferredRuleAnchorLabel,
         status: nextStatus,
         publishedAt: nextStatus === "published" ? new Date() : null,

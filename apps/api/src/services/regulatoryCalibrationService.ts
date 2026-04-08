@@ -218,7 +218,7 @@ export function detectRuleRelationSignals(text: string | null | undefined) {
 
 export async function recordRegulatoryValidationHistory(args: {
   communeId: string;
-  entityType: "zone" | "overlay" | "binding" | "excerpt" | "rule" | "conflict" | "relation";
+  entityType: "zone" | "overlay" | "binding" | "segment" | "excerpt" | "rule" | "conflict" | "relation";
   entityId: string;
   fromStatus?: string | null;
   toStatus?: string | null;

@@ -5,15 +5,17 @@ import { townHallDocumentsTable } from "./townHallDocuments";
 import { calibratedExcerptsTable } from "./calibratedExcerpts";
 import { regulatoryCalibrationZonesTable } from "./regulatoryCalibrationZones";
 import { regulatoryOverlaysTable } from "./regulatoryOverlays";
+import { zoneThematicSegmentsTable } from "./zoneThematicSegments";
 
 export const indexedRegulatoryRulesTable = pgTable("indexed_regulatory_rules", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   communeId: text("commune_id").notNull(),
   zoneId: uuid("zone_id").references(() => regulatoryCalibrationZonesTable.id, { onDelete: "restrict" }),
   overlayId: uuid("overlay_id").references(() => regulatoryOverlaysTable.id, { onDelete: "restrict" }),
+  segmentId: uuid("segment_id").references(() => zoneThematicSegmentsTable.id, { onDelete: "set null" }),
   documentId: uuid("document_id").references(() => townHallDocumentsTable.id, { onDelete: "cascade" }).notNull(),
   excerptId: uuid("excerpt_id").references(() => calibratedExcerptsTable.id, { onDelete: "cascade" }).notNull(),
-  articleCode: text("article_code").notNull(),
+  articleCode: text("article_code"),
   themeCode: text("theme_code").notNull(),
   ruleLabel: text("rule_label").notNull(),
   operator: text("operator"),
@@ -53,6 +55,7 @@ export const indexedRegulatoryRulesTable = pgTable("indexed_regulatory_rules", {
   communeIdx: index("indexed_regulatory_rules_commune_idx").on(table.communeId),
   zoneIdx: index("indexed_regulatory_rules_zone_idx").on(table.zoneId),
   overlayIdx: index("indexed_regulatory_rules_overlay_idx").on(table.overlayId),
+  segmentIdx: index("indexed_regulatory_rules_segment_idx").on(table.segmentId),
   excerptIdx: index("indexed_regulatory_rules_excerpt_idx").on(table.excerptId),
   themeIdx: index("indexed_regulatory_rules_theme_idx").on(table.themeCode),
   statusIdx: index("indexed_regulatory_rules_status_idx").on(table.status),

@@ -37,3 +37,4 @@ export * from "./ruleRelations";
 export * from "./regulatoryValidationHistory";
 export * from "./regulatoryRuleConflicts";
 export * from "./regulatoryCalibrationPermissions";
+export * from "./zoneThematicSegments";

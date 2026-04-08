@@ -50,7 +50,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -651,6 +651,10 @@ export default function AnalysisDetailPage() {
       return null;
     }
   })();
+  const parsedExpertAnalysis = parsedDigest?.analysisVersion === "expert_zone_analysis_v1"
+    ? parsedDigest
+    : null;
+  const effectiveDigest = parsedExpertAnalysis?.digest || parsedDigest;
 
   const regulationControls = Array.isArray((analysis as any).metadata?.pluAnalysis?.controles)
     ? (analysis as any).metadata.pluAnalysis.controles.filter((control: any) =>
@@ -705,16 +709,16 @@ export default function AnalysisDetailPage() {
   })();
 
   const digestHighlights = [
-    parsedDigest?.dimensions?.maxFootprint ? `Emprise: ${parsedDigest.dimensions.maxFootprint}` : null,
-    parsedDigest?.dimensions?.maxHeight ? `Hauteur: ${parsedDigest.dimensions.maxHeight}` : null,
-    parsedDigest?.dimensions?.minSetbacks ? `Reculs: ${parsedDigest.dimensions.minSetbacks}` : null,
-    parsedDigest?.dimensions?.greenSpace ? `Espaces libres: ${parsedDigest.dimensions.greenSpace}` : null,
-    ...(Array.isArray(parsedDigest?.restrictions) ? parsedDigest.restrictions.slice(0, 2) : []),
-    ...(Array.isArray(parsedDigest?.conditions) ? parsedDigest.conditions.slice(0, 2) : []),
+    effectiveDigest?.dimensions?.maxFootprint ? `Emprise: ${effectiveDigest.dimensions.maxFootprint}` : null,
+    effectiveDigest?.dimensions?.maxHeight ? `Hauteur: ${effectiveDigest.dimensions.maxHeight}` : null,
+    effectiveDigest?.dimensions?.minSetbacks ? `Reculs: ${effectiveDigest.dimensions.minSetbacks}` : null,
+    effectiveDigest?.dimensions?.greenSpace ? `Espaces libres: ${effectiveDigest.dimensions.greenSpace}` : null,
+    ...(Array.isArray(effectiveDigest?.restrictions) ? effectiveDigest.restrictions.slice(0, 2) : []),
+    ...(Array.isArray(effectiveDigest?.conditions) ? effectiveDigest.conditions.slice(0, 2) : []),
   ].filter((value): value is string => hasMeaningfulRegulatoryText(value));
 
   const hasDigestSubstance = !!(
-    hasMeaningfulRegulatoryText(parsedDigest?.summary)
+    hasMeaningfulRegulatoryText(effectiveDigest?.summary)
     || digestHighlights.length > 0
   );
   const hasRegulatoryMatter = thematicInsights.length > 0 || regulationControls.length > 0 || hasDigestSubstance || !!missingPluIssue;
@@ -1464,6 +1468,108 @@ export default function AnalysisDetailPage() {
                  </div>
                )}
 
+               {parsedExpertAnalysis && (
+                 <div className="space-y-4 mb-8">
+                   <Card className="border-primary/20 shadow-sm overflow-hidden">
+                     <CardHeader className="bg-primary/5">
+                       <CardTitle className="text-base text-primary">Lecture experte consolidée de la zone</CardTitle>
+                       <CardDescription>
+                         Cette synthèse regroupe les règles publiées, les segments thématiques et les couches complémentaires dans une seule lecture cohérente.
+                       </CardDescription>
+                     </CardHeader>
+                     <CardContent className="p-5 space-y-5">
+                       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                         <div className="rounded-xl border bg-muted/10 p-4">
+                           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identification</div>
+                           <div className="mt-2 text-sm space-y-1">
+                             <p><span className="font-medium">Commune :</span> {parsedExpertAnalysis.identification?.commune || analysis.city || "N/D"}</p>
+                             <p><span className="font-medium">Zone :</span> {parsedExpertAnalysis.identification?.zoneCode || analysis.zoneCode || "N/D"}</p>
+                             {parsedExpertAnalysis.identification?.zoneLabel ? <p>{parsedExpertAnalysis.identification.zoneLabel}</p> : null}
+                             {parsedExpertAnalysis.identification?.referenceDocument?.title ? (
+                               <p className="text-muted-foreground">Doc. de référence : {parsedExpertAnalysis.identification.referenceDocument.title}</p>
+                             ) : null}
+                           </div>
+                         </div>
+                         <div className="rounded-xl border bg-muted/10 p-4">
+                           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Autres pièces et couches</div>
+                           <div className="mt-2 text-sm space-y-1 text-muted-foreground">
+                             {parsedExpertAnalysis.identification?.overlays?.length ? (
+                               parsedExpertAnalysis.identification.overlays.map((overlay: any) => (
+                                 <p key={overlay.id}>{overlay.code}{overlay.type ? ` · ${overlay.type}` : ""}{overlay.label ? ` — ${overlay.label}` : ""}</p>
+                               ))
+                             ) : (
+                               <p>Aucune couche complémentaire stabilisée.</p>
+                             )}
+                           </div>
+                         </div>
+                         <div className="rounded-xl border bg-muted/10 p-4">
+                           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Conclusion opérationnelle</div>
+                           <div className="mt-2 text-sm space-y-1">
+                             <p><span className="font-medium">Zone plutôt :</span> {parsedExpertAnalysis.operationalConclusion?.zonePlutot || "N/D"}</p>
+                             <p><span className="font-medium">Logique dominante :</span> {parsedExpertAnalysis.operationalConclusion?.logiqueDominante || "N/D"}</p>
+                           </div>
+                         </div>
+                       </div>
+
+                       {parsedExpertAnalysis.articleOrThemeBlocks?.length ? (
+                         <div className="space-y-3">
+                           <div className="text-sm font-semibold text-primary">Synthèse thème par thème</div>
+                           {parsedExpertAnalysis.articleOrThemeBlocks.map((block: any) => (
+                             <div key={block.key} className="rounded-xl border bg-background p-4 space-y-2">
+                               <div className="flex flex-wrap items-center gap-2">
+                                 <Badge variant="outline">{block.articleCode ? `Article ${block.articleCode}` : block.themeLabel}</Badge>
+                                 <Badge variant="secondary">{block.themeLabel}</Badge>
+                                 <Badge variant="outline">{block.qualification}</Badge>
+                                 <Badge variant="outline">Vigilance {block.niveauVigilance}</Badge>
+                               </div>
+                               <p className="text-sm font-medium">{block.anchorLabel || block.themeLabel}</p>
+                               <p className="text-sm text-muted-foreground">{block.ruleResumee}</p>
+                               <p className="text-sm">{block.effetConcretConstructibilite}</p>
+                               {block.exceptionsConditions ? (
+                                 <p className="text-xs text-muted-foreground">Conditions / exceptions : {block.exceptionsConditions}</p>
+                               ) : null}
+                             </div>
+                           ))}
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.crossEffects?.length ? (
+                         <div className="rounded-xl border bg-amber-50/60 border-amber-200/60 p-4">
+                           <div className="text-sm font-semibold text-amber-900 mb-2">Contraintes transversales et effets croisés</div>
+                           <ul className="space-y-2 text-sm text-amber-900">
+                             {parsedExpertAnalysis.crossEffects.map((effect: string, index: number) => (
+                               <li key={`${effect}-${index}`}>• {effect}</li>
+                             ))}
+                           </ul>
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.otherDocuments?.length ? (
+                         <div className="rounded-xl border bg-muted/10 p-4">
+                           <div className="text-sm font-semibold mb-2 text-primary">Ce que disent les autres pièces</div>
+                           <div className="space-y-2 text-sm text-muted-foreground">
+                             {parsedExpertAnalysis.otherDocuments.map((item: any, index: number) => (
+                               <div key={`${item.title}-${index}`} className="rounded-lg border bg-background/80 px-3 py-2">
+                                 <p className="font-medium text-foreground">{item.title}</p>
+                                 <p>{item.role} · {item.qualification}</p>
+                                 <p>{item.note}</p>
+                               </div>
+                             ))}
+                           </div>
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.professionalInterpretation ? (
+                         <div className="rounded-xl border bg-primary/5 p-4">
+                           <div className="text-sm font-semibold text-primary mb-2">Interprétation professionnelle</div>
+                           <p className="text-sm leading-relaxed text-foreground">{parsedExpertAnalysis.professionalInterpretation}</p>
+                         </div>
+                       ) : null}
+                     </CardContent>
+                   </Card>
+                 </div>
+               )}
+
                {/* NOUVEL AFFICHAGE DES ARTICLES (TUNNEL STEP 3) */}
                {regulationControls.length > 0 && (
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
@@ -1493,8 +1599,8 @@ export default function AnalysisDetailPage() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="p-6">
-                        {hasMeaningfulRegulatoryText(parsedDigest?.summary) && (
-                          <p className="text-sm text-foreground leading-relaxed italic mb-4">"{parsedDigest.summary}"</p>
+                        {hasMeaningfulRegulatoryText(effectiveDigest?.summary) && (
+                          <p className="text-sm text-foreground leading-relaxed italic mb-4">"{effectiveDigest.summary}"</p>
                         )}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                           <div>
@@ -1502,11 +1608,11 @@ export default function AnalysisDetailPage() {
                               <Maximize2 className="w-3 h-3" /> Dimensions clés
                             </h5>
                             <ul className="text-xs space-y-1.5 font-medium">
-                              {parsedDigest?.dimensions?.maxFootprint && <li>Emprise: {parsedDigest.dimensions.maxFootprint}</li>}
-                              {parsedDigest?.dimensions?.maxHeight && <li>Hauteur: {parsedDigest.dimensions.maxHeight}</li>}
-                              {parsedDigest?.dimensions?.minSetbacks && <li>Recul: {parsedDigest.dimensions.minSetbacks}</li>}
-                              {parsedDigest?.dimensions?.greenSpace && <li>Espaces: {parsedDigest.dimensions.greenSpace}</li>}
-                              {!parsedDigest?.dimensions?.maxFootprint && !parsedDigest?.dimensions?.maxHeight && !parsedDigest?.dimensions?.minSetbacks && !parsedDigest?.dimensions?.greenSpace && (
+                              {effectiveDigest?.dimensions?.maxFootprint && <li>Emprise: {effectiveDigest.dimensions.maxFootprint}</li>}
+                              {effectiveDigest?.dimensions?.maxHeight && <li>Hauteur: {effectiveDigest.dimensions.maxHeight}</li>}
+                              {effectiveDigest?.dimensions?.minSetbacks && <li>Recul: {effectiveDigest.dimensions.minSetbacks}</li>}
+                              {effectiveDigest?.dimensions?.greenSpace && <li>Espaces: {effectiveDigest.dimensions.greenSpace}</li>}
+                              {!effectiveDigest?.dimensions?.maxFootprint && !effectiveDigest?.dimensions?.maxHeight && !effectiveDigest?.dimensions?.minSetbacks && !effectiveDigest?.dimensions?.greenSpace && (
                                 <li className="text-muted-foreground">Aucune valeur dimensionnelle stabilisée.</li>
                               )}
                             </ul>
@@ -1516,8 +1622,8 @@ export default function AnalysisDetailPage() {
                               <ShieldAlert className="w-3 h-3 text-amber-600" /> Restrictions
                             </h5>
                             <ul className="text-xs space-y-1 text-muted-foreground list-disc list-inside">
-                              {(parsedDigest?.restrictions || []).slice(0, 4).map((r: string, i: number) => <li key={i}>{r}</li>)}
-                              {(!parsedDigest?.restrictions || parsedDigest.restrictions.length === 0) && <li>Aucune restriction clairement extraite.</li>}
+                              {(effectiveDigest?.restrictions || []).slice(0, 4).map((r: string, i: number) => <li key={i}>{r}</li>)}
+                              {(!effectiveDigest?.restrictions || effectiveDigest.restrictions.length === 0) && <li>Aucune restriction clairement extraite.</li>}
                             </ul>
                           </div>
                           <div>
@@ -1525,8 +1631,8 @@ export default function AnalysisDetailPage() {
                               <FileCheck className="w-3 h-3 text-emerald-600" /> Conditions
                             </h5>
                             <ul className="text-xs space-y-1 text-muted-foreground list-disc list-inside">
-                              {(parsedDigest?.conditions || []).slice(0, 4).map((c: string, i: number) => <li key={i}>{c}</li>)}
-                              {(!parsedDigest?.conditions || parsedDigest.conditions.length === 0) && <li>Aucune condition claire isolée.</li>}
+                              {(effectiveDigest?.conditions || []).slice(0, 4).map((c: string, i: number) => <li key={i}>{c}</li>)}
+                              {(!effectiveDigest?.conditions || effectiveDigest.conditions.length === 0) && <li>Aucune condition claire isolée.</li>}
                             </ul>
                           </div>
                         </div>
@@ -1705,6 +1811,22 @@ export default function AnalysisDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {parsedExpertAnalysis?.crossEffects?.length ? (
+            <Card className="border-sky-200 bg-sky-50/70">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sky-900 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5" />
+                  Lecture experte à garder en tête pour la constructibilité
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-sky-900">
+                {parsedExpertAnalysis.crossEffects.slice(0, 3).map((effect: string, index: number) => (
+                  <p key={`${effect}-${index}`}>• {effect}</p>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
