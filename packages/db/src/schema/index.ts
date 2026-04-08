@@ -5,6 +5,7 @@ export * from "./documentReviews";
 export * from "./aiPrompts";
 export * from "./dossierMessages";
 export * from "./townHallDocuments";
+export * from "./townHallDocumentFiles";
 export * from "./townHallUploadSessions";
 export * from "./townHallPrompts";
 export * from "./rules";

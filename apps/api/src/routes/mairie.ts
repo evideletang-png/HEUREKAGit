@@ -7,7 +7,6 @@ import {
   usersTable, 
   analysesTable, 
   dossierMessagesTable, 
-  townHallDocumentsTable, 
   townHallPromptsTable, 
   baseIABatchesTable,
   baseIADocumentsTable,
@@ -17,6 +16,8 @@ import {
   ruleArticlesTable,
   zoneAnalysesTable,
 } from "@workspace/db";
+import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
+import { townHallDocumentFilesTable } from "../../../../packages/db/src/schema/townHallDocumentFiles.js";
 import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
 import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
@@ -967,6 +968,7 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
       id: townHallDocumentsTable.id,
       title: townHallDocumentsTable.title,
       fileName: townHallDocumentsTable.fileName,
+      hasStoredBlob: townHallDocumentsTable.hasStoredBlob,
       commune: townHallDocumentsTable.commune,
       rawText: townHallDocumentsTable.rawText,
       category: townHallDocumentsTable.category,
@@ -2140,6 +2142,53 @@ function resolveTownHallDocumentPath(id: string, fileName: string | null | undef
   return null;
 }
 
+async function loadTownHallDocumentBlob(documentId: string) {
+  const [storedFile] = await db.select({
+    documentId: townHallDocumentFilesTable.documentId,
+    mimeType: townHallDocumentFilesTable.mimeType,
+    fileSize: townHallDocumentFilesTable.fileSize,
+    fileBase64: townHallDocumentFilesTable.fileBase64,
+  })
+    .from(townHallDocumentFilesTable)
+    .where(eq(townHallDocumentFilesTable.documentId, documentId))
+    .limit(1);
+
+  if (!storedFile?.fileBase64) return null;
+
+  return {
+    mimeType: storedFile.mimeType || "application/pdf",
+    fileSize: storedFile.fileSize || null,
+    buffer: Buffer.from(storedFile.fileBase64, "base64"),
+  };
+}
+
+async function ensureTownHallDocumentPersistentSource(documentId: string, fileName: string | null | undefined) {
+  const diskPath = resolveTownHallDocumentPath(documentId, fileName);
+  if (diskPath && fs.existsSync(diskPath)) {
+    return { filePath: diskPath, fromBlob: false, mimeType: null as string | null, fileSize: null as number | null };
+  }
+
+  if (!fileName) {
+    return { filePath: null, fromBlob: false, mimeType: null as string | null, fileSize: null as number | null };
+  }
+
+  const storedBlob = await loadTownHallDocumentBlob(documentId);
+  if (!storedBlob) {
+    return { filePath: null, fromBlob: false, mimeType: null as string | null, fileSize: null as number | null };
+  }
+
+  ensureTownHallUploadsDir();
+  const restoredPath = path.join(PRIMARY_UPLOADS_DIR, fileName);
+  fs.writeFileSync(restoredPath, storedBlob.buffer);
+
+  return {
+    filePath: restoredPath,
+    fromBlob: true,
+    mimeType: storedBlob.mimeType,
+    fileSize: storedBlob.fileSize,
+  };
+}
+
 function hasUsableTownHallText(rawText: string | null | undefined): boolean {
   return hasUsableExtractedText(rawText);
 }
@@ -2151,9 +2200,10 @@ function getTownHallDocumentAvailability(doc: {
   rawText: string | null;
   documentType?: string | null;
   hasVisionAnalysis?: boolean | null;
+  hasStoredBlob?: boolean | null;
 }) {
   const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
-  const hasStoredFile = !!filePath;
+  const hasStoredFile = !!filePath || !!doc.hasStoredBlob;
   const hasExtractedText = hasUsableTownHallText(doc.rawText);
   const textQuality = assessExtractedTextQuality(doc.rawText);
   const lowerType = String(doc.documentType || "").toLowerCase();
@@ -2169,16 +2219,20 @@ function getTownHallDocumentAvailability(doc: {
 
   if (hasStoredFile && hasExtractedText) {
     availabilityStatus = "indexed";
-    availabilityMessage = "Document disponible et exploitable par l'analyse.";
+    availabilityMessage = filePath
+      ? "Document disponible et exploitable par l'analyse."
+      : "Document disponible depuis le stockage persistant et exploitable par l'analyse.";
   } else if (!hasStoredFile && hasExtractedText) {
     availabilityStatus = "indexed_without_source_file";
-    availabilityMessage = "Le texte du document est indexe, mais le fichier source est introuvable sur le disque.";
+    availabilityMessage = "Le texte du document est indexe, mais le fichier source persistant est indisponible.";
   } else if (hasStoredFile && !hasExtractedText) {
     availabilityStatus = "processing";
-    availabilityMessage = "Le fichier est present, mais le texte n'est pas encore exploitable pour l'analyse.";
+    availabilityMessage = filePath
+      ? "Le fichier est present, mais le texte n'est pas encore exploitable pour l'analyse."
+      : "Le document est stocke de façon persistante, mais le texte n'est pas encore exploitable pour l'analyse.";
   } else if (doc.fileName) {
     availabilityStatus = "missing_file";
-    availabilityMessage = "Le fichier source est introuvable et aucun texte exploitable n'a ete indexe.";
+    availabilityMessage = "Le fichier source persistant est introuvable et aucun texte exploitable n'a ete indexe.";
   } else {
     availabilityStatus = "broken";
     availabilityMessage = "Le document est incomplet et doit etre reimporte.";
@@ -2592,23 +2646,38 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
       return res.status(500).json({ error: "FILE_MISSING", message: "Le fichier temporaire de cette session est introuvable." });
     }
 
+    const fileBuffer = fs.readFileSync(sessionPath);
     ensureTownHallUploadsDir();
     const persistentPath = path.join(PRIMARY_UPLOADS_DIR, session.storedFileName);
     fs.renameSync(sessionPath, persistentPath);
 
-    const [doc] = await db.insert(townHallDocumentsTable).values({
-      userId: req.user!.userId,
-      commune: session.commune,
-      title: session.title || session.originalFileName,
-      fileName: session.storedFileName,
-      rawText: "",
-      category: session.category || null,
-      subCategory: session.subCategory || null,
-      documentType: session.documentType || null,
-      isRegulatory: true,
-      tags: parseDocumentTags(session.tags),
-      zone: session.zone || null
-    }).returning();
+    const [doc] = await db.transaction(async (tx) => {
+      const [createdDoc] = await tx.insert(townHallDocumentsTable).values({
+        userId: req.user!.userId,
+        commune: session.commune,
+        title: session.title || session.originalFileName,
+        fileName: session.storedFileName,
+        mimeType: session.mimeType || "application/pdf",
+        fileSize: session.fileSize,
+        hasStoredBlob: true,
+        rawText: "",
+        category: session.category || null,
+        subCategory: session.subCategory || null,
+        documentType: session.documentType || null,
+        isRegulatory: true,
+        tags: parseDocumentTags(session.tags),
+        zone: session.zone || null
+      }).returning();
+
+      await tx.insert(townHallDocumentFilesTable).values({
+        documentId: createdDoc.id,
+        mimeType: session.mimeType || "application/pdf",
+        fileSize: session.fileSize,
+        fileBase64: fileBuffer.toString("base64"),
+      });
+
+      return [createdDoc];
+    });
 
     await db.update(townHallUploadSessionsTable)
       .set({
@@ -3990,6 +4059,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
       id: townHallDocumentsTable.id,
       title: townHallDocumentsTable.title,
       fileName: townHallDocumentsTable.fileName,
+      hasStoredBlob: townHallDocumentsTable.hasStoredBlob,
       commune: townHallDocumentsTable.commune,
       documentType: townHallDocumentsTable.documentType,
       category: townHallDocumentsTable.category,
@@ -4390,6 +4460,7 @@ router.get("/plu-rule-reviews", async (req: AuthRequest, res) => {
       createdAt: townHallDocumentsTable.createdAt,
       rawText: townHallDocumentsTable.rawText,
       fileName: townHallDocumentsTable.fileName,
+      hasStoredBlob: townHallDocumentsTable.hasStoredBlob,
       isOpposable: townHallDocumentsTable.isOpposable,
     }).from(townHallDocumentsTable)
       .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
@@ -4737,11 +4808,14 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
           }).returning();
 
           // Also support legacy table for back-compat
-          await db.insert(townHallDocumentsTable).values({
+          const [townHallDoc] = await db.insert(townHallDocumentsTable).values({
             userId: req.user!.userId,
             commune: targetCommune || null,
             title: file.originalname,
             fileName: storedFileName,
+            mimeType: file.mimetype || "application/pdf",
+            fileSize: content.length,
+            hasStoredBlob: true,
             rawText: rawText,
             category,
             subCategory,
@@ -4750,6 +4824,13 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             isOpposable,
             tags,
             zone: req.body.zone || null
+          }).returning({ id: townHallDocumentsTable.id });
+
+          await db.insert(townHallDocumentFilesTable).values({
+            documentId: townHallDoc.id,
+            mimeType: file.mimetype || "application/pdf",
+            fileSize: content.length,
+            fileBase64: content.toString("base64"),
           });
 
           // Process the document for RAG (Chunking + Embeddings)
@@ -4829,6 +4910,7 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
 
     const ext = path.extname(file.originalname || "") || ".pdf";
     const storedFileName = `${crypto.randomUUID()}${ext}`;
+    const fileBuffer = fs.readFileSync(file.path);
     ensureTownHallUploadsDir();
     const persistentPath = path.join(PRIMARY_UPLOADS_DIR, storedFileName);
 
@@ -4841,18 +4923,32 @@ router.post("/documents", upload.single("file"), async (req: AuthRequest, res) =
     }
 
     const requestedTags = parseDocumentTags(req.body.tags);
-    const [doc] = await db.insert(townHallDocumentsTable).values({
-      userId: req.user!.userId,
-      commune: targetCommune,
-      title: req.body.title || file.originalname,
-      fileName: storedFileName,
-      rawText: "",
-      category: req.body.category || null,
-      subCategory: req.body.subCategory || null,
-      documentType: req.body.documentType || null,
-      tags: requestedTags,
-      zone: req.body.zone || null
-    }).returning();
+    const [doc] = await db.transaction(async (tx) => {
+      const [createdDoc] = await tx.insert(townHallDocumentsTable).values({
+        userId: req.user!.userId,
+        commune: targetCommune,
+        title: req.body.title || file.originalname,
+        fileName: storedFileName,
+        mimeType: file.mimetype || "application/pdf",
+        fileSize: file.size,
+        hasStoredBlob: true,
+        rawText: "",
+        category: req.body.category || null,
+        subCategory: req.body.subCategory || null,
+        documentType: req.body.documentType || null,
+        tags: requestedTags,
+        zone: req.body.zone || null
+      }).returning();
+
+      await tx.insert(townHallDocumentFilesTable).values({
+        documentId: createdDoc.id,
+        mimeType: file.mimetype || "application/pdf",
+        fileSize: file.size,
+        fileBase64: fileBuffer.toString("base64"),
+      });
+
+      return [createdDoc];
+    });
 
     try { fs.unlinkSync(file.path); } catch {}
 
@@ -4987,7 +5083,12 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
     const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
 
     // 1. Fetch document record to get the actual fileName
-    const [doc] = await db.select({ fileName: townHallDocumentsTable.fileName, commune: townHallDocumentsTable.commune })
+    const [doc] = await db.select({
+      fileName: townHallDocumentsTable.fileName,
+      commune: townHallDocumentsTable.commune,
+      mimeType: townHallDocumentsTable.mimeType,
+      hasStoredBlob: townHallDocumentsTable.hasStoredBlob,
+    })
       .from(townHallDocumentsTable)
       .where(eq(townHallDocumentsTable.id, id))
       .limit(1);
@@ -5000,17 +5101,17 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
-    // 2. Locate the file in physical storage
-    const filePath = resolveTownHallDocumentPath(id, doc.fileName);
+    // 2. Locate the file in physical storage or restore it from persistent DB storage
+    const source = await ensureTownHallDocumentPersistentSource(id, doc.fileName);
 
-    if (!filePath || !fs.existsSync(filePath)) {
-      console.error(`[mairie/view] Physical file missing in uploads/ for: ${doc.fileName}`);
-      return res.status(404).json({ error: "FILE_NOT_FOUND_ON_DISK" });
+    if (!source.filePath || !fs.existsSync(source.filePath)) {
+      console.error(`[mairie/view] Physical file missing and no persistent fallback found for: ${doc.fileName}`);
+      return res.status(404).json({ error: "FILE_NOT_FOUND" });
     }
 
-    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Type', doc.mimeType || source.mimeType || 'application/pdf');
     res.setHeader('Content-Disposition', 'inline');
-    return fs.createReadStream(filePath).pipe(res);
+    return fs.createReadStream(source.filePath).pipe(res);
   } catch (err) {
     console.error(`[mairie/view] Critical error for ID ${req.params.id}:`, err);
     return res.status(500).json({ error: "VIEW_FAILED" });

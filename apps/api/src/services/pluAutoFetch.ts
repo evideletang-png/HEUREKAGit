@@ -14,7 +14,7 @@ import { execSync } from "child_process";
 import crypto from "crypto";
 import path from "path";
 import fs from "fs";
-import { db, townHallDocumentsTable, baseIADocumentsTable } from "@workspace/db";
+import { db, baseIADocumentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
 import { GPUProviderService } from "./gpuProviderService.js";
@@ -24,6 +24,8 @@ import { persistRegulatoryUnitsForDocument } from "./regulatoryUnitService.js";
 import { persistRegulatoryZoneSectionsForDocument } from "./regulatoryZoneSectionService.js";
 import { persistUrbanRulesForDocument } from "./urbanRuleExtractionService.js";
 import { VisionService } from "./visionService.js";
+import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
+import { townHallDocumentFilesTable } from "../../../../packages/db/src/schema/townHallDocumentFiles.js";
 
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 
@@ -295,18 +297,34 @@ export async function autoFetchPLU(
           .where(eq(baseIADocumentsTable.id, baseIADoc.id));
 
         // Also create a townHallDocuments record for backward compat
-        await db.insert(townHallDocumentsTable).values({
+        const fileBuffer = fs.existsSync(path.join(UPLOADS_DIR, doc.fileName))
+          ? fs.readFileSync(path.join(UPLOADS_DIR, doc.fileName))
+          : null;
+
+        const [townHallDoc] = await db.insert(townHallDocumentsTable).values({
           userId: "SYSTEM",
           commune: communeName,
           title: doc.fileName,
           fileName: doc.fileName,
+          mimeType: "application/pdf",
+          fileSize: fileBuffer?.length || null,
+          hasStoredBlob: !!fileBuffer,
           rawText: doc.rawText,
           category: "REGULATORY",
           subCategory: "PLU",
           documentType: doc.docType,
           isRegulatory: true,
           isOpposable: true,
-        }).onConflictDoNothing();
+        }).returning({ id: townHallDocumentsTable.id });
+
+        if (townHallDoc?.id && fileBuffer) {
+          await db.insert(townHallDocumentFilesTable).values({
+            documentId: townHallDoc.id,
+            mimeType: "application/pdf",
+            fileSize: fileBuffer.length,
+            fileBase64: fileBuffer.toString("base64"),
+          }).onConflictDoNothing();
+        }
 
         logger.info(`[PLUAutoFetch] ✅ Background indexed ${doc.fileName} into Base IA (${poolId})`);
       } catch (e) {
