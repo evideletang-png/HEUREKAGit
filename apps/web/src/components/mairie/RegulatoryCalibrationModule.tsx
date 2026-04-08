@@ -33,6 +33,7 @@ type ZoneItem = {
   parentZoneCode: string | null;
   sectorCode: string | null;
   guidanceNotes: string | null;
+  searchKeywords: string[];
   displayOrder: number;
   isActive: boolean;
 };
@@ -399,6 +400,7 @@ function buildZoneEditorDraft(zone: ZoneItem) {
     zoneLabel: zone.zoneLabel || "",
     parentZoneCode: zone.parentZoneCode || "",
     guidanceNotes: zone.guidanceNotes || "",
+    searchKeywordsText: (zone.searchKeywords || []).join(", "),
   };
 }
 
@@ -444,6 +446,80 @@ function buildEmptyRelationDraft() {
   };
 }
 
+function normalizeQuickText(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function detectQuickRuleOperator(input: string) {
+  const normalized = normalizeQuickText(input);
+  if (/(maximum|maximale|maximal|au plus|ne depasse pas|inferieur ou egal|<=)/.test(normalized)) return "<=";
+  if (/(minimum|minimale|minimal|au moins|superieur ou egal|>=|obligatoire|minimum de)/.test(normalized)) return ">=";
+  return "=";
+}
+
+function matchQuickRuleTheme(input: string, themes: ThemeItem[]) {
+  const normalized = normalizeQuickText(input);
+  const definitions = [
+    { patterns: ["hauteur", "faitage", "egout"], candidates: ["hauteur", "height"] },
+    { patterns: ["stationnement", "parking", "velo", "place"], candidates: ["stationnement", "parking"] },
+    { patterns: ["emprise", "ces"], candidates: ["emprise_sol", "footprint"] },
+    { patterns: ["recul", "voie", "alignement"], candidates: ["recul_voie", "setback_public"] },
+    { patterns: ["limite separative", "limites separatives", "fond de parcelle", "distance entre batiments"], candidates: ["recul_limite", "setback_side", "setback_rear", "distance_entre_batiments"] },
+    { patterns: ["pleine terre", "espaces verts", "plantation", "biotope"], candidates: ["pleine_terre", "espaces_verts", "green_space", "coefficient_biotope", "plantations"] },
+    { patterns: ["materiau", "facade", "toiture", "cloture", "aspect exterieur"], candidates: ["materiaux", "aspect_exterieur", "facades", "toiture", "clotures"] },
+    { patterns: ["risque", "ppri", "pprt", "spr", "servitude", "abf"], candidates: ["risques", "servitudes"] },
+    { patterns: ["assainissement", "eaux usees"], candidates: ["assainissement", "reseaux"] },
+    { patterns: ["eaux pluviales"], candidates: ["eaux_pluviales", "reseaux"] },
+    { patterns: ["acces", "voirie", "pompiers"], candidates: ["acces_voirie", "acces_pompiers"] },
+    { patterns: ["destination", "usage", "interdit", "condition"], candidates: ["destination", "interdictions", "conditions_particulieres"] },
+  ];
+
+  for (const definition of definitions) {
+    if (!definition.patterns.some((pattern) => normalized.includes(pattern))) continue;
+    const matchedTheme = themes.find((theme) => {
+      const themeCode = normalizeQuickText(theme.code);
+      const themeLabel = normalizeQuickText(theme.label);
+      return definition.candidates.some((candidate) => themeCode.includes(candidate) || themeLabel.includes(candidate));
+    });
+    if (matchedTheme) return matchedTheme;
+  }
+
+  return themes.find((theme) => {
+    const themeCode = normalizeQuickText(theme.code.replaceAll("_", " "));
+    const themeLabel = normalizeQuickText(theme.label);
+    return normalized.includes(themeCode) || normalized.includes(themeLabel);
+  }) || null;
+}
+
+function buildQuickRuleDraft(input: string, themes: ThemeItem[]) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const theme = matchQuickRuleTheme(trimmed, themes);
+  const numericPerUnitMatch = trimmed.match(/(\d+(?:[.,]\d+)?)\s*(place(?:s)?|emplacement(?:s)?|m²|m2|m|%)(?:\s*(?:par|\/)\s*([A-Za-zÀ-ÿ0-9 m²m2]+))?/i);
+  const numericMatch = trimmed.match(/(\d+(?:[.,]\d+)?)/);
+  const numericValue = numericPerUnitMatch?.[1] || numericMatch?.[1] || "";
+  const numeric = numericValue ? Number.parseFloat(numericValue.replace(",", ".")) : null;
+  const unitBase = numericPerUnitMatch?.[2]?.toLowerCase() || "";
+  const perUnit = numericPerUnitMatch?.[3]?.trim() || "";
+  const unit = unitBase
+    ? `${unitBase.replace("m2", "m²").replace("places", "place").replace("emplacements", "emplacement")}${perUnit ? ` / ${perUnit}` : ""}`
+    : "";
+  const conditionMatch = trimmed.match(/(?:en cas de|si|sous reserve de|a condition de|conformement a)(.*)$/i);
+
+  return {
+    ...buildEmptyRuleDraft(),
+    themeCode: theme?.code || "",
+    ruleLabel: theme?.label || trimmed,
+    operator: detectQuickRuleOperator(trimmed),
+    valueNumeric: numeric !== null && Number.isFinite(numeric) ? String(numeric) : "",
+    valueText: numeric === null ? trimmed : "",
+    unit,
+    conditionText: conditionMatch?.[0]?.trim() || "",
+    interpretationNote: trimmed,
+  };
+}
+
 export function RegulatoryCalibrationModule({
   currentCommune,
   documents,
@@ -457,7 +533,7 @@ export function RegulatoryCalibrationModule({
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("zones");
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [zoneForm, setZoneForm] = useState({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "" });
+  const [zoneForm, setZoneForm] = useState({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "", searchKeywordsText: "" });
   const [overlayForm, setOverlayForm] = useState({
     overlayCode: "",
     overlayLabel: "",
@@ -491,6 +567,7 @@ export function RegulatoryCalibrationModule({
   const [libraryOverlayFilter, setLibraryOverlayFilter] = useState("all");
   const [libraryNormativeFilter, setLibraryNormativeFilter] = useState("all");
   const [libraryProceduralFilter, setLibraryProceduralFilter] = useState("all");
+  const [quickRuleInputs, setQuickRuleInputs] = useState<Record<string, string>>({});
   const [ruleDrafts, setRuleDrafts] = useState<Record<string, {
     themeCode: string;
     ruleLabel: string;
@@ -568,10 +645,11 @@ export function RegulatoryCalibrationModule({
         zoneLabel: zoneForm.zoneLabel,
         parentZoneCode: zoneForm.parentZoneCode,
         guidanceNotes: zoneForm.guidanceNotes,
+        searchKeywords: zoneForm.searchKeywordsText,
       }),
     }),
     onSuccess: () => {
-      setZoneForm({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "" });
+      setZoneForm({ zoneCode: "", zoneLabel: "", parentZoneCode: "", guidanceNotes: "", searchKeywordsText: "" });
       refreshCalibration();
       toast({ title: "Zone créée", description: "La zone est prête pour le calibrage." });
     },
@@ -659,6 +737,7 @@ export function RegulatoryCalibrationModule({
         zoneLabel: draft.zoneLabel,
         parentZoneCode: draft.parentZoneCode,
         guidanceNotes: draft.guidanceNotes,
+        searchKeywords: draft.searchKeywordsText,
       }),
     }),
     onSuccess: (_payload, variables) => {
@@ -1020,6 +1099,7 @@ export function RegulatoryCalibrationModule({
               <Input placeholder="Libellé optionnel" value={zoneForm.zoneLabel} onChange={(e) => setZoneForm((v) => ({ ...v, zoneLabel: e.target.value }))} />
               <Input placeholder="Zone mère optionnelle" value={zoneForm.parentZoneCode} onChange={(e) => setZoneForm((v) => ({ ...v, parentZoneCode: e.target.value }))} />
               <Textarea placeholder="Notes de guidage (pages, secteur, nuances utiles)" value={zoneForm.guidanceNotes} onChange={(e) => setZoneForm((v) => ({ ...v, guidanceNotes: e.target.value }))} />
+              <Textarea placeholder="Mots-clés de recherche (stationnement, changement de destination, article 12...)" value={zoneForm.searchKeywordsText} onChange={(e) => setZoneForm((v) => ({ ...v, searchKeywordsText: e.target.value }))} />
               <Button
                 className="w-full"
                 disabled={!canEditCalibration || !!calibrationLoadErrorMessage || loadingZones || createZoneMutation.isPending || !zoneForm.zoneCode.trim()}
@@ -1054,6 +1134,15 @@ export function RegulatoryCalibrationModule({
                         </div>
                         <p className="font-medium break-words">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
                         {zone.guidanceNotes && <p className="text-sm text-muted-foreground break-words">{zone.guidanceNotes}</p>}
+                        {zone.searchKeywords?.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {zone.searchKeywords.map((keyword) => (
+                              <Badge key={`${zone.id}-${keyword}`} variant="outline" className="text-[11px]">
+                                {keyword}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                         {editingZoneId === zone.id && (
                           <div className="mt-3 space-y-3 rounded-xl border bg-muted/10 p-3">
                             <Input
@@ -1086,6 +1175,14 @@ export function RegulatoryCalibrationModule({
                               onChange={(e) => setZoneEditorDrafts((current) => ({
                                 ...current,
                                 [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), guidanceNotes: e.target.value },
+                              }))}
+                            />
+                            <Textarea
+                              placeholder="Mots-clés de recherche"
+                              value={zoneEditorDrafts[zone.id]?.searchKeywordsText || ""}
+                              onChange={(e) => setZoneEditorDrafts((current) => ({
+                                ...current,
+                                [zone.id]: { ...buildZoneEditorDraft(zone), ...(current[zone.id] || {}), searchKeywordsText: e.target.value },
                               }))}
                             />
                             <div className="flex flex-wrap gap-2">
@@ -1652,6 +1749,49 @@ export function RegulatoryCalibrationModule({
                         <p className="mt-2 text-sm text-muted-foreground">Choisis un extrait calibré pour créer une règle structurée.</p>
                       ) : (
                           <div className="mt-3 space-y-3">
+                            <div className="rounded-xl border bg-muted/10 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-medium">Saisie rapide</p>
+                                  <p className="text-xs text-muted-foreground">Écris simplement une règle comme “Hauteur 15 m” ou “Stationnement 2 places / logement”.</p>
+                                </div>
+                                <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+                              </div>
+                              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                <Input
+                                  placeholder="Ex : Hauteur 15 m"
+                                  value={quickRuleInputs[activeExcerptId] || ""}
+                                  onChange={(e) => setQuickRuleInputs((current) => ({ ...current, [activeExcerptId]: e.target.value }))}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="sm:w-auto"
+                                  onClick={() => {
+                                    const parsed = buildQuickRuleDraft(
+                                      quickRuleInputs[activeExcerptId] || "",
+                                      themesData?.themes || workspaceData.themes,
+                                    );
+                                    if (!parsed) {
+                                      toast({ title: "Saisie vide", description: "Ajoute d’abord un texte court à interpréter.", variant: "destructive" });
+                                      return;
+                                    }
+                                    setRuleDrafts((current) => ({
+                                      ...current,
+                                      [activeExcerptId]: {
+                                        ...buildEmptyRuleDraft(),
+                                        ...(current[activeExcerptId] || {}),
+                                        ...parsed,
+                                      },
+                                    }));
+                                    toast({ title: "Formulaire pré-rempli", description: "Tu peux maintenant ajuster la règle structurée avant de l’enregistrer." });
+                                  }}
+                                >
+                                  <Sparkles className="mr-2 h-4 w-4" />
+                                  Pré-remplir
+                                </Button>
+                              </div>
+                            </div>
                             <Select value={ruleDrafts[activeExcerptId]?.themeCode || ""} onValueChange={(value) => setRuleDrafts((current) => ({
                               ...current,
                               [activeExcerptId]: {

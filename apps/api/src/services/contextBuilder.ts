@@ -5,6 +5,7 @@ import { queryRelevantChunks } from "./embeddingService.js";
 import { autoFetchPLU } from "./pluAutoFetch.js";
 import { hasUsableExtractedText } from "./textQualityService.js";
 import { buildZoneCodeAliases } from "./pluAnalysis.js";
+import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -21,9 +22,13 @@ async function collectPrioritizedRegulatoryChunks(
   jurisdictionContext: JurisdictionContext,
   limit = 30
 ) {
-  const query = `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`;
   const aliases = Array.from(new Set([commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)));
   const zoneAliases = buildZoneCodeAliases(zoneCode);
+  const searchKeywords = await loadZoneSearchKeywords({ municipalityAliases: aliases, zoneCode });
+  const query = [
+    `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`,
+    searchKeywords.length > 0 ? `Mots-clés prioritaires : ${searchKeywords.join(", ")}` : null,
+  ].filter(Boolean).join(". ");
   const plans = [
     { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 18) },
     { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 8) },

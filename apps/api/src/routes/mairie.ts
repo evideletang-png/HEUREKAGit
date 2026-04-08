@@ -559,6 +559,27 @@ function deriveParentZoneCode(zoneCode: string | null): string | null {
   return withoutNumericPrefix && withoutNumericPrefix !== normalized ? withoutNumericPrefix : null;
 }
 
+function normalizeZoneSearchKeywords(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return Array.from(new Set(
+      raw
+        .map((keyword) => String(keyword).trim())
+        .filter((keyword) => keyword.length > 0),
+    ));
+  }
+
+  if (typeof raw === "string") {
+    return Array.from(new Set(
+      raw
+        .split(/[\n,;]+/)
+        .map((keyword) => keyword.trim())
+        .filter((keyword) => keyword.length > 0),
+    ));
+  }
+
+  return [];
+}
+
 function normalizeDocumentFingerprintPart(raw: string | null | undefined) {
   return (raw || "")
     .toLowerCase()
@@ -2992,6 +3013,7 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
           parentZoneCode: normalizeConfiguredZoneCode(req.body.parentZoneCode),
           sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
           guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
+          searchKeywords: normalizeZoneSearchKeywords(req.body.searchKeywords),
           displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
           isActive: req.body.isActive === false ? false : true,
           updatedBy: req.user!.userId,
@@ -3016,6 +3038,7 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         parentZoneCode: normalizeConfiguredZoneCode(req.body.parentZoneCode),
         sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
         guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
+        searchKeywords: normalizeZoneSearchKeywords(req.body.searchKeywords),
         displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
         isActive: req.body.isActive === false ? false : true,
         createdBy: req.user!.userId,
@@ -3058,6 +3081,7 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
         parentZoneCode: req.body.parentZoneCode === undefined ? zone.parentZoneCode : normalizeConfiguredZoneCode(req.body.parentZoneCode),
         sectorCode: req.body.sectorCode === undefined ? zone.sectorCode : (typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null),
         guidanceNotes: req.body.guidanceNotes === undefined ? zone.guidanceNotes : (typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null),
+        searchKeywords: req.body.searchKeywords === undefined ? zone.searchKeywords : normalizeZoneSearchKeywords(req.body.searchKeywords),
         displayOrder: req.body.displayOrder === undefined ? zone.displayOrder : (Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : zone.displayOrder),
         isActive: req.body.isActive === undefined ? zone.isActive : !!req.body.isActive,
         updatedBy: req.user!.userId,

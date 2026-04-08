@@ -1371,15 +1371,19 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       id,
       reviewStatus,
       reviewedZoneCode,
+      reviewedStartPage,
+      reviewedEndPage,
     }: {
       id: string;
       reviewStatus: "validated" | "to_review" | "rejected";
       reviewedZoneCode?: string;
+      reviewedStartPage?: number | null;
+      reviewedEndPage?: number | null;
     }) => {
       return apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewStatus, reviewedZoneCode }),
+        body: JSON.stringify({ reviewStatus, reviewedZoneCode, reviewedStartPage, reviewedEndPage }),
       });
     },
     onSuccess: () => {
@@ -1971,10 +1975,28 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                 onClick={() => {
                                   const reviewedZoneCode = window.prompt("Zone correcte pour cette section", section.zoneCode || "");
                                   if (reviewedZoneCode == null) return;
+                                  const reviewedStartPageInput = window.prompt(
+                                    "Page de début correcte",
+                                    section.startPage != null ? String(section.startPage) : "",
+                                  );
+                                  if (reviewedStartPageInput == null) return;
+                                  const reviewedEndPageInput = window.prompt(
+                                    "Page de fin correcte",
+                                    section.endPage != null ? String(section.endPage) : reviewedStartPageInput,
+                                  );
+                                  if (reviewedEndPageInput == null) return;
+                                  const reviewedStartPage = reviewedStartPageInput.trim().length > 0
+                                    ? Number.parseInt(reviewedStartPageInput, 10)
+                                    : null;
+                                  const reviewedEndPage = reviewedEndPageInput.trim().length > 0
+                                    ? Number.parseInt(reviewedEndPageInput, 10)
+                                    : null;
                                   reviewZoneMutation.mutate({
                                     id: section.id,
                                     reviewStatus: "to_review",
                                     reviewedZoneCode,
+                                    reviewedStartPage: Number.isFinite(reviewedStartPage) ? reviewedStartPage : null,
+                                    reviewedEndPage: Number.isFinite(reviewedEndPage) ? reviewedEndPage : null,
                                   });
                                 }}
                               >

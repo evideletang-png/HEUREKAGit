@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, boolean, integer, index, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 
@@ -10,6 +10,7 @@ export const regulatoryCalibrationZonesTable = pgTable("regulatory_calibration_z
   parentZoneCode: text("parent_zone_code"),
   sectorCode: text("sector_code"),
   guidanceNotes: text("guidance_notes"),
+  searchKeywords: jsonb("search_keywords").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   displayOrder: integer("display_order").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
   createdBy: text("created_by"),

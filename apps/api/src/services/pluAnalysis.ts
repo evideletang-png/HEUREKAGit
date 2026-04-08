@@ -7,6 +7,7 @@ import { SYSTEM_PROMPTS, CerfaExtractionSchema, EvidenceBundle, EvidenceChunk, J
 import { queryRelevantChunks } from "./embeddingService.js";
 import { logger } from "../utils/logger.js";
 import fs from "fs";
+import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.js";
 
 function uniqueMunicipalityAliases(cityName?: string, jurisdictionContext?: JurisdictionContext): string[] {
   return Array.from(new Set([
@@ -1297,7 +1298,13 @@ export async function extractRelevantRules(
   // This is the canonical PLU knowledge source; rawText is supplementary
   if (cityName) {
     try {
-      const queryStr = `Règles d'urbanisme zone ${zoneCode}${topics.length > 0 ? `. Thématiques: ${topics.join(", ")}` : ""}`;
+      const municipalityAliases = uniqueMunicipalityAliases(cityName, jurisdictionContext);
+      const zoneSearchKeywords = await loadZoneSearchKeywords({ municipalityAliases, zoneCode });
+      const queryStr = [
+        `Règles d'urbanisme zone ${zoneCode}`,
+        topics.length > 0 ? `Thématiques: ${topics.join(", ")}` : null,
+        zoneSearchKeywords.length > 0 ? `Mots-clés ciblés: ${zoneSearchKeywords.join(", ")}` : null,
+      ].filter(Boolean).join(". ");
       console.log(`[pluAnalysis] Base IA semantic search: "${queryStr}" (${cityName})`);
 
       let chunks = await collectPrioritizedRegulatoryChunks(queryStr, {
