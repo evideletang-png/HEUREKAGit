@@ -315,6 +315,12 @@ function parsePositiveInt(raw: string) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
+function getArticleSortKey(articleCode: string | null | undefined) {
+  const normalized = String(articleCode || "").trim();
+  const numeric = Number.parseInt(normalized.replace(/\D+/g, ""), 10);
+  return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+}
+
 export function ZoneCalibrationWorkspace({
   currentCommune,
   zoneId,
@@ -564,6 +570,19 @@ export function ZoneCalibrationWorkspace({
   const pageNumbers = useMemo(
     () => (data?.pages || []).map((page) => page.pageNumber),
     [data?.pages],
+  );
+
+  const sortedZoneRules = useMemo(
+    () => [...(data?.rules || [])].sort((left, right) => {
+      const articleDelta = getArticleSortKey(left.articleCode) - getArticleSortKey(right.articleCode);
+      if (articleDelta !== 0) return articleDelta;
+
+      const pageDelta = (left.sourcePage || Number.POSITIVE_INFINITY) - (right.sourcePage || Number.POSITIVE_INFINITY);
+      if (pageDelta !== 0) return pageDelta;
+
+      return String(left.ruleLabel || "").localeCompare(String(right.ruleLabel || ""), "fr", { numeric: true, sensitivity: "base" });
+    }),
+    [data?.rules],
   );
 
   const applyQuickRuleInput = () => {
@@ -1284,7 +1303,7 @@ export function ZoneCalibrationWorkspace({
             <CardContent>
               <ScrollArea className="h-[360px] pr-3">
                 <div className="space-y-3">
-                  {data.rules.length > 0 ? data.rules.map((rule) => {
+                  {sortedZoneRules.length > 0 ? sortedZoneRules.map((rule) => {
                     const badge = getStatusBadge(rule.status);
                     return (
                       <div key={rule.id} className="overflow-hidden rounded-xl border bg-muted/10 p-3">
