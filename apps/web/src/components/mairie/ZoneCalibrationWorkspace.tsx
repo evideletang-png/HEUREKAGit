@@ -151,6 +151,9 @@ type ZoneWorkspaceResponse = {
     proceduralEffect: string;
     conflictFlag: boolean;
     resolutionStatus: string;
+    excerptSelectionLabel?: string | null;
+    visualCapture?: VisualCaptureMetadata | null;
+    visualSupportNote?: string | null;
   }>;
   conflicts: Array<{ id: string; conflictSummary: string; status: string }>;
   permissions: {
@@ -490,6 +493,10 @@ export function ZoneCalibrationWorkspace({
           ruleAnchorType: "article",
           ruleAnchorLabel: normalizedAnchorLabel,
           conflictResolutionStatus: "none",
+          rawSuggestion: {
+            visualCapture: selection?.visualCapture || null,
+            visualSupportNote: visualSupportNote.trim() || null,
+          },
         }),
       });
     },
@@ -1290,6 +1297,25 @@ export function ZoneCalibrationWorkspace({
                             <p className="text-sm font-semibold leading-snug text-primary break-words">
                               {rule.ruleLabel}
                             </p>
+                            {rule.visualCapture ? (
+                              <div className="space-y-2 rounded-xl border bg-background/70 p-2">
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="outline">Preuve graphique</Badge>
+                                  <span>page {rule.visualCapture.pageNumber}</span>
+                                  {rule.excerptSelectionLabel ? <span>{rule.excerptSelectionLabel}</span> : null}
+                                </div>
+                                <img
+                                  src={rule.visualCapture.previewDataUrl}
+                                  alt={`Croquis indexé page ${rule.visualCapture.pageNumber}`}
+                                  className="max-h-36 rounded-lg border bg-white object-contain"
+                                />
+                                {rule.visualSupportNote ? (
+                                  <p className="text-xs leading-snug text-muted-foreground break-words whitespace-pre-wrap">
+                                    {rule.visualSupportNote}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : null}
                             <p className="text-sm font-medium leading-snug break-words whitespace-pre-wrap">
                               {formatRuleValue(rule)}
                             </p>
@@ -1367,6 +1393,27 @@ export function ZoneCalibrationWorkspace({
                     </Badge>
                   </div>
                   <div className="space-y-2 rounded-xl border bg-muted/10 p-4">
+                    {detailRule.visualCapture ? (
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preuve graphique</div>
+                        <div className="mt-2 space-y-2 rounded-xl border bg-background/70 p-3">
+                          <div className="text-xs text-muted-foreground">
+                            page {detailRule.visualCapture.pageNumber}
+                            {detailRule.excerptSelectionLabel ? ` · ${detailRule.excerptSelectionLabel}` : ""}
+                          </div>
+                          <img
+                            src={detailRule.visualCapture.previewDataUrl}
+                            alt={`Croquis indexé page ${detailRule.visualCapture.pageNumber}`}
+                            className="max-h-72 rounded-lg border bg-white object-contain"
+                          />
+                          {detailRule.visualSupportNote ? (
+                            <p className="text-sm leading-snug break-words whitespace-pre-wrap">
+                              {detailRule.visualSupportNote}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Libellé</div>
                       <p className="mt-1 text-sm font-medium leading-snug break-words whitespace-pre-wrap">{detailRule.ruleLabel}</p>

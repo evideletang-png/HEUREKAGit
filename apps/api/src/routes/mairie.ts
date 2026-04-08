@@ -3881,6 +3881,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       pages: analysisPages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
       keywords: zone.searchKeywords || [],
     }).sort((left, right) => left.pageNumber - right.pageNumber);
+    const excerptMap = new Map(zoneExcerpts.map((excerpt) => [excerpt.id, excerpt] as const));
 
     return res.json({
       commune: access.targetCommune,
@@ -3946,10 +3947,18 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         document: documentMap.get(excerpt.documentId) || null,
         rules: zoneRules.filter((rule) => rule.excerptId === excerpt.id),
       })),
-      rules: zoneRules.map((rule) => ({
-        ...rule,
-        document: documentMap.get(rule.documentId) || null,
-      })),
+      rules: zoneRules.map((rule) => {
+        const excerpt = excerptMap.get(rule.excerptId);
+        const excerptMetadata = excerpt?.metadata && typeof excerpt.metadata === "object" ? excerpt.metadata as Record<string, unknown> : null;
+        const rawSuggestion = rule.rawSuggestion && typeof rule.rawSuggestion === "object" ? rule.rawSuggestion as Record<string, unknown> : null;
+        return {
+          ...rule,
+          document: documentMap.get(rule.documentId) || null,
+          excerptSelectionLabel: excerpt?.selectionLabel || null,
+          visualCapture: (rawSuggestion?.visualCapture || excerptMetadata?.visualCapture || null) as Record<string, unknown> | null,
+          visualSupportNote: typeof rawSuggestion?.visualSupportNote === "string" ? rawSuggestion.visualSupportNote : null,
+        };
+      }),
       relations: hydratedRelations,
       conflicts,
       permissions,
@@ -4528,6 +4537,13 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
         ? ruleAnchorLabel.trim()
         : (buildReviewedSourceArticle(normalizedArticleCode) || ruleLabel.trim());
 
+    const excerptMetadata = excerpt.metadata && typeof excerpt.metadata === "object"
+      ? excerpt.metadata as Record<string, unknown>
+      : {};
+    const incomingRawSuggestion = rawSuggestion && typeof rawSuggestion === "object"
+      ? rawSuggestion as Record<string, unknown>
+      : {};
+
     const [rule] = await db.insert(indexedRegulatoryRulesTable).values({
       communeId: excerpt.communeId,
       zoneId: excerpt.zoneId,
@@ -4559,7 +4575,14 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       status: "draft",
       aiSuggested: !!aiSuggested,
       validationNote: typeof validationNote === "string" ? validationNote.trim() || null : null,
-      rawSuggestion: rawSuggestion && typeof rawSuggestion === "object" ? rawSuggestion : {},
+      rawSuggestion: {
+        ...incomingRawSuggestion,
+        visualCapture: incomingRawSuggestion.visualCapture || excerptMetadata.visualCapture || null,
+        visualSupportNote:
+          typeof incomingRawSuggestion.visualSupportNote === "string"
+            ? incomingRawSuggestion.visualSupportNote
+            : null,
+      },
       createdBy: req.user!.userId,
       updatedBy: req.user!.userId,
     }).returning();
