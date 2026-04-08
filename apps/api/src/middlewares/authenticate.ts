@@ -24,7 +24,7 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
 }
 
 export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (req.user?.role !== "admin") {
+  if (req.user?.role !== "admin" && req.user?.role !== "super_admin") {
     res.status(403).json({ error: "FORBIDDEN", message: "Admin access required" });
     return;
   }
@@ -32,7 +32,7 @@ export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction
 }
 
 export function requireMairie(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (req.user?.role !== "mairie" && req.user?.role !== "admin") {
+  if (req.user?.role !== "mairie" && req.user?.role !== "admin" && req.user?.role !== "super_admin") {
     res.status(403).json({ error: "FORBIDDEN", message: "Accès réservé aux agents de mairie." });
     return;
   }

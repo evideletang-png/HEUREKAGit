@@ -36,3 +36,4 @@ export * from "./indexedRegulatoryRules";
 export * from "./ruleRelations";
 export * from "./regulatoryValidationHistory";
 export * from "./regulatoryRuleConflicts";
+export * from "./regulatoryCalibrationPermissions";

@@ -10,6 +10,7 @@ import {
   FolderSearch,
   Loader2,
   MapPin,
+  PencilLine,
   RefreshCw,
   Save,
   Send,
@@ -150,6 +151,13 @@ type ZoneWorkspaceResponse = {
     resolutionStatus: string;
   }>;
   conflicts: Array<{ id: string; conflictSummary: string; status: string }>;
+  permissions: {
+    communeId: string;
+    mode: "legacy" | "controlled" | "admin";
+    canEditCalibration: boolean;
+    canPublishRules: boolean;
+    canManagePermissions: boolean;
+  };
   workspaceReady: boolean;
 };
 
@@ -281,6 +289,7 @@ export function ZoneCalibrationWorkspace({
   const [selectionLabel, setSelectionLabel] = useState("");
   const [selectedExcerptId, setSelectedExcerptId] = useState<string | null>(null);
   const [detailRule, setDetailRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
+  const [editingRule, setEditingRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
   const [manualArticleMode, setManualArticleMode] = useState(false);
   const [manualArticle, setManualArticle] = useState({
     articleCode: "",
@@ -301,6 +310,17 @@ export function ZoneCalibrationWorkspace({
   const [quickRuleInput, setQuickRuleInput] = useState("");
   const [visualSupportNote, setVisualSupportNote] = useState("");
   const [ruleDraft, setRuleDraft] = useState({
+    themeCode: "",
+    ruleLabel: "",
+    operator: "",
+    valueNumeric: "",
+    valueText: "",
+    unit: "",
+    conditionText: "",
+    interpretationNote: "",
+  });
+  const [editingRuleDraft, setEditingRuleDraft] = useState({
+    articleCode: "",
     themeCode: "",
     ruleLabel: "",
     operator: "",
@@ -453,6 +473,30 @@ export function ZoneCalibrationWorkspace({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const updateRuleMutation = useMutation({
+    mutationFn: async ({ ruleId }: { ruleId: string }) => apiFetch(`/api/mairie/regulatory-calibration/rules/${ruleId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        commune: currentCommune,
+        articleCode: editingRuleDraft.articleCode || null,
+        themeCode: editingRuleDraft.themeCode || null,
+        ruleLabel: editingRuleDraft.ruleLabel,
+        operator: editingRuleDraft.operator || null,
+        valueNumeric: editingRuleDraft.valueNumeric || null,
+        valueText: editingRuleDraft.valueText || null,
+        unit: editingRuleDraft.unit || null,
+        conditionText: editingRuleDraft.conditionText || null,
+        interpretationNote: editingRuleDraft.interpretationNote || null,
+      }),
+    }),
+    onSuccess: () => {
+      refreshAll();
+      setEditingRule(null);
+      toast({ title: "Règle mise à jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const updateRuleStatusMutation = useMutation({
     mutationFn: async ({ ruleId, status }: { ruleId: string; status: string }) => apiFetch(`/api/mairie/regulatory-calibration/rules/${ruleId}/status`, {
       method: "POST",
@@ -527,6 +571,21 @@ export function ZoneCalibrationWorkspace({
     requestAnimationFrame(() => {
       selectionEditorRef.current?.focus();
       selectionEditorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
+
+  const openRuleEditor = (rule: ZoneWorkspaceResponse["rules"][number]) => {
+    setEditingRule(rule);
+    setEditingRuleDraft({
+      articleCode: rule.articleCode || "",
+      themeCode: rule.themeCode || "",
+      ruleLabel: rule.ruleLabel || "",
+      operator: rule.operator || "",
+      valueNumeric: typeof rule.valueNumeric === "number" ? String(rule.valueNumeric) : "",
+      valueText: rule.valueText || "",
+      unit: rule.unit || "",
+      conditionText: rule.conditionText || "",
+      interpretationNote: rule.interpretationNote || "",
     });
   };
 
@@ -834,13 +893,14 @@ export function ZoneCalibrationWorkspace({
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-xl border bg-muted/20 p-3 text-sm">
-                {selection ? (
-                  <Textarea
-                    ref={selectionEditorRef}
-                    value={selection.text}
-                    onChange={(event) => {
-                      setSelectedExcerptId(null);
-                      setSelection((current) => current ? { ...current, text: event.target.value } : current);
+              {selection ? (
+                <Textarea
+                  ref={selectionEditorRef}
+                  value={selection.text}
+                  disabled={!data.permissions.canEditCalibration}
+                  onChange={(event) => {
+                    setSelectedExcerptId(null);
+                    setSelection((current) => current ? { ...current, text: event.target.value } : current);
                     }}
                     rows={8}
                     placeholder="Le texte de l’extrait peut être corrigé, complété ou simplifié ici avant enregistrement."
@@ -864,6 +924,7 @@ export function ZoneCalibrationWorkspace({
               <div className="grid gap-3 sm:grid-cols-2">
                 <Select
                   value={selectionArticleCode || "__none__"}
+                  disabled={!data.permissions.canEditCalibration}
                   onValueChange={(value) => {
                     setSelectedExcerptId(null);
                     setSelectionArticleCode(value === "__none__" ? "" : value);
@@ -883,6 +944,7 @@ export function ZoneCalibrationWorkspace({
                 </Select>
                 <Input
                   value={selectionLabel}
+                  disabled={!data.permissions.canEditCalibration}
                   onChange={(event) => {
                     setSelectedExcerptId(null);
                     setSelectionLabel(event.target.value);
@@ -905,15 +967,16 @@ export function ZoneCalibrationWorkspace({
                 <div className="flex gap-2">
                   <Input
                     value={quickRuleInput}
+                    disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setQuickRuleInput(event.target.value)}
                     placeholder='Ex : "Hauteur 15 m" ou "Stationnement 2 places / logement"'
                   />
-                  <Button variant="outline" onClick={applyQuickRuleInput}>
+                  <Button variant="outline" onClick={applyQuickRuleInput} disabled={!data.permissions.canEditCalibration}>
                     <Sparkles className="h-4 w-4" />
                     Interpréter
                   </Button>
                 </div>
-                <Select value={ruleDraft.themeCode || "__none__"} onValueChange={(value) => setRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}>
+                <Select value={ruleDraft.themeCode || "__none__"} disabled={!data.permissions.canEditCalibration} onValueChange={(value) => setRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}>
                   <SelectTrigger>
                     <SelectValue placeholder="Thème métier" />
                   </SelectTrigger>
@@ -928,46 +991,54 @@ export function ZoneCalibrationWorkspace({
                 </Select>
                 <Input
                   value={ruleDraft.ruleLabel}
+                  disabled={!data.permissions.canEditCalibration}
                   onChange={(event) => setRuleDraft((current) => ({ ...current, ruleLabel: event.target.value }))}
                   placeholder="Libellé de la règle"
                 />
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Input
                     value={ruleDraft.operator}
+                    disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setRuleDraft((current) => ({ ...current, operator: event.target.value }))}
                     placeholder="Opérateur"
                   />
                   <Input
                     value={ruleDraft.valueNumeric}
+                    disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setRuleDraft((current) => ({ ...current, valueNumeric: event.target.value }))}
                     placeholder="Valeur numérique"
                   />
                   <Input
                     value={ruleDraft.unit}
+                    disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setRuleDraft((current) => ({ ...current, unit: event.target.value }))}
                     placeholder="Unité"
                   />
                 </div>
                 <Textarea
                   value={ruleDraft.valueText}
+                  disabled={!data.permissions.canEditCalibration}
                   onChange={(event) => setRuleDraft((current) => ({ ...current, valueText: event.target.value }))}
                   placeholder="Valeur textuelle"
                   rows={2}
                 />
                 <Textarea
                   value={ruleDraft.conditionText}
+                  disabled={!data.permissions.canEditCalibration}
                   onChange={(event) => setRuleDraft((current) => ({ ...current, conditionText: event.target.value }))}
                   placeholder="Condition"
                   rows={2}
                 />
                 <Textarea
                   value={ruleDraft.interpretationNote}
+                  disabled={!data.permissions.canEditCalibration}
                   onChange={(event) => setRuleDraft((current) => ({ ...current, interpretationNote: event.target.value }))}
                   placeholder="Interprétation réglementaire"
                   rows={3}
                 />
                 <Textarea
                   value={visualSupportNote}
+                  disabled={!data.permissions.canEditCalibration}
                   onChange={(event) => setVisualSupportNote(event.target.value)}
                   placeholder="Pièce visuelle / croquis si besoin : décris ici l’élément graphique à prendre en compte"
                   rows={2}
@@ -975,7 +1046,7 @@ export function ZoneCalibrationWorkspace({
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={createExcerptMutation.isPending || !selection?.text || !selection?.pageNumber}
+                  disabled={!data.permissions.canEditCalibration || createExcerptMutation.isPending || !selection?.text || !selection?.pageNumber}
                   onClick={() => {
                     if (!selection) return;
                     createExcerptMutation.mutate({
@@ -992,6 +1063,8 @@ export function ZoneCalibrationWorkspace({
                 </Button>
                 <Button
                   disabled={
+                    !data.permissions.canEditCalibration
+                    ||
                     createRuleMutation.isPending
                     || createExcerptMutation.isPending
                     || !selection?.text
@@ -1006,11 +1079,17 @@ export function ZoneCalibrationWorkspace({
                   {createRuleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Créer la règle ferme
                 </Button>
-                <Button variant="outline" onClick={() => setManualArticleMode((current) => !current)}>
+                <Button variant="outline" disabled={!data.permissions.canEditCalibration} onClick={() => setManualArticleMode((current) => !current)}>
                   <FilePlus2 className="h-4 w-4" />
                   Ajouter un article manquant
                 </Button>
               </div>
+
+              {!data.permissions.canEditCalibration && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Ce workspace est actuellement en lecture seule pour ton profil.
+                </div>
+              )}
 
               {manualArticleMode && (
                 <div className="space-y-3 rounded-2xl border bg-muted/10 p-4">
@@ -1018,11 +1097,13 @@ export function ZoneCalibrationWorkspace({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Input
                       value={manualArticle.articleCode}
+                      disabled={!data.permissions.canEditCalibration}
                       onChange={(event) => setManualArticle((current) => ({ ...current, articleCode: event.target.value }))}
                       placeholder="Article (ex : 12)"
                     />
                     <Input
                       value={manualArticle.sourcePage}
+                      disabled={!data.permissions.canEditCalibration}
                       onChange={(event) => setManualArticle((current) => ({ ...current, sourcePage: event.target.value }))}
                       inputMode="numeric"
                       placeholder="Page source"
@@ -1030,17 +1111,19 @@ export function ZoneCalibrationWorkspace({
                   </div>
                   <Input
                     value={manualArticle.label}
+                    disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setManualArticle((current) => ({ ...current, label: event.target.value }))}
                     placeholder="Libellé de l’article"
                   />
                   <Textarea
                     value={manualArticle.sourceText}
+                    disabled={!data.permissions.canEditCalibration}
                     onChange={(event) => setManualArticle((current) => ({ ...current, sourceText: event.target.value }))}
                     placeholder="Texte source"
                     rows={6}
                   />
                   <Button
-                    disabled={createExcerptMutation.isPending || !manualArticle.sourceText.trim() || !parsePositiveInt(manualArticle.sourcePage)}
+                    disabled={!data.permissions.canEditCalibration || createExcerptMutation.isPending || !manualArticle.sourceText.trim() || !parsePositiveInt(manualArticle.sourcePage)}
                     onClick={() => {
                       const sourcePage = parsePositiveInt(manualArticle.sourcePage);
                       if (!sourcePage) return;
@@ -1101,13 +1184,21 @@ export function ZoneCalibrationWorkspace({
                             </p>
                           </div>
                           <div className="flex md:justify-end">
-                            <Button size="sm" variant="outline" onClick={() => setDetailRule(rule)}>
-                              Voir le détail
-                            </Button>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button size="sm" variant="outline" onClick={() => setDetailRule(rule)}>
+                                Voir le détail
+                              </Button>
+                              {data.permissions.canEditCalibration && (
+                                <Button size="sm" variant="outline" onClick={() => openRuleEditor(rule)}>
+                                  <PencilLine className="h-4 w-4" />
+                                  Modifier
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {rule.status !== "validated" && (
+                          {data.permissions.canPublishRules && rule.status !== "validated" && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -1117,7 +1208,7 @@ export function ZoneCalibrationWorkspace({
                               Valider
                             </Button>
                           )}
-                          {rule.status !== "published" && (
+                          {data.permissions.canPublishRules && rule.status !== "published" && (
                             <Button
                               size="sm"
                               onClick={() => updateRuleStatusMutation.mutate({ ruleId: rule.id, status: "published" })}
@@ -1183,6 +1274,69 @@ export function ZoneCalibrationWorkspace({
                         page {detailRule.sourcePage}
                       </p>
                     </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={!!editingRule} onOpenChange={(open) => !open && setEditingRule(null)}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Modifier la règle</DialogTitle>
+                <DialogDescription>
+                  Ajuste le contenu structuré de la règle sans recréer l’extrait.
+                </DialogDescription>
+              </DialogHeader>
+              {editingRule && (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Input
+                      value={editingRuleDraft.articleCode}
+                      onChange={(event) => setEditingRuleDraft((current) => ({ ...current, articleCode: event.target.value }))}
+                      placeholder="Article"
+                    />
+                    <Select
+                      value={editingRuleDraft.themeCode || "__none__"}
+                      onValueChange={(value) => setEditingRuleDraft((current) => ({ ...current, themeCode: value === "__none__" ? "" : value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Thème métier" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Aucun thème</SelectItem>
+                        {data.themes.map((theme) => (
+                          <SelectItem key={theme.code} value={theme.code}>
+                            {theme.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    value={editingRuleDraft.ruleLabel}
+                    onChange={(event) => setEditingRuleDraft((current) => ({ ...current, ruleLabel: event.target.value }))}
+                    placeholder="Libellé"
+                  />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Input value={editingRuleDraft.operator} onChange={(event) => setEditingRuleDraft((current) => ({ ...current, operator: event.target.value }))} placeholder="Opérateur" />
+                    <Input value={editingRuleDraft.valueNumeric} onChange={(event) => setEditingRuleDraft((current) => ({ ...current, valueNumeric: event.target.value }))} placeholder="Valeur numérique" />
+                    <Input value={editingRuleDraft.unit} onChange={(event) => setEditingRuleDraft((current) => ({ ...current, unit: event.target.value }))} placeholder="Unité" />
+                  </div>
+                  <Textarea value={editingRuleDraft.valueText} onChange={(event) => setEditingRuleDraft((current) => ({ ...current, valueText: event.target.value }))} placeholder="Valeur textuelle" rows={2} />
+                  <Textarea value={editingRuleDraft.conditionText} onChange={(event) => setEditingRuleDraft((current) => ({ ...current, conditionText: event.target.value }))} placeholder="Condition" rows={2} />
+                  <Textarea value={editingRuleDraft.interpretationNote} onChange={(event) => setEditingRuleDraft((current) => ({ ...current, interpretationNote: event.target.value }))} placeholder="Interprétation réglementaire" rows={4} />
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="outline" onClick={() => setEditingRule(null)}>
+                      Annuler
+                    </Button>
+                    <Button
+                      disabled={updateRuleMutation.isPending || !editingRuleDraft.ruleLabel.trim() || !editingRuleDraft.themeCode}
+                      onClick={() => updateRuleMutation.mutate({ ruleId: editingRule.id })}
+                    >
+                      {updateRuleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Enregistrer les modifications
+                    </Button>
                   </div>
                 </div>
               )}

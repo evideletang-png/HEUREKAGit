@@ -30,6 +30,7 @@ import { overlayDocumentBindingsTable } from "../../../../packages/db/src/schema
 import { regulatoryThemeTaxonomyTable } from "../../../../packages/db/src/schema/regulatoryThemeTaxonomy.js";
 import { calibratedExcerptsTable } from "../../../../packages/db/src/schema/calibratedExcerpts.js";
 import { indexedRegulatoryRulesTable } from "../../../../packages/db/src/schema/indexedRegulatoryRules.js";
+import { regulatoryCalibrationPermissionsTable } from "../../../../packages/db/src/schema/regulatoryCalibrationPermissions.js";
 import { ruleRelationsTable } from "../../../../packages/db/src/schema/ruleRelations.js";
 import { regulatoryValidationHistoryTable } from "../../../../packages/db/src/schema/regulatoryValidationHistory.js";
 import { regulatoryRuleConflictsTable } from "../../../../packages/db/src/schema/regulatoryRuleConflicts.js";
@@ -1208,7 +1209,7 @@ async function resolveAuthorizedTownHallCommune(userId: string, requestedCommune
     };
   }
 
-  if (currentUser?.role !== "admin" && !assignedCommunes.some(c => c.toLowerCase() === targetCommune.toLowerCase())) {
+  if (currentUser?.role !== "admin" && currentUser?.role !== "super_admin" && !assignedCommunes.some(c => c.toLowerCase() === targetCommune.toLowerCase())) {
     return {
       ok: false as const,
       status: 403,
@@ -1231,6 +1232,76 @@ async function resolveCommuneAliases(commune: string) {
     communeAliases: Array.from(new Set([commune, inseeCode].filter((value): value is string => !!value))),
     communeKey: inseeCode || commune,
   };
+}
+
+type CalibrationPermissionSet = {
+  communeId: string;
+  mode: "legacy" | "controlled" | "admin";
+  canEditCalibration: boolean;
+  canPublishRules: boolean;
+  canManagePermissions: boolean;
+};
+
+async function listEligibleCalibrationUsersForCommune(commune: string) {
+  const users = await db.select({
+    id: usersTable.id,
+    email: usersTable.email,
+    name: usersTable.name,
+    role: usersTable.role,
+    communes: usersTable.communes,
+  }).from(usersTable);
+
+  return users.filter((user) => {
+    if (user.role === "admin" || user.role === "super_admin") return true;
+    if (user.role !== "mairie") return false;
+    return canAccessCommune(user.role, parseCommunes(user.communes), commune);
+  });
+}
+
+async function resolveCalibrationPermissions(args: {
+  userId: string;
+  role: string;
+  commune: string;
+}): Promise<CalibrationPermissionSet> {
+  await ensureCalibrationSchemaReady();
+  const { communeKey } = await resolveCommuneAliases(args.commune);
+
+  if (args.role === "admin" || args.role === "super_admin") {
+    return {
+      communeId: communeKey,
+      mode: "admin",
+      canEditCalibration: true,
+      canPublishRules: true,
+      canManagePermissions: true,
+    };
+  }
+
+  const existingRows = await db.select()
+    .from(regulatoryCalibrationPermissionsTable)
+    .where(eq(regulatoryCalibrationPermissionsTable.communeId, communeKey));
+
+  if (existingRows.length === 0) {
+    return {
+      communeId: communeKey,
+      mode: "legacy",
+      canEditCalibration: true,
+      canPublishRules: true,
+      canManagePermissions: false,
+    };
+  }
+
+  const currentRow = existingRows.find((row) => row.userId === args.userId);
+  return {
+    communeId: communeKey,
+    mode: "controlled",
+    canEditCalibration: !!currentRow?.canEditCalibration,
+    canPublishRules: !!currentRow?.canPublishRules,
+    canManagePermissions: !!currentRow?.canManagePermissions,
+  };
+}
+
+function denyCalibrationPermission(res: any, message: string) {
+  return res.status(403).json({ error: "FORBIDDEN", message });
 }
 
 async function safeRecordRegulatoryValidationHistory(args: {
@@ -3160,6 +3231,157 @@ router.get("/regulatory-calibration/themes", async (_req: AuthRequest, res) => {
   }
 });
 
+router.get("/regulatory-calibration/permissions", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+
+    const canManage = req.user!.role === "admin" || req.user!.role === "super_admin" || permissions.canManagePermissions;
+    const rows = canManage
+      ? await db.select()
+          .from(regulatoryCalibrationPermissionsTable)
+          .where(eq(regulatoryCalibrationPermissionsTable.communeId, permissions.communeId))
+      : [];
+    const rowsByUserId = new Map(rows.map((row) => [row.userId, row] as const));
+    const eligibleUsers = canManage ? await listEligibleCalibrationUsersForCommune(access.targetCommune) : [];
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: permissions.communeId,
+      currentPermissions: permissions,
+      users: eligibleUsers.map((user) => {
+        const row = rowsByUserId.get(user.id);
+        const isAdminPlus = user.role === "admin" || user.role === "super_admin";
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          permissions: {
+            canEditCalibration: isAdminPlus ? true : (permissions.mode === "legacy" ? true : !!row?.canEditCalibration),
+            canPublishRules: isAdminPlus ? true : (permissions.mode === "legacy" ? true : !!row?.canPublishRules),
+            canManagePermissions: isAdminPlus ? true : !!row?.canManagePermissions,
+            inherited: !isAdminPlus && permissions.mode === "legacy" && !row,
+          },
+        };
+      }),
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/permissions GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.put("/regulatory-calibration/permissions/:userId", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || req.query.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const currentPermissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    const isAdminPlus = req.user!.role === "admin" || req.user!.role === "super_admin";
+    if (!isAdminPlus && !currentPermissions.canManagePermissions) {
+      return denyCalibrationPermission(res, "Seul un profil Administrateur+ peut distribuer les droits de calibration.");
+    }
+
+    const targetUserId = req.params.userId as string;
+    const [targetUser] = await db.select({
+      id: usersTable.id,
+      role: usersTable.role,
+      name: usersTable.name,
+      email: usersTable.email,
+      communes: usersTable.communes,
+    }).from(usersTable).where(eq(usersTable.id, targetUserId)).limit(1);
+    if (!targetUser) {
+      return res.status(404).json({ error: "USER_NOT_FOUND" });
+    }
+
+    if (targetUser.role === "admin" || targetUser.role === "super_admin") {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Les profils Administrateur+ disposent déjà de tous les droits." });
+    }
+
+    if (targetUser.role !== "mairie" || !canAccessCommune(targetUser.role, parseCommunes(targetUser.communes), access.targetCommune)) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Cet utilisateur n’est pas rattaché à cette commune." });
+    }
+
+    const communeId = currentPermissions.communeId;
+    const canEditCalibration = !!req.body.canEditCalibration;
+    const canPublishRules = !!req.body.canPublishRules;
+    const canManagePermissions = !!req.body.canManagePermissions;
+
+    if (currentPermissions.mode === "legacy") {
+      const existingRows = await db.select()
+        .from(regulatoryCalibrationPermissionsTable)
+        .where(eq(regulatoryCalibrationPermissionsTable.communeId, communeId));
+      if (existingRows.length === 0) {
+        const eligibleUsers = await listEligibleCalibrationUsersForCommune(access.targetCommune);
+        const mairieUsers = eligibleUsers.filter((user) => user.role === "mairie");
+        if (mairieUsers.length > 0) {
+          await db.insert(regulatoryCalibrationPermissionsTable).values(
+            mairieUsers.map((user) => ({
+              communeId,
+              userId: user.id,
+              canEditCalibration: true,
+              canPublishRules: true,
+              canManagePermissions: false,
+              assignedBy: req.user!.userId,
+            })),
+          );
+        }
+      }
+    }
+
+    const [existing] = await db.select()
+      .from(regulatoryCalibrationPermissionsTable)
+      .where(
+        and(
+          eq(regulatoryCalibrationPermissionsTable.communeId, communeId),
+          eq(regulatoryCalibrationPermissionsTable.userId, targetUserId),
+        ),
+      )
+      .limit(1);
+
+    if (!canEditCalibration && !canPublishRules && !canManagePermissions) {
+      if (existing) {
+        await db.delete(regulatoryCalibrationPermissionsTable).where(eq(regulatoryCalibrationPermissionsTable.id, existing.id));
+      }
+    } else if (existing) {
+      await db.update(regulatoryCalibrationPermissionsTable)
+        .set({
+          canEditCalibration,
+          canPublishRules,
+          canManagePermissions,
+          assignedBy: req.user!.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(regulatoryCalibrationPermissionsTable.id, existing.id));
+    } else {
+      await db.insert(regulatoryCalibrationPermissionsTable).values({
+        communeId,
+        userId: targetUserId,
+        canEditCalibration,
+        canPublishRules,
+        canManagePermissions,
+        assignedBy: req.user!.userId,
+      });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/permissions PUT]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 router.get("/regulatory-calibration/overview", async (req: AuthRequest, res) => {
   try {
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
@@ -3316,6 +3538,14 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
   try {
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour modifier la calibration de cette commune.");
+    }
 
     const { communeKey, communeAliases } = await resolveCommuneAliases(access.targetCommune);
     const zoneCode = normalizeConfiguredZoneCode(req.body.zoneCode);
@@ -3417,6 +3647,14 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || zone.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour modifier la calibration de cette commune.");
+    }
 
     let referenceDocumentId = zone.referenceDocumentId;
     try {
@@ -3485,6 +3723,11 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       req.query.commune as string | undefined || zone.communeId,
     );
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
 
     const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
     const themes = await ensureRegulatoryThemeTaxonomySeed();
@@ -3709,6 +3952,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       })),
       relations: hydratedRelations,
       conflicts,
+      permissions,
       workspaceReady: !!referenceDocumentId,
     });
   } catch (err) {
@@ -3725,6 +3969,14 @@ router.delete("/regulatory-calibration/zones/:id", async (req: AuthRequest, res)
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || zone.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour modifier la calibration de cette commune.");
+    }
 
     await db.delete(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, id));
     await recordRegulatoryValidationHistory({
@@ -3747,6 +3999,14 @@ router.post("/regulatory-calibration/rebuild", async (req: AuthRequest, res) => 
   try {
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour reconstruire ce workspace de calibration.");
+    }
 
     const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
     const docs = await db.select({
@@ -4132,6 +4392,14 @@ router.post("/regulatory-calibration/excerpts", async (req: AuthRequest, res) =>
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, commune);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour créer des extraits calibrés.");
+    }
     const { communeKey } = await resolveCommuneAliases(access.targetCommune);
 
     const [zone, overlay, doc] = await Promise.all([
@@ -4202,6 +4470,14 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || excerpt.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour créer des règles calibrées.");
+    }
 
     const {
       articleCode,
@@ -4320,6 +4596,14 @@ router.patch("/regulatory-calibration/rules/:id", async (req: AuthRequest, res) 
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || rule.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour modifier cette règle.");
+    }
 
     let nextZoneId = rule.zoneId;
     let nextOverlayId = rule.overlayId;
@@ -4419,9 +4703,21 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || rule.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
 
     const allowedStatuses = new Set(["draft", "in_review", "validated", "published"]);
     const nextStatus = allowedStatuses.has(String(req.body.status || "")) ? String(req.body.status) : "draft";
+    if (nextStatus === "validated" || nextStatus === "published") {
+      if (!permissions.canPublishRules) {
+        return denyCalibrationPermission(res, "Vous n’avez pas les droits pour valider ou publier cette règle.");
+      }
+    } else if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour modifier le statut de cette règle.");
+    }
 
     const inferredArticleCode =
       (typeof rule.articleCode === "string" && rule.articleCode.trim() && rule.articleCode.trim().toLowerCase() !== "manual")
@@ -4492,6 +4788,14 @@ router.delete("/regulatory-calibration/rules/:id", async (req: AuthRequest, res)
 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined || rule.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour supprimer cette règle.");
+    }
 
     await db.delete(indexedRegulatoryRulesTable).where(eq(indexedRegulatoryRulesTable.id, id));
 

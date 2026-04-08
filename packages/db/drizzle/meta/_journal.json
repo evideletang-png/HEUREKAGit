@@ -134,6 +134,13 @@
       "when": 1775642400000,
       "tag": "0018_zone_reference_document",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1775671200000,
+      "tag": "0019_regulatory_calibration_permissions",
+      "breakpoints": true
     }
   ]
 }

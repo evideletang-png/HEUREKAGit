@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -132,6 +133,30 @@ type PublishedLibraryResponse = {
   }>;
 };
 
+type CalibrationPermissionsResponse = {
+  commune: string;
+  communeId: string;
+  currentPermissions: {
+    communeId: string;
+    mode: "legacy" | "controlled" | "admin";
+    canEditCalibration: boolean;
+    canPublishRules: boolean;
+    canManagePermissions: boolean;
+  };
+  users: Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    permissions: {
+      canEditCalibration: boolean;
+      canPublishRules: boolean;
+      canManagePermissions: boolean;
+      inherited: boolean;
+    };
+  }>;
+};
+
 async function apiFetch(path: string, options: RequestInit = {}) {
   const response = await fetch(path, {
     headers: {
@@ -190,6 +215,11 @@ export function ZoneFirstCalibrationModule({
   });
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, typeof zoneForm>>({});
+  const [permissionDrafts, setPermissionDrafts] = useState<Record<string, {
+    canEditCalibration: boolean;
+    canPublishRules: boolean;
+    canManagePermissions: boolean;
+  }>>({});
 
   const { data: overviewData } = useQuery<OverviewResponse>({
     queryKey: ["reg-calibration-overview", currentCommune],
@@ -215,11 +245,18 @@ export function ZoneFirstCalibrationModule({
     enabled: currentCommune !== "all" && !activeZoneId,
   });
 
+  const { data: permissionData } = useQuery<CalibrationPermissionsResponse>({
+    queryKey: ["reg-calibration-permissions", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/permissions?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all" && !activeZoneId,
+  });
+
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-overview", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-zones", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-zone-reviews", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-library", currentCommune] });
+    queryClient.invalidateQueries({ queryKey: ["reg-calibration-permissions", currentCommune] });
   };
 
   const createZoneMutation = useMutation({
@@ -303,6 +340,46 @@ export function ZoneFirstCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const savePermissionMutation = useMutation({
+    mutationFn: async ({
+      userId,
+      draft,
+    }: {
+      userId: string;
+      draft: {
+        canEditCalibration: boolean;
+        canPublishRules: boolean;
+        canManagePermissions: boolean;
+      };
+    }) => apiFetch(`/api/mairie/regulatory-calibration/permissions/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        commune: currentCommune,
+        ...draft,
+      }),
+    }),
+    onSuccess: () => {
+      refreshAll();
+      toast({ title: "Droits mis à jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  useEffect(() => {
+    if (!permissionData?.users) return;
+    setPermissionDrafts((current) => {
+      const next = { ...current };
+      for (const managedUser of permissionData.users) {
+        next[managedUser.id] = {
+          canEditCalibration: managedUser.permissions.canEditCalibration,
+          canPublishRules: managedUser.permissions.canPublishRules,
+          canManagePermissions: managedUser.permissions.canManagePermissions,
+        };
+      }
+      return next;
+    });
+  }, [permissionData?.users]);
+
   useEffect(() => {
     if (activeZoneId) {
       setActiveTab("zones");
@@ -349,6 +426,9 @@ export function ZoneFirstCalibrationModule({
 
     return Array.from(groups.values()).sort((left, right) => left.zoneCode.localeCompare(right.zoneCode, "fr"));
   }, [publishedData?.rules]);
+
+  const canManagePermissions = !!permissionData?.currentPermissions.canManagePermissions;
+  const canEditCalibration = !!permissionData?.currentPermissions.canEditCalibration;
 
   if (activeZoneId) {
     return <ZoneCalibrationWorkspace currentCommune={currentCommune} zoneId={activeZoneId} />;
@@ -440,11 +520,19 @@ export function ZoneFirstCalibrationModule({
             <h3 className="text-lg font-semibold text-primary">Zones & calibration</h3>
             <p className="text-sm text-muted-foreground">Valide d’abord les zones utiles, puis administre chaque zone dans son propre workspace.</p>
           </div>
-          <Button variant="outline" onClick={() => rebuildMutation.mutate()} disabled={rebuildMutation.isPending}>
+          <Button variant="outline" onClick={() => rebuildMutation.mutate()} disabled={!canEditCalibration || rebuildMutation.isPending}>
             {rebuildMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Rebuild zone workspace
           </Button>
         </div>
+
+        {!canEditCalibration && (
+          <Card className="border-amber-200 bg-amber-50 shadow-sm">
+            <CardContent className="p-4 text-sm text-amber-900">
+              Cette commune est actuellement en lecture seule pour ton profil. Tu peux consulter les zones et les règles, mais pas modifier la calibration.
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
@@ -479,13 +567,92 @@ export function ZoneFirstCalibrationModule({
               </div>
               <Textarea placeholder="Notes de guidage" value={zoneForm.guidanceNotes} onChange={(event) => setZoneForm((current) => ({ ...current, guidanceNotes: event.target.value }))} rows={3} />
               <Textarea placeholder="Mots-clés de recherche" value={zoneForm.searchKeywordsText} onChange={(event) => setZoneForm((current) => ({ ...current, searchKeywordsText: event.target.value }))} rows={3} />
-              <Button className="w-full" disabled={createZoneMutation.isPending || !zoneForm.zoneCode.trim()} onClick={() => createZoneMutation.mutate()}>
+              <Button className="w-full" disabled={!canEditCalibration || createZoneMutation.isPending || !zoneForm.zoneCode.trim()} onClick={() => createZoneMutation.mutate()}>
                 {createZoneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
                 Ajouter la zone
               </Button>
             </div>
           </CardContent>
         </Card>
+
+        {canManagePermissions && (
+          <Card className="border-primary/10 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Droits de calibration</CardTitle>
+              <CardDescription>
+                Les profils Administrateur+ peuvent distribuer les droits par commune. Tant qu’aucune règle spécifique n’est enregistrée, la commune reste en mode hérité.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                Mode actuel : <span className="font-medium text-primary">{permissionData?.currentPermissions.mode === "legacy" ? "hérité" : permissionData?.currentPermissions.mode === "admin" ? "administrateur+" : "contrôlé"}</span>
+              </div>
+              <div className="space-y-3">
+                {(permissionData?.users || []).map((managedUser) => {
+                  const draft = permissionDrafts[managedUser.id] || {
+                    canEditCalibration: managedUser.permissions.canEditCalibration,
+                    canPublishRules: managedUser.permissions.canPublishRules,
+                    canManagePermissions: managedUser.permissions.canManagePermissions,
+                  };
+                  const isAdminPlus = managedUser.role === "admin" || managedUser.role === "super_admin";
+                  return (
+                    <div key={managedUser.id} className="rounded-xl border bg-background p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <p className="font-medium">{managedUser.name}</p>
+                          <p className="text-sm text-muted-foreground">{managedUser.email} · {managedUser.role}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-4">
+                          <label className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={draft.canEditCalibration}
+                              disabled={isAdminPlus}
+                              onCheckedChange={(checked) => setPermissionDrafts((current) => ({
+                                ...current,
+                                [managedUser.id]: { ...draft, canEditCalibration: checked === true },
+                              }))}
+                            />
+                            Modifier
+                          </label>
+                          <label className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={draft.canPublishRules}
+                              disabled={isAdminPlus}
+                              onCheckedChange={(checked) => setPermissionDrafts((current) => ({
+                                ...current,
+                                [managedUser.id]: { ...draft, canPublishRules: checked === true },
+                              }))}
+                            />
+                            Publier
+                          </label>
+                          <label className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={draft.canManagePermissions}
+                              disabled={isAdminPlus}
+                              onCheckedChange={(checked) => setPermissionDrafts((current) => ({
+                                ...current,
+                                [managedUser.id]: { ...draft, canManagePermissions: checked === true },
+                              }))}
+                            />
+                            Gérer les droits
+                          </label>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isAdminPlus || savePermissionMutation.isPending}
+                            onClick={() => savePermissionMutation.mutate({ userId: managedUser.id, draft })}
+                          >
+                            Sauvegarder
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
@@ -551,6 +718,7 @@ export function ZoneFirstCalibrationModule({
                       </Button>
                       <Button
                         variant="outline"
+                        disabled={!canEditCalibration}
                         onClick={() => {
                           if (editingZoneId === zone.id) {
                             setEditingZoneId(null);
@@ -562,7 +730,7 @@ export function ZoneFirstCalibrationModule({
                       >
                         Modifier
                       </Button>
-                      <Button variant="outline" onClick={() => deleteZoneMutation.mutate(zone.id)}>
+                      <Button variant="outline" disabled={!canEditCalibration} onClick={() => deleteZoneMutation.mutate(zone.id)}>
                         <Trash2 className="h-4 w-4" />
                         Supprimer
                       </Button>
@@ -600,7 +768,7 @@ export function ZoneFirstCalibrationModule({
                         <Textarea value={draft.guidanceNotes} onChange={(event) => setZoneDrafts((current) => ({ ...current, [zone.id]: { ...draft, guidanceNotes: event.target.value } }))} placeholder="Notes de guidage" rows={3} />
                         <Textarea value={draft.searchKeywordsText} onChange={(event) => setZoneDrafts((current) => ({ ...current, [zone.id]: { ...draft, searchKeywordsText: event.target.value } }))} placeholder="Mots-clés de recherche" rows={3} />
                         <div className="flex flex-wrap gap-2">
-                          <Button onClick={() => updateZoneMutation.mutate({ zoneId: zone.id, draft })}>
+                          <Button disabled={!canEditCalibration} onClick={() => updateZoneMutation.mutate({ zoneId: zone.id, draft })}>
                             <CheckCircle2 className="h-4 w-4" />
                             Enregistrer
                           </Button>
