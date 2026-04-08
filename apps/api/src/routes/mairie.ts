@@ -604,8 +604,26 @@ function isLikelyPluZoneCode(raw: unknown, options?: { allowSingleLetter?: boole
   return null;
 }
 
-function extractCalibrationZoneCodes(rawText: string) {
-  if (!rawText || rawText.trim().length < 80) return [];
+function isLikelyZoningLikeSource(args: {
+  rawText?: string | null;
+  sourceName?: string | null;
+  sourceType?: string | null;
+}) {
+  const hint = [args.sourceName || "", args.sourceType || "", args.rawText?.slice(0, 1200) || ""]
+    .join(" ")
+    .toLowerCase();
+
+  return hint.includes("zonage")
+    || hint.includes("zoning map")
+    || hint.includes("document graphique")
+    || hint.includes("planche")
+    || hint.includes("légende")
+    || hint.includes("legende")
+    || hint.includes("legend");
+}
+
+function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: boolean }) {
+  if (!rawText || rawText.trim().length < (options?.zoningLike ? 20 : 80)) return [];
 
   const detected = new Set<string>();
   const addZoneCode = (raw: unknown, options?: { allowSingleLetter?: boolean }) => {
@@ -630,9 +648,18 @@ function extractCalibrationZoneCodes(rawText: string) {
     }
   }
 
+  if (options?.zoningLike) {
+    const inlineTokenPattern = /\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g;
+    let inlineMatch: RegExpExecArray | null;
+    while ((inlineMatch = inlineTokenPattern.exec(rawText.toUpperCase())) !== null) {
+      addZoneCode(inlineMatch[0], { allowSingleLetter: true });
+    }
+  }
+
   for (const line of rawText.replace(/\r\n?/g, "\n").split("\n")) {
     const trimmed = line.trim().replace(/\s+/g, " ");
-    if (!trimmed || trimmed.length > 36) continue;
+    const maxLineLength = options?.zoningLike ? 96 : 36;
+    if (!trimmed || trimmed.length > maxLineLength) continue;
 
     const prefixedMatch = trimmed.match(/^zone\s+([A-Z0-9-]+)$/i);
     if (prefixedMatch?.[1]) {
@@ -640,8 +667,17 @@ function extractCalibrationZoneCodes(rawText: string) {
       continue;
     }
 
-    if (!/^[A-Z0-9 -]+$/.test(trimmed.toUpperCase())) continue;
-    addZoneCode(trimmed, { allowSingleLetter: true });
+    const lineLeadMatch = trimmed.match(/^(?:zone\s+)?((?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*)\b/i);
+    if (lineLeadMatch?.[1]) {
+      addZoneCode(lineLeadMatch[1], { allowSingleLetter: true });
+    }
+
+    if (!options?.zoningLike && !/^[A-Z0-9 -]+$/.test(trimmed.toUpperCase())) continue;
+
+    const tokens = trimmed.toUpperCase().match(/\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g) || [];
+    for (const token of tokens) {
+      addZoneCode(token, { allowSingleLetter: true });
+    }
   }
 
   return Array.from(detected.values()).sort((left, right) => left.localeCompare(right, "fr"));
@@ -652,9 +688,16 @@ async function ensureCalibrationZonesForCommune(args: {
   communeAliases: string[];
   rawText: string;
   sourceName?: string | null;
+  sourceType?: string | null;
   userId?: string | null;
 }) {
-  const zoneCodes = extractCalibrationZoneCodes(args.rawText);
+  const zoneCodes = extractCalibrationZoneCodes(args.rawText, {
+    zoningLike: isLikelyZoningLikeSource({
+      rawText: args.rawText,
+      sourceName: args.sourceName,
+      sourceType: args.sourceType,
+    }),
+  });
   if (zoneCodes.length === 0) {
     return { detected: 0, created: 0 };
   }
@@ -707,7 +750,7 @@ async function ensureCalibrationZonesForCommune(args: {
       zoneLabel: `Zone ${zoneCode}`,
       parentZoneCode: deriveParentZoneCode(zoneCode),
       guidanceNotes: args.sourceName
-        ? `Zone détectée automatiquement depuis ${args.sourceName}.`
+        ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
         : "Zone détectée automatiquement depuis un document réglementaire.",
       displayOrder: nextDisplayOrder + index,
       isActive: true,
@@ -2409,6 +2452,7 @@ async function queueTownHallDocumentIndexing(args: {
         communeAliases: Array.from(new Set([args.targetCommune, inseeCode].filter((value): value is string => !!value))),
         rawText,
         sourceName: args.originalName,
+        sourceType: documentType,
         userId: args.userId || null,
       });
 
@@ -2884,12 +2928,20 @@ router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         });
 
         if (!["plu_reglement", "plu_annexe"].includes(classification.canonicalType)) continue;
+        const zoningLike = isLikelyZoningLikeSource({
+          rawText: doc.rawText,
+          sourceName: doc.title || doc.fileName || "document",
+          sourceType: doc.documentType,
+        });
+        if (!doc.rawText?.trim()) continue;
+        if (!zoningLike && !hasUsableTownHallText(doc.rawText)) continue;
 
         await ensureCalibrationZonesForCommune({
           communeKey,
           communeAliases,
           rawText: doc.rawText,
           sourceName: doc.title || doc.fileName || "document",
+          sourceType: doc.documentType,
           userId: req.user!.userId,
         });
       }
@@ -4867,6 +4919,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  communeAliases: Array.from(new Set([targetCommune, inseeCode].filter((value): value is string => !!value))),
                  rawText,
                  sourceName: file.originalname,
+                 sourceType: classification.resolved.documentType,
                  userId: req.user!.userId,
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
@@ -5247,6 +5300,7 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
       communeAliases: Array.from(new Set([communeName, await resolveInseeCode(communeName)].filter((value): value is string => !!value))),
       rawText,
       sourceName,
+      sourceType: doc.documentType,
       userId: req.user!.userId,
     });
 
