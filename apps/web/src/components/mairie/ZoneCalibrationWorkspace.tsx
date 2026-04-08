@@ -33,6 +33,12 @@ type ThemeItem = {
   articleHint: string | null;
 };
 
+type VisualCaptureMetadata = {
+  pageNumber: number;
+  previewDataUrl: string;
+  box: { x: number; y: number; width: number; height: number };
+};
+
 type DocumentOption = {
   id: string;
   title: string | null;
@@ -94,6 +100,9 @@ type ZoneWorkspaceResponse = {
     sourcePage: number;
     sourcePageEnd: number | null;
     status: string;
+    metadata?: {
+      visualCapture?: VisualCaptureMetadata | null;
+    } | null;
     document: { id: string; title: string | null; fileName: string | null } | null;
     rules: Array<{
       id: string;
@@ -259,6 +268,7 @@ export function ZoneCalibrationWorkspace({
     text: string;
     pageNumber: number;
     pageEndNumber: number | null;
+    visualCapture?: VisualCaptureMetadata | null;
   } | null>(null);
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
@@ -349,6 +359,7 @@ export function ZoneCalibrationWorkspace({
       sourcePageEnd: number | null;
       articleCode: string;
       selectionLabel: string;
+      metadata?: Record<string, unknown>;
     }) => apiFetch("/api/mairie/regulatory-calibration/excerpts", {
       method: "POST",
       body: JSON.stringify({
@@ -360,6 +371,7 @@ export function ZoneCalibrationWorkspace({
         sourceText: payload.sourceText,
         sourcePage: payload.sourcePage,
         sourcePageEnd: payload.sourcePageEnd,
+        metadata: payload.metadata || {},
       }),
     }),
     onSuccess: (payload) => {
@@ -465,6 +477,7 @@ export function ZoneCalibrationWorkspace({
       sourcePageEnd: selection.pageEndNumber,
       articleCode: selectionArticleCode,
       selectionLabel,
+      metadata: selection.visualCapture ? { visualCapture: selection.visualCapture } : {},
     });
     return payload.excerpt.id as string;
   };
@@ -493,6 +506,7 @@ export function ZoneCalibrationWorkspace({
       text: candidate.text,
       pageNumber: candidate.pageNumber,
       pageEndNumber: candidate.pageEndNumber ?? null,
+      visualCapture: null,
     });
     setSelectedExcerptId(null);
     setSelectionArticleCode(candidate.articleCode || "");
@@ -527,6 +541,11 @@ export function ZoneCalibrationWorkspace({
       </Card>
     );
   }
+
+  const selectedExcerpt = selectedExcerptId
+    ? data.excerpts.find((excerpt) => excerpt.id === selectedExcerptId) || null
+    : null;
+  const activeVisualCapture = selection?.visualCapture || selectedExcerpt?.metadata?.visualCapture || null;
 
   return (
     <div className="space-y-6">
@@ -743,10 +762,32 @@ export function ZoneCalibrationWorkspace({
                   fallbackPages={data.pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text }))}
                   onTextSelected={({ text, pageNumber, pageEndNumber }) => {
                     setSelectedExcerptId(null);
-                    setSelection({ text, pageNumber, pageEndNumber });
+                    setSelection({ text, pageNumber, pageEndNumber, visualCapture: null });
                     if (!selectionLabel) {
                       setSelectionLabel(text.slice(0, 80));
                     }
+                  }}
+                  onVisualSelected={({ pageNumber, previewDataUrl, box }) => {
+                    setSelectedExcerptId(null);
+                    setSelection({
+                      text: selection?.text?.trim()
+                        ? selection.text
+                        : "Extrait visuel sélectionné. Décris ici le croquis, schéma ou repère graphique à retenir.",
+                      pageNumber,
+                      pageEndNumber: null,
+                      visualCapture: {
+                        pageNumber,
+                        previewDataUrl,
+                        box,
+                      },
+                    });
+                    if (!selectionLabel) {
+                      setSelectionLabel(`Pièce visuelle · page ${pageNumber}`);
+                    }
+                    requestAnimationFrame(() => {
+                      selectionEditorRef.current?.focus();
+                      selectionEditorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+                    });
                   }}
                 />
               ) : (
@@ -794,6 +835,19 @@ export function ZoneCalibrationWorkspace({
                   />
                 ) : "Sélectionne directement un extrait dans le PDF ou utilise un texte retrouvé à gauche."}
               </div>
+              {activeVisualCapture ? (
+                <div className="rounded-2xl border bg-muted/10 p-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="outline">Pièce visuelle</Badge>
+                    <span>page {activeVisualCapture.pageNumber}</span>
+                  </div>
+                  <img
+                    src={activeVisualCapture.previewDataUrl}
+                    alt={`Pièce visuelle page ${activeVisualCapture.pageNumber}`}
+                    className="max-h-52 rounded-lg border bg-white object-contain"
+                  />
+                </div>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 <Select
                   value={selectionArticleCode || "__none__"}

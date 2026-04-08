@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -16,8 +18,35 @@ type ZonePdfViewerProps = {
   pageNumbers: number[];
   fallbackPages?: Array<{ pageNumber: number; text: string }>;
   onTextSelected: (selection: { text: string; pageNumber: number; pageEndNumber: number | null }) => void;
+  onVisualSelected?: (capture: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box: { x: number; y: number; width: number; height: number };
+  }) => void;
   className?: string;
 };
+
+type VisualDraftSelection = {
+  pageNumber: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  canvasLeft: number;
+  canvasTop: number;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getRectBounds(selection: VisualDraftSelection) {
+  const left = Math.min(selection.startX, selection.currentX);
+  const top = Math.min(selection.startY, selection.currentY);
+  const width = Math.abs(selection.currentX - selection.startX);
+  const height = Math.abs(selection.currentY - selection.startY);
+  return { left, top, width, height };
+}
 
 function resolveSelectionPageNumber(node: Node | null): number | null {
   let current: HTMLElement | null =
@@ -43,14 +72,18 @@ export function ZonePdfViewer({
   pageNumbers,
   fallbackPages = [],
   onTextSelected,
+  onVisualSelected,
   className,
 }: ZonePdfViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const pageCanvasRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [viewerWidth, setViewerWidth] = useState(820);
   const [pdfUnavailable, setPdfUnavailable] = useState(false);
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [visualMode, setVisualMode] = useState(false);
+  const [visualDraft, setVisualDraft] = useState<VisualDraftSelection | null>(null);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -70,6 +103,95 @@ export function ZonePdfViewer({
     () => pageNumbers.slice().sort((left, right) => left - right),
     [pageNumbers],
   );
+
+  useEffect(() => {
+    if (!visualDraft) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const container = pageCanvasRefs.current[visualDraft.pageNumber];
+      const canvas = container?.querySelector("canvas");
+      if (!container || !canvas) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const nextX = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
+      const nextY = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+
+      setVisualDraft((current) => current ? {
+        ...current,
+        currentX: nextX,
+        currentY: nextY,
+        canvasLeft: canvasRect.left - containerRect.left,
+        canvasTop: canvasRect.top - containerRect.top,
+      } : current);
+    };
+
+    const handlePointerUp = () => {
+      const current = visualDraft;
+      const container = pageCanvasRefs.current[current.pageNumber];
+      const canvas = container?.querySelector("canvas");
+      if (!container || !canvas) {
+        setVisualDraft(null);
+        return;
+      }
+
+      const bounds = getRectBounds(current);
+      if (bounds.width < 12 || bounds.height < 12) {
+        setVisualDraft(null);
+        return;
+      }
+
+      const canvasRect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / canvasRect.width;
+      const scaleY = canvas.height / canvasRect.height;
+      const sourceX = bounds.left * scaleX;
+      const sourceY = bounds.top * scaleY;
+      const sourceWidth = bounds.width * scaleX;
+      const sourceHeight = bounds.height * scaleY;
+      const maxPreviewEdge = 560;
+      const ratio = Math.min(
+        1,
+        maxPreviewEdge / Math.max(sourceWidth || 1, sourceHeight || 1),
+      );
+      const previewCanvas = document.createElement("canvas");
+      previewCanvas.width = Math.max(1, Math.round(sourceWidth * ratio));
+      previewCanvas.height = Math.max(1, Math.round(sourceHeight * ratio));
+      const context = previewCanvas.getContext("2d");
+      if (context) {
+        context.drawImage(
+          canvas,
+          sourceX,
+          sourceY,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          previewCanvas.width,
+          previewCanvas.height,
+        );
+        onVisualSelected?.({
+          pageNumber: current.pageNumber,
+          previewDataUrl: previewCanvas.toDataURL("image/png"),
+          box: {
+            x: Number((sourceX / (canvas.width || 1)).toFixed(4)),
+            y: Number((sourceY / (canvas.height || 1)).toFixed(4)),
+            width: Number((sourceWidth / (canvas.width || 1)).toFixed(4)),
+            height: Number((sourceHeight / (canvas.height || 1)).toFixed(4)),
+          },
+        });
+      }
+      setVisualDraft(null);
+      setVisualMode(false);
+      window.getSelection?.()?.removeAllRanges();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [onVisualSelected, visualDraft]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -163,6 +285,28 @@ export function ZonePdfViewer({
 
   return (
     <div ref={containerRef} className={cn("rounded-2xl border bg-muted/15 p-4", className)}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-muted-foreground">
+          {visualMode
+            ? "Mode capture visuelle actif : trace un rectangle sur le croquis ou le schéma."
+            : "Mode texte actif : sélectionne du texte, ou active la capture visuelle pour un croquis."}
+        </div>
+        <div className="flex items-center gap-2">
+          {visualMode ? <Badge variant="secondary">Capture visuelle active</Badge> : null}
+          <Button
+            type="button"
+            size="sm"
+            variant={visualMode ? "default" : "outline"}
+            onClick={() => {
+              setVisualDraft(null);
+              setVisualMode((current) => !current);
+              window.getSelection?.()?.removeAllRanges();
+            }}
+          >
+            {visualMode ? "Quitter la capture" : "Capturer une pièce visuelle"}
+          </Button>
+        </div>
+      </div>
       <Document
         file={pdfObjectUrl}
         onLoadError={(error) => {
@@ -208,13 +352,49 @@ export function ZonePdfViewer({
             <div className="border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
               {documentTitle} · page {pageNumber}
             </div>
-            <div className="overflow-x-auto p-3">
+            <div
+              ref={(node) => {
+                pageCanvasRefs.current[pageNumber] = node;
+              }}
+              className={cn("relative overflow-x-auto p-3", visualMode && "touch-none select-none cursor-crosshair")}
+              onPointerDown={(event) => {
+                if (!visualMode) return;
+                const container = pageCanvasRefs.current[pageNumber];
+                const canvas = container?.querySelector("canvas");
+                if (!container || !canvas) return;
+                event.preventDefault();
+                const containerRect = container.getBoundingClientRect();
+                const canvasRect = canvas.getBoundingClientRect();
+                const startX = clamp(event.clientX - canvasRect.left, 0, canvasRect.width);
+                const startY = clamp(event.clientY - canvasRect.top, 0, canvasRect.height);
+                setVisualDraft({
+                  pageNumber,
+                  startX,
+                  startY,
+                  currentX: startX,
+                  currentY: startY,
+                  canvasLeft: canvasRect.left - containerRect.left,
+                  canvasTop: canvasRect.top - containerRect.top,
+                });
+              }}
+            >
               <Page
                 pageNumber={pageNumber}
                 width={viewerWidth}
                 renderAnnotationLayer
                 renderTextLayer
               />
+              {visualDraft && visualDraft.pageNumber === pageNumber ? (
+                <div
+                  className="pointer-events-none absolute rounded-md border-2 border-primary bg-primary/10"
+                  style={{
+                    left: visualDraft.canvasLeft + getRectBounds(visualDraft).left,
+                    top: visualDraft.canvasTop + getRectBounds(visualDraft).top,
+                    width: getRectBounds(visualDraft).width,
+                    height: getRectBounds(visualDraft).height,
+                  }}
+                />
+              ) : null}
             </div>
           </div>
         ))}
