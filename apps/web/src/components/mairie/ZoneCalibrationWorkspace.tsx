@@ -255,6 +255,8 @@ export function ZoneCalibrationWorkspace({
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const selectionEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const ruleComposerRef = useRef<HTMLDivElement | null>(null);
+  const zoneRulesRef = useRef<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState<{
     text: string;
     pageNumber: number;
@@ -366,7 +368,13 @@ export function ZoneCalibrationWorkspace({
       setSelectedExcerptId(payload.excerpt.id);
       setManualArticleMode(false);
       setManualArticle({ articleCode: "", label: "", sourcePage: "", sourceText: "" });
-      toast({ title: "Article enregistré", description: "L’extrait calibré est maintenant disponible pour créer la règle." });
+      requestAnimationFrame(() => {
+        ruleComposerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+      toast({
+        title: "Extrait enregistré",
+        description: "Le texte est stocké comme extrait calibré. Crée maintenant la règle, puis publie-la dans 'Règles de la zone'.",
+      });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -408,7 +416,13 @@ export function ZoneCalibrationWorkspace({
         interpretationNote: "",
       });
       setQuickRuleInput("");
-      toast({ title: "Règle créée", description: "La règle est prête pour validation ou publication." });
+      requestAnimationFrame(() => {
+        zoneRulesRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+      toast({
+        title: "Règle créée",
+        description: "La règle est enregistrée en brouillon dans 'Règles de la zone'. Publie-la pour la voir dans 'Règles effectives'.",
+      });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -726,6 +740,15 @@ export function ZoneCalibrationWorkspace({
         </div>
 
         <div className="space-y-4">
+          <Card className="border-primary/10 bg-primary/[0.03] shadow-sm">
+            <CardContent className="space-y-2 p-4 text-sm">
+              <p className="font-medium text-primary">Flux de publication</p>
+              <p className="text-muted-foreground">1. Enregistrer l’extrait</p>
+              <p className="text-muted-foreground">2. Créer la règle depuis cet extrait</p>
+              <p className="text-muted-foreground">3. Publier la règle dans le bloc `Règles de la zone`</p>
+            </CardContent>
+          </Card>
+
           <Card className="border-primary/10 shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -733,7 +756,7 @@ export function ZoneCalibrationWorkspace({
                 Sélection courante
               </CardTitle>
               <CardDescription>
-                Ajuste l’article, le libellé et le texte avant d’enregistrer l’extrait calibré.
+                Cette étape enregistre un extrait calibré, pas encore une règle publiée.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -794,7 +817,7 @@ export function ZoneCalibrationWorkspace({
                   }}
                 >
                   {createExcerptMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Enregistrer l’extrait
+                  Etape 1 · Enregistrer l’extrait
                 </Button>
                 <Button variant="outline" onClick={() => setManualArticleMode((current) => !current)}>
                   <FilePlus2 className="h-4 w-4" />
@@ -851,14 +874,14 @@ export function ZoneCalibrationWorkspace({
             </CardContent>
           </Card>
 
-          <Card className="border-primary/10 shadow-sm">
+          <Card ref={ruleComposerRef} className="border-primary/10 shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Search className="h-4 w-4 text-primary" />
                 Règle issue de l’extrait
               </CardTitle>
               <CardDescription>
-                Tu peux parler naturellement au système, puis affiner si besoin.
+                Cette étape transforme l’extrait calibré en règle. La règle restera en brouillon jusqu’à publication.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -946,19 +969,19 @@ export function ZoneCalibrationWorkspace({
                 onClick={() => createRuleMutation.mutate()}
               >
                 {createRuleMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Créer la règle
+                Etape 2 · Créer la règle
               </Button>
             </CardContent>
           </Card>
 
-          <Card className="border-primary/10 shadow-sm">
+          <Card ref={zoneRulesRef} className="border-primary/10 shadow-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <BookOpen className="h-4 w-4 text-primary" />
                 Règles de la zone
               </CardTitle>
               <CardDescription>
-                Les règles restent ici tant qu’elles ne sont pas publiées.
+                Les règles créées arrivent ici en brouillon. Seules celles passées en `Publié` apparaissent dans `Règles effectives`.
               </CardDescription>
             </CardHeader>
             <CardContent>
