@@ -45,6 +45,13 @@ export function Navbar() {
         <div className="flex items-center gap-2 sm:gap-3">
           {!isAuthenticated ? (
             <>
+              <Button
+                variant="outline"
+                asChild
+                className="h-10 px-3 text-sm shadow-sm sm:hidden"
+              >
+                <Link href="/login">Se connecter</Link>
+              </Button>
               <Button variant="ghost" asChild className="hidden sm:inline-flex">
                 <Link href="/login">Se connecter</Link>
               </Button>
