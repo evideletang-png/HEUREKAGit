@@ -58,6 +58,7 @@ type BuildabilitySourceDetail = {
   resolutionStatus: string | null;
   linkedRuleCount: number;
   requiresCrossDocumentResolution: boolean;
+  relationResolutionNote: string | null;
 };
 
 type BuildabilitySourceMeta = {
@@ -164,6 +165,7 @@ async function buildBuildabilitySourceDetails(
       resolutionStatus: "resolutionStatus" in rule ? rule.resolutionStatus ?? null : null,
       linkedRuleCount: "linkedRuleCount" in rule ? Number(rule.linkedRuleCount || 0) : 0,
       requiresCrossDocumentResolution: "requiresCrossDocumentResolution" in rule ? !!rule.requiresCrossDocumentResolution : false,
+      relationResolutionNote: "relationResolutionNote" in rule ? rule.relationResolutionNote ?? null : null,
     };
   };
 
@@ -1022,6 +1024,11 @@ export async function orchestrateDossierAnalysis(
         ...(calculations.blocking_constraints ?? []),
         ...(calculations.uncertainties ?? []),
       ];
+      const relationAppliedNotes = Array.from(new Set(
+        structuredUrbanRules
+          .map((rule) => ("relationResolutionNote" in rule ? rule.relationResolutionNote : null))
+          .filter((note): note is string => !!note && note.trim().length > 0),
+      )).slice(0, 4);
       const sourceDetails = await buildBuildabilitySourceDetails(structuredUrbanRules, structuredRuleLoad.source);
       const explicitSignals = [
         maxFootprint != null || normalizedParams.green_space_ratio?.[0] != null,
@@ -1054,6 +1061,15 @@ export async function orchestrateDossierAnalysis(
       } else if (sourceDetails.meta.partialRelationalRuleCount > 0) {
         assumptions.push(`${sourceDetails.meta.partialRelationalRuleCount} regle(s) relationnelle(s) restent partiellement resolue(s) et demandent une verification.`);
       }
+      assumptions.push(...relationAppliedNotes);
+
+      const relationSummarySuffix = sourceDetails.meta.unresolvedRelationalRuleCount > 0
+        ? ` Sous réserve de ${sourceDetails.meta.unresolvedRelationalRuleCount} dépendance(s) documentaire(s) non résolue(s).`
+        : sourceDetails.meta.partialRelationalRuleCount > 0
+          ? ` Certaines dépendances documentaires restent partielles et demandent une lecture complémentaire.`
+          : sourceDetails.meta.relationalRuleCount > 0
+            ? ` Les relations documentaires calibrées ont été prises en compte dans cette conclusion.`
+            : "";
 
       const buildabilityData = {
         analysisId,
@@ -1068,7 +1084,8 @@ export async function orchestrateDossierAnalysis(
         sourceDetailsJson: JSON.stringify(sourceDetails),
         confidenceScore: computedConfidenceScore,
         resultSummary: calculations.theoretical_potential_synthesis
-          ?? `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m`,
+          ? `${calculations.theoretical_potential_synthesis}${relationSummarySuffix}`.trim()
+          : `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m.${relationSummarySuffix}`.trim(),
       };
       const [existingBuildability] = await db.select({ id: buildabilityResultsTable.id })
         .from(buildabilityResultsTable).where(eq(buildabilityResultsTable.analysisId, analysisId)).limit(1);

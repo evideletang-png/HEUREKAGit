@@ -55,6 +55,7 @@ export type PublishedIndexedRule = {
   requiresCrossDocumentResolution: boolean;
   resolutionStatus: string | null;
   linkedRuleCount: number;
+  relationResolutionNote: string | null;
   relations: Array<{
     id: string;
     relationType: string;
@@ -225,6 +226,7 @@ function toPublishedIndexedRule(row: {
     requiresCrossDocumentResolution: row.requiresCrossDocumentResolution,
     resolutionStatus: row.resolutionStatus,
     linkedRuleCount: row.linkedRuleCount,
+    relationResolutionNote: null,
     relations: row.relations,
     ruleFamily,
     ruleTopic: row.themeCode,
@@ -249,6 +251,251 @@ function toPublishedIndexedRule(row: {
     sourceDocumentKind: row.documentId ? "town_hall_document" : null,
     sourceDocumentName: row.documentName,
   };
+}
+
+const BLOCKING_RELATION_TYPES = new Set([
+  "depends_on",
+  "restricts",
+  "substitutes",
+  "exception_to",
+]);
+
+const PROCEDURAL_RELATION_TYPES = new Set([
+  "procedural_dependency",
+  "cross_checks_with",
+]);
+
+const UPPER_BOUND_RULE_FAMILIES = new Set([
+  "height",
+  "footprint",
+]);
+
+const LOWER_BOUND_RULE_FAMILIES = new Set([
+  "setback_public",
+  "setback_side",
+  "setback_rear",
+  "setback_between_buildings",
+  "green_space",
+]);
+
+function mergeDistinctText(current: string | null | undefined, addition: string | null | undefined) {
+  const left = String(current || "").trim();
+  const right = String(addition || "").trim();
+  if (!right) return left || null;
+  if (!left) return right;
+  if (left.includes(right)) return left;
+  if (right.includes(left)) return right;
+  return `${left} ${right}`.trim();
+}
+
+function mergeDistinctList(current: string | null | undefined, additions: string[]) {
+  return additions.reduce((acc, item) => mergeDistinctText(acc, item), current || null);
+}
+
+function buildRelationTargetLabel(
+  relation: PublishedIndexedRule["relations"][number],
+  targetRule: PublishedIndexedRule | null,
+) {
+  if (targetRule?.ruleLabel) return targetRule.ruleLabel;
+  if (relation.targetRuleLabel) return relation.targetRuleLabel;
+  if (relation.targetDocumentName) return relation.targetDocumentName;
+  return "document lié";
+}
+
+function getComparableRuleValue(rule: PublishedIndexedRule) {
+  if (typeof rule.ruleValueExact === "number") {
+    return { mode: "exact" as const, value: rule.ruleValueExact };
+  }
+  if (typeof rule.ruleValueMax === "number") {
+    return { mode: "max" as const, value: rule.ruleValueMax };
+  }
+  if (typeof rule.ruleValueMin === "number") {
+    return { mode: "min" as const, value: rule.ruleValueMin };
+  }
+  return null;
+}
+
+function copyNumericPayloadFromTarget(rule: PublishedIndexedRule, targetRule: PublishedIndexedRule) {
+  rule.ruleValueType = targetRule.ruleValueType;
+  rule.ruleValueMin = targetRule.ruleValueMin;
+  rule.ruleValueMax = targetRule.ruleValueMax;
+  rule.ruleValueExact = targetRule.ruleValueExact;
+  rule.ruleUnit = targetRule.ruleUnit;
+}
+
+function clearNumericPayload(rule: PublishedIndexedRule) {
+  rule.ruleValueType = null;
+  rule.ruleValueMin = null;
+  rule.ruleValueMax = null;
+  rule.ruleValueExact = null;
+  rule.ruleUnit = null;
+}
+
+function applyRestrictiveNumericMerge(rule: PublishedIndexedRule, targetRule: PublishedIndexedRule) {
+  if (rule.ruleFamily !== targetRule.ruleFamily) return false;
+
+  const current = getComparableRuleValue(rule);
+  const target = getComparableRuleValue(targetRule);
+  if (!target) return false;
+
+  if (!current) {
+    copyNumericPayloadFromTarget(rule, targetRule);
+    return true;
+  }
+
+  if (UPPER_BOUND_RULE_FAMILIES.has(rule.ruleFamily)) {
+    const strictest = Math.min(current.value, target.value);
+    rule.ruleValueType = "max";
+    rule.ruleValueMin = null;
+    rule.ruleValueExact = null;
+    rule.ruleValueMax = strictest;
+    rule.ruleUnit = rule.ruleUnit || targetRule.ruleUnit;
+    return true;
+  }
+
+  if (LOWER_BOUND_RULE_FAMILIES.has(rule.ruleFamily)) {
+    const strictest = Math.max(current.value, target.value);
+    rule.ruleValueType = "min";
+    rule.ruleValueMax = null;
+    rule.ruleValueExact = null;
+    rule.ruleValueMin = strictest;
+    rule.ruleUnit = rule.ruleUnit || targetRule.ruleUnit;
+    return true;
+  }
+
+  return false;
+}
+
+function resolvePublishedRuleRelations(
+  rules: PublishedIndexedRule[],
+  targetRuleMap: Map<string, PublishedIndexedRule>,
+) {
+  return rules.map((rule) => {
+    const resolvedRule: PublishedIndexedRule = {
+      ...rule,
+      relations: [...rule.relations],
+    };
+    const relationNotes: string[] = [];
+    const unresolvedBlockingTargets: string[] = [];
+    const hasProceduralRelation = rule.relations.some((relation) => PROCEDURAL_RELATION_TYPES.has(relation.relationType));
+
+    for (const relation of rule.relations) {
+      const targetRule = relation.targetRuleId ? targetRuleMap.get(relation.targetRuleId) || null : null;
+      const targetLabel = buildRelationTargetLabel(relation, targetRule);
+      const targetSummary = targetRule?.ruleSummary || targetRule?.sourceExcerpt || targetRule?.ruleTextRaw || null;
+      const targetCondition = targetRule?.ruleCondition || null;
+
+      switch (relation.relationType) {
+        case "substitutes": {
+          if (targetRule) {
+            if (rule.ruleFamily === targetRule.ruleFamily) {
+              copyNumericPayloadFromTarget(resolvedRule, targetRule);
+            }
+            resolvedRule.ruleCondition = mergeDistinctText(
+              resolvedRule.ruleCondition,
+              relation.conditionText || targetCondition,
+            );
+            relationNotes.push(`Règle substituée par ${targetLabel}.`);
+          } else {
+            unresolvedBlockingTargets.push(targetLabel);
+          }
+          break;
+        }
+        case "restricts": {
+          if (targetRule) {
+            const merged = applyRestrictiveNumericMerge(resolvedRule, targetRule);
+            resolvedRule.ruleCondition = mergeDistinctText(
+              resolvedRule.ruleCondition,
+              relation.conditionText || targetCondition || targetSummary,
+            );
+            relationNotes.push(merged
+              ? `Règle restreinte par ${targetLabel}.`
+              : `Application sous restriction de ${targetLabel}.`);
+          } else {
+            unresolvedBlockingTargets.push(targetLabel);
+          }
+          break;
+        }
+        case "complements":
+        case "references":
+        case "derived_from": {
+          if (targetRule) {
+            if (resolvedRule.ruleValueType == null && targetRule.ruleFamily === rule.ruleFamily) {
+              copyNumericPayloadFromTarget(resolvedRule, targetRule);
+            }
+            resolvedRule.ruleCondition = mergeDistinctText(
+              resolvedRule.ruleCondition,
+              relation.conditionText || targetCondition || targetSummary,
+            );
+            relationNotes.push(`Complétée par ${targetLabel}.`);
+          } else {
+            relationNotes.push(`Renvoi documentaire vers ${targetLabel}.`);
+          }
+          break;
+        }
+        case "depends_on": {
+          if (targetRule) {
+            resolvedRule.ruleCondition = mergeDistinctText(
+              resolvedRule.ruleCondition,
+              relation.conditionText || targetCondition || targetSummary,
+            );
+            relationNotes.push(`Application sous réserve de ${targetLabel}.`);
+          } else {
+            unresolvedBlockingTargets.push(targetLabel);
+          }
+          break;
+        }
+        case "exception_to": {
+          if (targetRule) {
+            resolvedRule.ruleException = mergeDistinctText(
+              resolvedRule.ruleException,
+              relation.conditionText || targetCondition || targetSummary,
+            );
+            relationNotes.push(`Exception liée à ${targetLabel}.`);
+          } else {
+            unresolvedBlockingTargets.push(targetLabel);
+          }
+          break;
+        }
+        case "procedural_dependency":
+        case "cross_checks_with": {
+          const proceduralNote = relation.conditionText || targetCondition || targetSummary || `Vérifier ${targetLabel}.`;
+          resolvedRule.ruleCondition = mergeDistinctText(resolvedRule.ruleCondition, proceduralNote);
+          relationNotes.push(
+            relation.relationType === "procedural_dependency"
+              ? `Procédure complémentaire liée à ${targetLabel}.`
+              : `Contrôle croisé recommandé avec ${targetLabel}.`,
+          );
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    if (unresolvedBlockingTargets.length > 0) {
+      clearNumericPayload(resolvedRule);
+      relationNotes.push(
+        `Conclusion suspendue tant que ${unresolvedBlockingTargets.join(", ")} n'est pas calibré ou publié.`,
+      );
+    }
+
+    const relationResolutionNote = relationNotes.join(" ").trim() || null;
+    resolvedRule.relationResolutionNote = relationResolutionNote;
+
+    if (relationResolutionNote) {
+      resolvedRule.ruleSummary = mergeDistinctText(resolvedRule.ruleSummary, relationResolutionNote);
+      resolvedRule.ruleCondition = mergeDistinctList(resolvedRule.ruleCondition, relationNotes);
+      if (hasProceduralRelation) {
+        resolvedRule.ruleException = mergeDistinctText(
+          resolvedRule.ruleException,
+          "Instruction à compléter avec les procédures ou validations externes liées.",
+        );
+      }
+    }
+
+    return resolvedRule;
+  });
 }
 
 function toArticleConfidence(confidenceScore: number | null | undefined): "high" | "medium" | "low" {
@@ -608,15 +855,43 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
     targetRuleIds.length > 0
       ? db.select({
           id: indexedRegulatoryRulesTable.id,
+          zoneLabel: regulatoryCalibrationZonesTable.zoneLabel,
+          overlayId: indexedRegulatoryRulesTable.overlayId,
           ruleLabel: indexedRegulatoryRulesTable.ruleLabel,
+          articleCode: indexedRegulatoryRulesTable.articleCode,
+          themeCode: indexedRegulatoryRulesTable.themeCode,
+          operator: indexedRegulatoryRulesTable.operator,
+          valueNumeric: indexedRegulatoryRulesTable.valueNumeric,
+          valueText: indexedRegulatoryRulesTable.valueText,
+          unit: indexedRegulatoryRulesTable.unit,
+          conditionText: indexedRegulatoryRulesTable.conditionText,
+          interpretationNote: indexedRegulatoryRulesTable.interpretationNote,
+          sourceText: indexedRegulatoryRulesTable.sourceText,
+          sourcePage: indexedRegulatoryRulesTable.sourcePage,
+          confidenceScore: indexedRegulatoryRulesTable.confidenceScore,
+          conflictFlag: indexedRegulatoryRulesTable.conflictFlag,
           status: indexedRegulatoryRulesTable.status,
           zoneCode: regulatoryCalibrationZonesTable.zoneCode,
           overlayCode: regulatoryOverlaysTable.overlayCode,
+          overlayLabel: regulatoryOverlaysTable.overlayLabel,
+          overlayType: sql<string | null>`coalesce(${indexedRegulatoryRulesTable.overlayType}, ${regulatoryOverlaysTable.overlayType})`,
+          normativeEffect: indexedRegulatoryRulesTable.normativeEffect,
+          proceduralEffect: indexedRegulatoryRulesTable.proceduralEffect,
+          applicabilityScope: indexedRegulatoryRulesTable.applicabilityScope,
+          ruleAnchorType: indexedRegulatoryRulesTable.ruleAnchorType,
+          ruleAnchorLabel: indexedRegulatoryRulesTable.ruleAnchorLabel,
+          isRelationalRule: indexedRegulatoryRulesTable.isRelationalRule,
+          requiresCrossDocumentResolution: indexedRegulatoryRulesTable.requiresCrossDocumentResolution,
+          resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
+          linkedRuleCount: indexedRegulatoryRulesTable.linkedRuleCount,
           documentId: indexedRegulatoryRulesTable.documentId,
+          documentName: townHallDocumentsTable.title,
+          documentFileName: townHallDocumentsTable.fileName,
         })
           .from(indexedRegulatoryRulesTable)
           .leftJoin(regulatoryCalibrationZonesTable, eq(indexedRegulatoryRulesTable.zoneId, regulatoryCalibrationZonesTable.id))
           .leftJoin(regulatoryOverlaysTable, eq(indexedRegulatoryRulesTable.overlayId, regulatoryOverlaysTable.id))
+          .leftJoin(townHallDocumentsTable, eq(indexedRegulatoryRulesTable.documentId, townHallDocumentsTable.id))
           .where(inArray(indexedRegulatoryRulesTable.id, targetRuleIds))
       : Promise.resolve([]),
     targetDocIds.length > 0
@@ -628,7 +903,20 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
       : Promise.resolve([]),
   ]);
 
-  const targetRuleMap = new Map(targetRules.map((rule) => [rule.id, rule]));
+  const targetRuleRows = targetRules as Array<any>;
+  const targetRuleMap = new Map(targetRuleRows.map((rule) => [rule.id, rule]));
+  const targetPublishedRuleMap = new Map(
+    targetRuleRows
+      .filter((rule) => rule.status === "published")
+      .map((rule) => [
+        rule.id,
+        toPublishedIndexedRule({
+          ...rule,
+          documentName: rule.documentName || rule.documentFileName || null,
+          relations: [],
+        }),
+      ]),
+  );
   const targetDocMap = new Map(targetDocs.map((doc) => [doc.id, doc.title || doc.fileName || null]));
   const relationMap = new Map<string, PublishedIndexedRule["relations"]>();
   for (const relation of relationRows) {
@@ -651,11 +939,13 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
     relationMap.set(relation.sourceRuleId, existing);
   }
 
-  return rows.map((row) => toPublishedIndexedRule({
+  const publishedRules = rows.map((row) => toPublishedIndexedRule({
     ...row,
     documentName: row.documentName || row.documentFileName || null,
     relations: relationMap.get(row.id) || [],
   }));
+
+  return resolvePublishedRuleRelations(publishedRules, targetPublishedRuleMap);
 }
 
 export async function loadStructuredRulesForAnalysis(args: LoadUrbanRulesArgs): Promise<{
@@ -721,6 +1011,7 @@ export function buildParsedRulesFromUrbanRules(rules: StructuredUrbanRuleSource[
       requires_cross_document_resolution: "requiresCrossDocumentResolution" in rule ? rule.requiresCrossDocumentResolution : false,
       resolution_status: "resolutionStatus" in rule ? rule.resolutionStatus : null,
       linked_rule_count: "linkedRuleCount" in rule ? rule.linkedRuleCount : 0,
+      relation_resolution_note: "relationResolutionNote" in rule ? rule.relationResolutionNote : null,
       relations: "relations" in rule ? rule.relations : [],
     },
   }));
@@ -734,14 +1025,20 @@ export function buildArticlesFromUrbanRules(rules: StructuredUrbanRuleSource[]) 
     sourceText: rule.ruleTextRaw,
     interpretation: rule.ruleSummary || rule.ruleTextRaw,
     summary: rule.ruleSummary || rule.ruleTextRaw,
-    impactText: `Règle ${
+    impactText: `${`Règle ${
       rule.reviewStatus === "published"
         ? "publiée"
         : rule.reviewStatus === "validated"
           ? "validée"
           : "structurée"
-    } pour la zone ${rule.zoneCode || "globale"}.`,
-    vigilanceText: rule.reviewStatus === "published"
+    } pour la zone ${rule.zoneCode || "globale"}.`}${
+      "relationResolutionNote" in rule && rule.relationResolutionNote
+        ? ` ${rule.relationResolutionNote}`
+        : ""
+    }`,
+    vigilanceText: "resolutionStatus" in rule && rule.resolutionStatus === "unresolved"
+      ? "La règle dépend encore d'un autre document ou d'une autre règle non résolue."
+      : rule.reviewStatus === "published"
       ? "Règle publiée dans le référentiel mairie."
       : rule.requiresManualValidation
         ? "Validation manuelle recommandée avant usage opposable."
@@ -770,6 +1067,7 @@ export function buildArticlesFromUrbanRules(rules: StructuredUrbanRuleSource[]) 
       requires_cross_document_resolution: "requiresCrossDocumentResolution" in rule ? rule.requiresCrossDocumentResolution : false,
       resolution_status: "resolutionStatus" in rule ? rule.resolutionStatus : null,
       linked_rule_count: "linkedRuleCount" in rule ? rule.linkedRuleCount : 0,
+      relation_resolution_note: "relationResolutionNote" in rule ? rule.relationResolutionNote : null,
       relations: "relations" in rule ? rule.relations : [],
     },
   }));

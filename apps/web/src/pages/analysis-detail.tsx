@@ -164,6 +164,7 @@ type BuildabilitySourceDetail = {
   resolutionStatus: string | null;
   linkedRuleCount: number;
   requiresCrossDocumentResolution: boolean;
+  relationResolutionNote: string | null;
 };
 
 type BuildabilitySourceMeta = {
@@ -212,12 +213,16 @@ function buildEvidenceState({
   defaultHelper?: string;
   missingHelper?: string;
 }): FieldEvidenceState {
+  const relationHint = sourceDetail?.relationResolutionNote
+    ? ` ${sourceDetail.relationResolutionNote}`
+    : "";
+
   if (value == null || value === "") {
     return {
       displayValue: missingLabel,
       statusLabel: "Non trouvé",
       statusClassName: "border-slate-200 bg-slate-50 text-slate-700",
-      helperText: missingHelper,
+      helperText: `${missingHelper}${relationHint}`.trim(),
       sourceLabel: null,
       sourceExcerpt: null,
     };
@@ -228,7 +233,7 @@ function buildEvidenceState({
       displayValue: formattedValue,
       statusLabel: "Par défaut",
       statusClassName: "border-amber-200 bg-amber-50 text-amber-800",
-      helperText: defaultHelper,
+      helperText: `${defaultHelper}${relationHint}`.trim(),
       sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
       sourceExcerpt: sourceDetail?.sourceExcerpt || null,
     };
@@ -239,7 +244,7 @@ function buildEvidenceState({
       displayValue: formattedValue,
       statusLabel: "Règle trouvée",
       statusClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
-      helperText: explicitHelper,
+      helperText: `${explicitHelper}${relationHint}`.trim(),
       sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
       sourceExcerpt: sourceDetail?.sourceExcerpt || null,
     };
@@ -249,7 +254,7 @@ function buildEvidenceState({
     displayValue: formattedValue,
     statusLabel: "Calcul partiel",
     statusClassName: "border-sky-200 bg-sky-50 text-sky-800",
-    helperText: derivedHelper,
+    helperText: `${derivedHelper}${relationHint}`.trim(),
     sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
     sourceExcerpt: sourceDetail?.sourceExcerpt || null,
   };
@@ -264,6 +269,7 @@ function formatBuildabilitySourceDetail(sourceDetail?: BuildabilitySourceDetail 
     sourceDetail.sourceArticle,
     sourceDetail.sourcePage != null ? `p. ${sourceDetail.sourcePage}` : null,
     sourceDetail.requiresCrossDocumentResolution ? "lien documentaire" : null,
+    sourceDetail.relationResolutionNote ? "effet lié appliqué" : null,
   ].filter(Boolean);
 
   if (parts.length === 0) return null;
@@ -278,6 +284,8 @@ function formatBuildabilityConfidenceHint(meta?: BuildabilitySourceMeta) {
       ? ` ${meta.unresolvedRelationalRuleCount} dependance(s) documentaire(s) restent non resolue(s).`
       : meta.partialRelationalRuleCount > 0
         ? ` ${meta.partialRelationalRuleCount} dependance(s) documentaire(s) restent partielles.`
+        : meta.relationalRuleCount > 0
+          ? ` ${meta.relationalRuleCount} regle(s) inter-document(s) ont ete integree(s).`
         : "";
     return `${meta.publishedCoveredFieldCount}/${meta.explicitFieldCount} variables clés sont couvertes par des règles publiées.${relationHint}`;
   }
