@@ -3374,7 +3374,36 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       if (effectiveEndPage && page.pageNumber > effectiveEndPage) return false;
       return true;
     });
-    const workspacePages = boundedPages.length > 0 ? boundedPages : allPages;
+    const sectionTextPages = zoneSections
+      .map((section) => ({
+        pageNumber: section.reviewedStartPage ?? section.startPage ?? effectiveStartPage ?? 1,
+        text: section.sourceText || "",
+        startOffset: 0,
+        endOffset: (section.sourceText || "").length,
+      }))
+      .filter((page) => page.text.trim().length > 0)
+      .filter((page, index, all) => all.findIndex((candidate) => candidate.pageNumber === page.pageNumber && candidate.text === page.text) === index);
+    const analysisPages =
+      boundedPages.length > 0
+        ? boundedPages
+        : sectionTextPages.length > 0
+          ? sectionTextPages
+          : allPages;
+    const viewerPageNumbers =
+      effectiveStartPage && effectiveEndPage && effectiveEndPage >= effectiveStartPage
+        ? Array.from({ length: effectiveEndPage - effectiveStartPage + 1 }, (_, index) => effectiveStartPage + index)
+        : effectiveStartPage
+          ? [effectiveStartPage]
+          : analysisPages.map((page) => page.pageNumber);
+    const workspacePages = Array.from(new Set(viewerPageNumbers)).map((pageNumber) => {
+      const matchingPage = analysisPages.find((page) => page.pageNumber === pageNumber);
+      return {
+        pageNumber,
+        text: matchingPage?.text || "",
+        startOffset: matchingPage?.startOffset || 0,
+        endOffset: matchingPage?.endOffset || 0,
+      };
+    });
 
     const [zoneExcerpts, zoneRules, overlays] = await Promise.all([
       db.select()
@@ -3423,14 +3452,19 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       ? await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: referenceDocumentId })
       : { sections: [], rules: [] };
 
-    const articleAnchors = buildZoneArticleAnchors(workspacePages.map((page) => ({
+    const articleAnchors = buildZoneArticleAnchors(analysisPages.map((page) => ({
       pageNumber: page.pageNumber,
       text: page.text,
-    })));
-    const keywordMatches = buildZoneKeywordMatches({
-      pages: workspacePages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
-      keywords: zone.searchKeywords || [],
+    }))).sort((left, right) => {
+      const leftArticle = Number.parseInt(left.articleCode || "999", 10);
+      const rightArticle = Number.parseInt(right.articleCode || "999", 10);
+      if (leftArticle !== rightArticle) return leftArticle - rightArticle;
+      return left.pageNumber - right.pageNumber;
     });
+    const keywordMatches = buildZoneKeywordMatches({
+      pages: analysisPages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
+      keywords: zone.searchKeywords || [],
+    }).sort((left, right) => left.pageNumber - right.pageNumber);
 
     return res.json({
       commune: access.targetCommune,
