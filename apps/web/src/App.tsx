@@ -47,6 +47,7 @@ function Router() {
       <Route path="/admin" component={AdminPage} />
       <Route path="/account" component={AccountPage} />
       <Route path="/conformite" component={MairiePage} />
+      <Route path="/portail-mairie/base-ia/zones/:zoneId" component={PortailMairiePage} />
       <Route path="/portail-mairie/:id?" component={PortailMairiePage} />
       <Route path="/portail-metropole/:id?" component={PortailMetropolePage} />
       <Route path="/portail-abf/:id?" component={PortailABFPage} />

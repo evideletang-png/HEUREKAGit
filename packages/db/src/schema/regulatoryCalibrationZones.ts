@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, uuid, boolean, integer, index, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { townHallDocumentsTable } from "./townHallDocuments";
 
 export const regulatoryCalibrationZonesTable = pgTable("regulatory_calibration_zones", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -11,6 +12,7 @@ export const regulatoryCalibrationZonesTable = pgTable("regulatory_calibration_z
   sectorCode: text("sector_code"),
   guidanceNotes: text("guidance_notes"),
   searchKeywords: jsonb("search_keywords").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  referenceDocumentId: uuid("reference_document_id").references(() => townHallDocumentsTable.id, { onDelete: "set null" }),
   referenceStartPage: integer("reference_start_page"),
   referenceEndPage: integer("reference_end_page"),
   displayOrder: integer("display_order").notNull().default(0),
@@ -22,6 +24,7 @@ export const regulatoryCalibrationZonesTable = pgTable("regulatory_calibration_z
 }, (table) => ({
   communeIdx: index("regulatory_calibration_zones_commune_idx").on(table.communeId),
   codeIdx: index("regulatory_calibration_zones_code_idx").on(table.zoneCode),
+  referenceDocumentIdx: index("regulatory_calibration_zones_reference_document_idx").on(table.referenceDocumentId),
 }));
 
 export const selectRegulatoryCalibrationZoneSchema = createSelectSchema(regulatoryCalibrationZonesTable);

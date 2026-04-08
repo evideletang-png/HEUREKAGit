@@ -18,7 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
-import { RegulatoryCalibrationModule } from "@/components/mairie/RegulatoryCalibrationModule";
+import { ZoneFirstCalibrationModule } from "@/components/mairie/ZoneFirstCalibrationModule";
 
 type Dossier = {
   id: string;
@@ -1762,10 +1762,9 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       </Card>
 
       {useRegulatoryCalibrationModule && currentCommune !== "all" && (
-        <RegulatoryCalibrationModule
+        <ZoneFirstCalibrationModule
           currentCommune={currentCommune}
           documents={allDocs}
-          loadingDocuments={loadingPluDocs}
         />
       )}
 
@@ -2803,7 +2802,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
 export default function PortailMairiePage() {
   const { user, isAuthenticated, isLoading } = useAuth();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeDossierTab, setActiveDossierTab] = useState<string>("summary");
   const [activeTab, setActiveTab] = useState("dossiers");
@@ -2860,13 +2859,27 @@ export default function PortailMairiePage() {
     if (!isLoading) {
       if (!isAuthenticated) { setLocation("/login"); return; }
       if ((user?.role as string) !== "mairie" && user?.role !== "admin") { setLocation("/dashboard"); }
-      
+
+      const requestedCommune = typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("commune")
+        : null;
+      if (requestedCommune) {
+        setSelectedCommune(requestedCommune);
+        return;
+      }
+
       // Default to first commune if it's a mairie user
       if ((user?.role as string) === "mairie" && assignedCommunes.length > 0) {
         setSelectedCommune(assignedCommunes[0]);
       }
     }
   }, [isLoading, isAuthenticated, user, assignedCommunes]);
+
+  useEffect(() => {
+    if (location.startsWith("/portail-mairie/base-ia/")) {
+      setActiveTab("plu");
+    }
+  }, [location]);
 
   const { data: dossiersData, isLoading: loadingDossiers } = useQuery<{ dossiers: Dossier[] }>({
     queryKey: ["mairie-dossiers", selectedCommune],

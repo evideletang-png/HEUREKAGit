@@ -587,6 +587,32 @@ function normalizeOptionalPositivePage(raw: unknown): number | null {
   return value > 0 ? value : null;
 }
 
+async function resolveCalibrationReferenceDocumentId(args: {
+  communeAliases: string[];
+  requestedId: unknown;
+}) {
+  if (typeof args.requestedId !== "string" || args.requestedId.trim().length === 0) {
+    return null;
+  }
+
+  const [doc] = await db.select({
+    id: townHallDocumentsTable.id,
+  }).from(townHallDocumentsTable)
+    .where(
+      and(
+        eq(townHallDocumentsTable.id, args.requestedId.trim()),
+        buildMunicipalityAliasFilter(townHallDocumentsTable.commune, args.communeAliases),
+      ),
+    )
+    .limit(1);
+
+  if (!doc) {
+    throw new Error("REFERENCE_DOCUMENT_NOT_FOUND");
+  }
+
+  return doc.id;
+}
+
 function normalizeReviewedArticleNumber(raw: unknown): string | null {
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
     return String(Math.trunc(raw));
@@ -604,6 +630,74 @@ function normalizeReviewedArticleNumber(raw: unknown): string | null {
 function buildReviewedSourceArticle(articleNumber: string | null) {
   if (!articleNumber || articleNumber === "manual") return null;
   return `Article ${articleNumber}`;
+}
+
+function inferArticleCodeFromCalibrationText(rawText: string | null | undefined) {
+  if (!rawText) return null;
+  const match = rawText.match(/\b(?:ARTICLE|ART\.?)\s*(\d{1,2})\b/i);
+  return match?.[1] || null;
+}
+
+function normalizeSearchableText(rawText: string | null | undefined) {
+  return (rawText || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function buildZoneKeywordMatchSnippet(lines: string[], index: number) {
+  const window = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 2));
+  return window.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function buildZoneKeywordMatches(args: {
+  pages: Array<{ pageNumber: number; text: string }>;
+  keywords: string[];
+}) {
+  const normalizedKeywords = args.keywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length > 0);
+  if (normalizedKeywords.length === 0) return [];
+
+  return normalizedKeywords.flatMap((keyword) => {
+    const normalizedKeyword = normalizeSearchableText(keyword);
+    return args.pages.flatMap((page) => {
+      const lines = page.text
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      return lines.flatMap((line, index) => {
+        if (!normalizeSearchableText(line).includes(normalizedKeyword)) return [];
+        const snippet = buildZoneKeywordMatchSnippet(lines, index);
+        return [{
+          keyword,
+          pageNumber: page.pageNumber,
+          snippet,
+          articleCode: inferArticleCodeFromCalibrationText(snippet),
+        }];
+      });
+    });
+  }).filter((hit, index, all) => all.findIndex((candidate) => candidate.keyword === hit.keyword && candidate.pageNumber === hit.pageNumber && candidate.snippet === hit.snippet) === index);
+}
+
+function buildZoneArticleAnchors(pages: Array<{ pageNumber: number; text: string }>) {
+  return pages.flatMap((page) => {
+    const lines = page.text
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    return lines.flatMap((line) => {
+      const articleCode = inferArticleCodeFromCalibrationText(line);
+      if (!articleCode) return [];
+      return [{
+        articleCode,
+        pageNumber: page.pageNumber,
+        label: line.replace(/\s+/g, " ").trim(),
+      }];
+    });
+  }).filter((anchor, index, all) => all.findIndex((candidate) => candidate.articleCode === anchor.articleCode && candidate.pageNumber === anchor.pageNumber && candidate.label === anchor.label) === index);
 }
 
 function normalizeDocumentFingerprintPart(raw: string | null | undefined) {
@@ -759,6 +853,7 @@ async function ensureCalibrationZonesForCommune(args: {
   rawText: string;
   sourceName?: string | null;
   sourceType?: string | null;
+  referenceDocumentId?: string | null;
   userId?: string | null;
 }) {
   const zoneCodes = extractCalibrationZoneCodes(args.rawText, {
@@ -822,6 +917,7 @@ async function ensureCalibrationZonesForCommune(args: {
       guidanceNotes: args.sourceName
         ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
         : "Zone détectée automatiquement depuis un document réglementaire.",
+      referenceDocumentId: args.referenceDocumentId || null,
       displayOrder: nextDisplayOrder + index,
       isActive: true,
       createdBy: args.userId || null,
@@ -2523,6 +2619,7 @@ async function queueTownHallDocumentIndexing(args: {
         rawText,
         sourceName: args.originalName,
         sourceType: documentType,
+        referenceDocumentId: args.docId,
         userId: args.userId || null,
       });
 
@@ -2975,6 +3072,7 @@ router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
 
     if (zones.length === 0) {
       const docs = await db.select({
+        id: townHallDocumentsTable.id,
         title: townHallDocumentsTable.title,
         fileName: townHallDocumentsTable.fileName,
         rawText: townHallDocumentsTable.rawText,
@@ -3012,6 +3110,7 @@ router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
           rawText: doc.rawText,
           sourceName: doc.title || doc.fileName || "document",
           sourceType: doc.documentType,
+          referenceDocumentId: doc.id,
           userId: req.user!.userId,
         });
       }
@@ -3022,10 +3121,31 @@ router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         .orderBy(regulatoryCalibrationZonesTable.displayOrder, regulatoryCalibrationZonesTable.zoneCode);
     }
 
+    const referenceDocuments = zones
+      .map((zone) => zone.referenceDocumentId)
+      .filter((value): value is string => !!value);
+    const referenceDocMap = new Map(
+      referenceDocuments.length > 0
+        ? (await db.select({
+            id: townHallDocumentsTable.id,
+            title: townHallDocumentsTable.title,
+            fileName: townHallDocumentsTable.fileName,
+            documentType: townHallDocumentsTable.documentType,
+          }).from(townHallDocumentsTable)
+            .where(inArray(townHallDocumentsTable.id, referenceDocuments)))
+          .map((doc) => [doc.id, doc] as const)
+        : [],
+    );
+
     return res.json({
       commune: access.targetCommune,
       communeId: communeKey,
-      zones,
+      zones: zones.map((zone) => ({
+        ...zone,
+        referenceDocument: zone.referenceDocumentId
+          ? referenceDocMap.get(zone.referenceDocumentId) || null
+          : null,
+      })),
     });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zones GET]", err);
@@ -3054,6 +3174,16 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
       )
       .limit(1);
 
+    let referenceDocumentId: string | null = null;
+    try {
+      referenceDocumentId = await resolveCalibrationReferenceDocumentId({
+        communeAliases,
+        requestedId: req.body.referenceDocumentId,
+      });
+    } catch {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Document de référence invalide pour cette commune." });
+    }
+
     let zone;
     if (existing[0]) {
       const [updated] = await db.update(regulatoryCalibrationZonesTable)
@@ -3063,6 +3193,7 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
           sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
           guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
           searchKeywords: normalizeZoneSearchKeywords(req.body.searchKeywords),
+          referenceDocumentId,
           referenceStartPage: normalizeOptionalPositivePage(req.body.referenceStartPage),
           referenceEndPage: normalizeOptionalPositivePage(req.body.referenceEndPage),
           displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
@@ -3090,6 +3221,7 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         sectorCode: typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null,
         guidanceNotes: typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null,
         searchKeywords: normalizeZoneSearchKeywords(req.body.searchKeywords),
+        referenceDocumentId,
         referenceStartPage: normalizeOptionalPositivePage(req.body.referenceStartPage),
         referenceEndPage: normalizeOptionalPositivePage(req.body.referenceEndPage),
         displayOrder: Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : 0,
@@ -3127,6 +3259,18 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || zone.communeId);
     if (!access.ok) return res.status(access.status).json(access.error);
 
+    let referenceDocumentId = zone.referenceDocumentId;
+    try {
+      if (req.body.referenceDocumentId !== undefined) {
+        referenceDocumentId = await resolveCalibrationReferenceDocumentId({
+          communeAliases: [access.targetCommune, zone.communeId].filter((value): value is string => !!value),
+          requestedId: req.body.referenceDocumentId,
+        });
+      }
+    } catch {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Document de référence invalide pour cette commune." });
+    }
+
     const [updated] = await db.update(regulatoryCalibrationZonesTable)
       .set({
         zoneCode: normalizeConfiguredZoneCode(req.body.zoneCode) || zone.zoneCode,
@@ -3135,6 +3279,7 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
         sectorCode: req.body.sectorCode === undefined ? zone.sectorCode : (typeof req.body.sectorCode === "string" ? req.body.sectorCode.trim() || null : null),
         guidanceNotes: req.body.guidanceNotes === undefined ? zone.guidanceNotes : (typeof req.body.guidanceNotes === "string" ? req.body.guidanceNotes.trim() || null : null),
         searchKeywords: req.body.searchKeywords === undefined ? zone.searchKeywords : normalizeZoneSearchKeywords(req.body.searchKeywords),
+        referenceDocumentId,
         referenceStartPage: req.body.referenceStartPage === undefined ? zone.referenceStartPage : normalizeOptionalPositivePage(req.body.referenceStartPage),
         referenceEndPage: req.body.referenceEndPage === undefined ? zone.referenceEndPage : normalizeOptionalPositivePage(req.body.referenceEndPage),
         displayOrder: req.body.displayOrder === undefined ? zone.displayOrder : (Number.isFinite(Number(req.body.displayOrder)) ? Number(req.body.displayOrder) : zone.displayOrder),
@@ -3164,6 +3309,207 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
   }
 });
 
+router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthRequest, res) => {
+  try {
+    const zoneId = req.params.id as string;
+    const [zone] = await db.select()
+      .from(regulatoryCalibrationZonesTable)
+      .where(eq(regulatoryCalibrationZonesTable.id, zoneId))
+      .limit(1);
+
+    if (!zone) {
+      return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+    }
+
+    const access = await resolveAuthorizedTownHallCommune(
+      req.user!.userId,
+      req.query.commune as string | undefined || zone.communeId,
+    );
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+    const themes = await ensureRegulatoryThemeTaxonomySeed();
+
+    const availableDocuments = await db.select()
+      .from(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, access.targetCommune.toLowerCase()))
+      .orderBy(desc(townHallDocumentsTable.createdAt));
+
+    const matchingSections = await db.select()
+      .from(regulatoryZoneSectionsTable)
+      .where(buildMunicipalityAliasFilter(regulatoryZoneSectionsTable.municipalityId, communeAliases));
+
+    const normalizedZoneCode = normalizeConfiguredZoneCode(zone.zoneCode) || zone.zoneCode;
+    const zoneSections = matchingSections
+      .filter((section) => {
+        const effectiveZoneCode = section.reviewedZoneCode || section.zoneCode;
+        return normalizeConfiguredZoneCode(effectiveZoneCode) === normalizedZoneCode && section.reviewStatus !== "rejected";
+      })
+      .sort((left, right) => {
+        const leftPage = left.reviewedStartPage ?? left.startPage ?? Number.MAX_SAFE_INTEGER;
+        const rightPage = right.reviewedStartPage ?? right.startPage ?? Number.MAX_SAFE_INTEGER;
+        return leftPage - rightPage;
+      });
+
+    const referenceDocumentId =
+      zone.referenceDocumentId
+      || zoneSections.find((section) => !!section.townHallDocumentId)?.townHallDocumentId
+      || availableDocuments[0]?.id
+      || null;
+
+    const referenceDocument = referenceDocumentId
+      ? availableDocuments.find((doc) => doc.id === referenceDocumentId)
+        || await db.select()
+          .from(townHallDocumentsTable)
+          .where(eq(townHallDocumentsTable.id, referenceDocumentId))
+          .limit(1)
+          .then((rows) => rows[0] || null)
+      : null;
+
+    const allPages = splitDocumentIntoCalibrationPages(referenceDocument?.rawText || "");
+    const effectiveStartPage = zone.referenceStartPage ?? zoneSections[0]?.reviewedStartPage ?? zoneSections[0]?.startPage ?? null;
+    const effectiveEndPage = zone.referenceEndPage ?? zoneSections[zoneSections.length - 1]?.reviewedEndPage ?? zoneSections[zoneSections.length - 1]?.endPage ?? null;
+    const boundedPages = allPages.filter((page) => {
+      if (effectiveStartPage && page.pageNumber < effectiveStartPage) return false;
+      if (effectiveEndPage && page.pageNumber > effectiveEndPage) return false;
+      return true;
+    });
+    const workspacePages = boundedPages.length > 0 ? boundedPages : allPages;
+
+    const [zoneExcerpts, zoneRules, overlays] = await Promise.all([
+      db.select()
+        .from(calibratedExcerptsTable)
+        .where(eq(calibratedExcerptsTable.zoneId, zone.id))
+        .orderBy(calibratedExcerptsTable.sourcePage, calibratedExcerptsTable.createdAt),
+      db.select()
+        .from(indexedRegulatoryRulesTable)
+        .where(eq(indexedRegulatoryRulesTable.zoneId, zone.id))
+        .orderBy(indexedRegulatoryRulesTable.articleCode, indexedRegulatoryRulesTable.sourcePage, indexedRegulatoryRulesTable.updatedAt),
+      listCommuneRegulatoryOverlays(communeAliases),
+    ]);
+
+    const excerptDocumentIds = Array.from(new Set(zoneExcerpts.map((excerpt) => excerpt.documentId).filter((value): value is string => !!value)));
+    const ruleDocumentIds = Array.from(new Set(zoneRules.map((rule) => rule.documentId).filter((value): value is string => !!value)));
+    const documentIds = Array.from(new Set([referenceDocumentId, ...excerptDocumentIds, ...ruleDocumentIds].filter((value): value is string => !!value)));
+    const documentMap = new Map(
+      availableDocuments
+        .filter((doc) => documentIds.includes(doc.id))
+        .map((doc) => [doc.id, doc] as const),
+    );
+
+    const ruleIds = zoneRules.map((rule) => rule.id);
+    const relations = ruleIds.length > 0
+      ? await db.select()
+        .from(ruleRelationsTable)
+        .where(
+          or(
+            inArray(ruleRelationsTable.sourceRuleId, ruleIds),
+            inArray(ruleRelationsTable.targetRuleId, ruleIds),
+          )!,
+        )
+      : [];
+    const hydratedRelations = await hydrateRuleRelations(relations);
+
+    const conflicts = await db.select()
+      .from(regulatoryRuleConflictsTable)
+      .where(
+        and(
+          eq(regulatoryRuleConflictsTable.communeId, communeKey),
+          eq(regulatoryRuleConflictsTable.zoneId, zone.id),
+        ),
+      );
+
+    const suggestions = referenceDocumentId
+      ? await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: referenceDocumentId })
+      : { sections: [], rules: [] };
+
+    const articleAnchors = buildZoneArticleAnchors(workspacePages.map((page) => ({
+      pageNumber: page.pageNumber,
+      text: page.text,
+    })));
+    const keywordMatches = buildZoneKeywordMatches({
+      pages: workspacePages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
+      keywords: zone.searchKeywords || [],
+    });
+
+    return res.json({
+      commune: access.targetCommune,
+      communeId: communeKey,
+      zone: {
+        ...zone,
+        referenceDocumentId,
+        referenceStartPage: effectiveStartPage,
+        referenceEndPage: effectiveEndPage,
+      },
+      referenceDocument: referenceDocument
+        ? {
+            id: referenceDocument.id,
+            title: referenceDocument.title,
+            fileName: referenceDocument.fileName,
+            documentType: referenceDocument.documentType,
+            availability: getTownHallDocumentAvailability(referenceDocument),
+          }
+        : null,
+      availableDocuments: availableDocuments.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        fileName: doc.fileName,
+        documentType: doc.documentType,
+        availability: getTownHallDocumentAvailability(doc),
+      })),
+      overlays,
+      themes: themes.map((theme) => ({
+        code: theme.code,
+        label: theme.label,
+        description: theme.description,
+        articleHint: theme.articleHint,
+      })),
+      articleReference: REGULATORY_ARTICLE_REFERENCE,
+      pages: workspacePages.map((page) => ({
+        pageNumber: page.pageNumber,
+        text: page.text,
+        startOffset: page.startOffset,
+        endOffset: page.endOffset,
+      })),
+      articleAnchors,
+      keywordMatches,
+      detectedSections: zoneSections.map((section) => ({
+        id: section.id,
+        zoneCode: section.reviewedZoneCode || section.zoneCode,
+        heading: section.heading,
+        startPage: section.reviewedStartPage ?? section.startPage,
+        endPage: section.reviewedEndPage ?? section.endPage,
+        sourceText: section.sourceText?.slice(0, 1200) || "",
+        reviewStatus: section.reviewStatus,
+        townHallDocumentId: section.townHallDocumentId,
+      })),
+      detectedRules: suggestions.rules
+        .filter((rule) => normalizeConfiguredZoneCode(rule.zoneCode) === normalizedZoneCode)
+        .sort((left, right) => {
+          const leftArticle = Number.parseInt(left.articleCode || "999", 10);
+          const rightArticle = Number.parseInt(right.articleCode || "999", 10);
+          if (leftArticle !== rightArticle) return leftArticle - rightArticle;
+          return (left.sourcePage || Number.MAX_SAFE_INTEGER) - (right.sourcePage || Number.MAX_SAFE_INTEGER);
+        }),
+      excerpts: zoneExcerpts.map((excerpt) => ({
+        ...excerpt,
+        document: documentMap.get(excerpt.documentId) || null,
+        rules: zoneRules.filter((rule) => rule.excerptId === excerpt.id),
+      })),
+      rules: zoneRules.map((rule) => ({
+        ...rule,
+        document: documentMap.get(rule.documentId) || null,
+      })),
+      relations: hydratedRelations,
+      conflicts,
+      workspaceReady: !!referenceDocumentId,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/zone-workspace GET]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 router.delete("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
@@ -3186,6 +3532,64 @@ router.delete("/regulatory-calibration/zones/:id", async (req: AuthRequest, res)
     return res.json({ success: true });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zones DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/regulatory-calibration/rebuild", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
+    const docs = await db.select({
+      id: townHallDocumentsTable.id,
+      title: townHallDocumentsTable.title,
+      fileName: townHallDocumentsTable.fileName,
+      rawText: townHallDocumentsTable.rawText,
+      documentType: townHallDocumentsTable.documentType,
+      category: townHallDocumentsTable.category,
+      subCategory: townHallDocumentsTable.subCategory,
+    }).from(townHallDocumentsTable)
+      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, access.targetCommune.toLowerCase()))
+      .orderBy(desc(townHallDocumentsTable.createdAt));
+
+    let processedDocumentCount = 0;
+    for (const doc of docs) {
+      if (!hasUsableTownHallText(doc.rawText)) continue;
+
+      const classification = resolveTownHallClassification({
+        rawText: doc.rawText,
+        fileName: doc.title || doc.fileName || "document",
+        category: doc.category,
+        subCategory: doc.subCategory,
+        documentType: doc.documentType,
+      });
+      if (!["plu_reglement", "plu_annexe"].includes(classification.canonicalType)) continue;
+
+      processedDocumentCount += 1;
+      await ensureCalibrationZonesForCommune({
+        communeKey,
+        communeAliases,
+        rawText: doc.rawText,
+        sourceName: doc.title || doc.fileName || "document",
+        sourceType: doc.documentType,
+        referenceDocumentId: doc.id,
+        userId: req.user!.userId,
+      });
+    }
+
+    const zoneCount = await db.select({ id: regulatoryCalibrationZonesTable.id })
+      .from(regulatoryCalibrationZonesTable)
+      .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases));
+
+    return res.json({
+      success: true,
+      processedDocumentCount,
+      zoneCount: zoneCount.length,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/rebuild POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -4372,6 +4776,7 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
       id: regulatoryZoneSectionsTable.id,
       municipalityId: regulatoryZoneSectionsTable.municipalityId,
       zoneCode: regulatoryZoneSectionsTable.zoneCode,
+      heading: regulatoryZoneSectionsTable.heading,
       reviewedZoneCode: regulatoryZoneSectionsTable.reviewedZoneCode,
       reviewedStartPage: regulatoryZoneSectionsTable.reviewedStartPage,
       reviewedEndPage: regulatoryZoneSectionsTable.reviewedEndPage,
@@ -4391,6 +4796,7 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
     if (!access.ok) {
       return res.status(access.status).json(access.error);
     }
+    const { communeAliases, communeKey } = await resolveCommuneAliases(access.targetCommune);
 
     const allowedStatuses = new Set(["auto", "validated", "to_review", "rejected"]);
     const nextStatus = allowedStatuses.has(String(reviewStatus || "")) ? String(reviewStatus) : "validated";
@@ -4489,6 +4895,62 @@ router.post("/plu-zone-reviews/:id/review", async (req: AuthRequest, res) => {
           updatedAt: new Date(),
         })
         .where(relatedUrbanRuleFilter);
+
+      if (nextStatus === "validated" && nextEffectiveZoneCode) {
+        const [existingZone] = await tx.select({
+          id: regulatoryCalibrationZonesTable.id,
+        }).from(regulatoryCalibrationZonesTable)
+          .where(
+            and(
+              buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases),
+              eq(regulatoryCalibrationZonesTable.zoneCode, nextEffectiveZoneCode),
+            ),
+          )
+          .limit(1);
+
+        const nextReferenceStartPage =
+          reviewedStartPage === undefined
+            ? section.reviewedStartPage ?? null
+            : Number.isFinite(Number(reviewedStartPage))
+              ? Number(reviewedStartPage)
+              : null;
+        const nextReferenceEndPage =
+          reviewedEndPage === undefined
+            ? section.reviewedEndPage ?? null
+            : Number.isFinite(Number(reviewedEndPage))
+              ? Number(reviewedEndPage)
+              : null;
+
+        if (existingZone) {
+          await tx.update(regulatoryCalibrationZonesTable)
+            .set({
+              parentZoneCode: nextReviewedParentZoneCode,
+              guidanceNotes: sql`coalesce(${regulatoryCalibrationZonesTable.guidanceNotes}, ${section.heading})`,
+              referenceDocumentId: section.townHallDocumentId || null,
+              referenceStartPage: nextReferenceStartPage,
+              referenceEndPage: nextReferenceEndPage,
+              isActive: true,
+              updatedBy: req.user!.userId,
+              updatedAt: new Date(),
+            })
+            .where(eq(regulatoryCalibrationZonesTable.id, existingZone.id));
+        } else {
+          await tx.insert(regulatoryCalibrationZonesTable).values({
+            communeId: communeKey,
+            zoneCode: nextEffectiveZoneCode,
+            zoneLabel: nextEffectiveZoneCode ? `Zone ${nextEffectiveZoneCode}` : section.heading,
+            parentZoneCode: nextReviewedParentZoneCode,
+            guidanceNotes: section.heading || null,
+            referenceDocumentId: section.townHallDocumentId || null,
+            referenceStartPage: nextReferenceStartPage,
+            referenceEndPage: nextReferenceEndPage,
+            displayOrder: 0,
+            isActive: true,
+            createdBy: req.user!.userId,
+            updatedBy: req.user!.userId,
+          });
+        }
+      }
     });
 
     return res.json({ success: true });
@@ -5075,6 +5537,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  rawText,
                  sourceName: file.originalname,
                  sourceType: classification.resolved.documentType,
+                 referenceDocumentId: doc.id,
                  userId: req.user!.userId,
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
@@ -5456,6 +5919,7 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
       rawText,
       sourceName,
       sourceType: doc.documentType,
+      referenceDocumentId: doc.id,
       userId: req.user!.userId,
     });
 
