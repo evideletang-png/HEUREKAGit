@@ -5979,25 +5979,31 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
-    // 2. Locate the file in physical storage or restore it from persistent DB storage
-    const source = await ensureTownHallDocumentPersistentSource(id, doc.fileName);
+    const diskPath = resolveTownHallDocumentPath(id, doc.fileName);
+    if (diskPath && fs.existsSync(diskPath)) {
+      if (!doc.hasStoredBlob) {
+        await backfillTownHallDocumentBlobFromDisk({
+          documentId: id,
+          filePath: diskPath,
+          mimeType: doc.mimeType || "application/pdf",
+        });
+      }
 
-    if (!source.filePath || !fs.existsSync(source.filePath)) {
-      console.error(`[mairie/view] Physical file missing and no persistent fallback found for: ${doc.fileName}`);
-      return res.status(404).json({ error: "FILE_NOT_FOUND" });
+      res.setHeader('Content-Type', doc.mimeType || 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+      return fs.createReadStream(diskPath).pipe(res);
     }
 
-    if (!doc.hasStoredBlob) {
-      await backfillTownHallDocumentBlobFromDisk({
-        documentId: id,
-        filePath: source.filePath,
-        mimeType: doc.mimeType || source.mimeType || "application/pdf",
-      });
+    const storedBlob = await loadTownHallDocumentBlob(id);
+    if (storedBlob?.buffer) {
+      res.setHeader('Content-Type', doc.mimeType || storedBlob.mimeType || 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('Content-Length', String(storedBlob.fileSize || storedBlob.buffer.length));
+      return res.end(storedBlob.buffer);
     }
 
-    res.setHeader('Content-Type', doc.mimeType || source.mimeType || 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline');
-    return fs.createReadStream(source.filePath).pipe(res);
+    console.error(`[mairie/view] Physical file missing and persistent blob unavailable for: ${doc.fileName}`);
+    return res.status(404).json({ error: "FILE_NOT_FOUND", message: "Le PDF source n'est disponible ni sur le disque ni dans le stockage persistant." });
   } catch (err) {
     console.error(`[mairie/view] Critical error for ID ${req.params.id}:`, err);
     return res.status(500).json({ error: "VIEW_FAILED" });

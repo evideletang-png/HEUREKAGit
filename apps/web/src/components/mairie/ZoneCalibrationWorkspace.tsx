@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -254,6 +254,7 @@ export function ZoneCalibrationWorkspace({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const selectionEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const [selection, setSelection] = useState<{ text: string; pageNumber: number } | null>(null);
   const [selectionArticleCode, setSelectionArticleCode] = useState("");
   const [selectionLabel, setSelectionLabel] = useState("");
@@ -439,6 +440,21 @@ export function ZoneCalibrationWorkspace({
     }));
   };
 
+  const applySelectionCandidate = (candidate: {
+    text: string;
+    pageNumber: number;
+    articleCode?: string | null;
+    label?: string | null;
+  }) => {
+    setSelection({ text: candidate.text, pageNumber: candidate.pageNumber });
+    setSelectionArticleCode(candidate.articleCode || "");
+    setSelectionLabel(candidate.label || candidate.text.slice(0, 80));
+    requestAnimationFrame(() => {
+      selectionEditorRef.current?.focus();
+      selectionEditorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  };
+
   if (isLoading) {
     return (
       <Card className="border-primary/10 shadow-sm">
@@ -598,9 +614,12 @@ export function ZoneCalibrationWorkspace({
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setSelection({ text: anchor.snippet || anchor.label, pageNumber: anchor.pageNumber });
-                            setSelectionArticleCode(anchor.articleCode);
-                            setSelectionLabel(anchor.label);
+                            applySelectionCandidate({
+                              text: anchor.snippet || anchor.label,
+                              pageNumber: anchor.pageNumber,
+                              articleCode: anchor.articleCode,
+                              label: anchor.label,
+                            });
                           }}
                         >
                           Utiliser
@@ -633,9 +652,12 @@ export function ZoneCalibrationWorkspace({
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setSelection({ text: match.snippet, pageNumber: match.pageNumber });
-                            setSelectionArticleCode(match.articleCode || "");
-                            setSelectionLabel(match.keyword);
+                            applySelectionCandidate({
+                              text: match.snippet,
+                              pageNumber: match.pageNumber,
+                              articleCode: match.articleCode || "",
+                              label: match.keyword,
+                            });
                           }}
                         >
                           Utiliser
@@ -698,7 +720,16 @@ export function ZoneCalibrationWorkspace({
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="rounded-xl border bg-muted/20 p-3 text-sm">
-                {selection ? selection.text : "Sélectionne directement un extrait dans le PDF ou utilise un texte retrouvé à gauche."}
+                {selection ? (
+                  <Textarea
+                    ref={selectionEditorRef}
+                    value={selection.text}
+                    onChange={(event) => setSelection((current) => current ? { ...current, text: event.target.value } : current)}
+                    rows={8}
+                    placeholder="Le texte de l’extrait peut être corrigé, complété ou simplifié ici avant enregistrement."
+                    className="min-h-[180px] resize-y border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+                  />
+                ) : "Sélectionne directement un extrait dans le PDF ou utilise un texte retrouvé à gauche."}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Select value={selectionArticleCode || "__none__"} onValueChange={(value) => setSelectionArticleCode(value === "__none__" ? "" : value)}>

@@ -30,6 +30,9 @@ export function ZonePdfViewer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [viewerWidth, setViewerWidth] = useState(820);
   const [pdfUnavailable, setPdfUnavailable] = useState(false);
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -50,11 +53,59 @@ export function ZonePdfViewer({
     [pageNumbers],
   );
 
-  if (pdfUnavailable) {
+  useEffect(() => {
+    const controller = new AbortController();
+    setPdfBytes(null);
+    setPdfError(null);
+    setPdfUnavailable(false);
+    setPdfLoading(true);
+
+    fetch(`/api/mairie/documents/${documentId}/view`, {
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.message || payload?.error || "Impossible de récupérer le PDF.");
+        }
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        if (bytes.length === 0) {
+          throw new Error("Le PDF retourné est vide.");
+        }
+        setPdfBytes(bytes);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setPdfUnavailable(true);
+        setPdfError(error instanceof Error ? error.message : "Impossible d’ouvrir le PDF source.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setPdfLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [documentId]);
+
+  if (pdfLoading) {
     return (
       <div ref={containerRef} className={cn("rounded-2xl border bg-muted/15 p-4", className)}>
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Le PDF source est indisponible. Affichage de secours du texte extrait borné à cette zone.
+        <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Chargement du PDF…
+        </div>
+      </div>
+    );
+  }
+
+  if (pdfUnavailable || !pdfBytes) {
+    return (
+      <div ref={containerRef} className={cn("rounded-2xl border bg-muted/15 p-4", className)}>
+        <div className="mb-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {pdfError || "Impossible d’ouvrir le PDF source."}
         </div>
         <div className="space-y-4">
           {fallbackPages.length > 0 ? fallbackPages.map((page) => (
@@ -87,8 +138,11 @@ export function ZonePdfViewer({
   return (
     <div ref={containerRef} className={cn("rounded-2xl border bg-muted/15 p-4", className)}>
       <Document
-        file={`/api/mairie/documents/${documentId}/view`}
-        onLoadError={() => setPdfUnavailable(true)}
+        file={{ data: pdfBytes }}
+        onLoadError={(error) => {
+          setPdfUnavailable(true);
+          setPdfError(error instanceof Error ? error.message : "Impossible d’ouvrir le PDF source.");
+        }}
         loading={(
           <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
