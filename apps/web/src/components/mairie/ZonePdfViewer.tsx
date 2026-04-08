@@ -30,7 +30,7 @@ export function ZonePdfViewer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [viewerWidth, setViewerWidth] = useState(820);
   const [pdfUnavailable, setPdfUnavailable] = useState(false);
-  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
+  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
@@ -55,7 +55,11 @@ export function ZonePdfViewer({
 
   useEffect(() => {
     const controller = new AbortController();
-    setPdfBytes(null);
+    let createdUrl: string | null = null;
+    setPdfObjectUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
     setPdfError(null);
     setPdfUnavailable(false);
     setPdfLoading(true);
@@ -70,11 +74,12 @@ export function ZonePdfViewer({
           throw new Error(payload?.message || payload?.error || "Impossible de récupérer le PDF.");
         }
         const buffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        if (bytes.length === 0) {
+        if (buffer.byteLength === 0) {
           throw new Error("Le PDF retourné est vide.");
         }
-        setPdfBytes(bytes);
+        const mimeType = response.headers.get("content-type") || "application/pdf";
+        createdUrl = URL.createObjectURL(new Blob([buffer], { type: mimeType }));
+        setPdfObjectUrl(createdUrl);
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -87,7 +92,10 @@ export function ZonePdfViewer({
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
   }, [documentId]);
 
   if (pdfLoading) {
@@ -101,7 +109,7 @@ export function ZonePdfViewer({
     );
   }
 
-  if (pdfUnavailable || !pdfBytes) {
+  if (pdfUnavailable || !pdfObjectUrl) {
     return (
       <div ref={containerRef} className={cn("rounded-2xl border bg-muted/15 p-4", className)}>
         <div className="mb-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -138,7 +146,7 @@ export function ZonePdfViewer({
   return (
     <div ref={containerRef} className={cn("rounded-2xl border bg-muted/15 p-4", className)}>
       <Document
-        file={{ data: pdfBytes }}
+        file={pdfObjectUrl}
         onLoadError={(error) => {
           setPdfUnavailable(true);
           setPdfError(error instanceof Error ? error.message : "Impossible d’ouvrir le PDF source.");
