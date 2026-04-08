@@ -394,10 +394,15 @@ export function ZoneCalibrationWorkspace({
         ruleDraft.interpretationNote?.trim(),
         visualSupportNote.trim() ? `Repère visuel / croquis : ${visualSupportNote.trim()}` : "",
       ].filter(Boolean);
+      const normalizedArticleCode = selectionArticleCode.trim() || null;
+      const normalizedAnchorLabel = normalizedArticleCode
+        ? `Article ${normalizedArticleCode}`
+        : (selectionLabel.trim() || null);
       return apiFetch(`/api/mairie/regulatory-calibration/excerpts/${excerptId}/rules`, {
         method: "POST",
         body: JSON.stringify({
           commune: currentCommune,
+          articleCode: normalizedArticleCode,
           themeCode: ruleDraft.themeCode,
           ruleLabel: ruleDraft.ruleLabel,
           operator: ruleDraft.operator,
@@ -410,7 +415,7 @@ export function ZoneCalibrationWorkspace({
           proceduralEffect: "none",
           applicabilityScope: "main_zone",
           ruleAnchorType: "article",
-          ruleAnchorLabel: selectionArticleCode || null,
+          ruleAnchorLabel: normalizedAnchorLabel,
           conflictResolutionStatus: "none",
         }),
       });

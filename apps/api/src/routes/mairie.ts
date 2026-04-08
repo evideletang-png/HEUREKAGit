@@ -4238,13 +4238,27 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       return res.status(400).json({ error: "BAD_REQUEST", message: "Libellé de règle obligatoire." });
     }
 
+    const normalizedArticleCode =
+      typeof articleCode === "string" && articleCode.trim()
+        ? articleCode.trim()
+        : (excerpt.articleCode || inferArticleCodeFromCalibrationText(
+          typeof ruleAnchorLabel === "string" && ruleAnchorLabel.trim()
+            ? ruleAnchorLabel
+            : `${ruleLabel}\n${excerpt.sourceText || ""}`,
+        ) || "manual");
+
+    const normalizedRuleAnchorLabel =
+      typeof ruleAnchorLabel === "string" && ruleAnchorLabel.trim()
+        ? ruleAnchorLabel.trim()
+        : (buildReviewedSourceArticle(normalizedArticleCode) || ruleLabel.trim());
+
     const [rule] = await db.insert(indexedRegulatoryRulesTable).values({
       communeId: excerpt.communeId,
       zoneId: excerpt.zoneId,
       overlayId: excerpt.overlayId,
       documentId: excerpt.documentId,
       excerptId: excerpt.id,
-      articleCode: typeof articleCode === "string" && articleCode.trim() ? articleCode.trim() : excerpt.articleCode || "manual",
+      articleCode: normalizedArticleCode,
       themeCode: themeCode.trim(),
       ruleLabel: ruleLabel.trim(),
       operator: typeof operator === "string" ? operator.trim() || null : null,
@@ -4259,7 +4273,7 @@ router.post("/regulatory-calibration/excerpts/:id/rules", async (req: AuthReques
       proceduralEffect: typeof proceduralEffect === "string" && proceduralEffect.trim() ? proceduralEffect.trim() : "none",
       applicabilityScope: typeof applicabilityScope === "string" && applicabilityScope.trim() ? applicabilityScope.trim() : "main_zone",
       ruleAnchorType: typeof ruleAnchorType === "string" && ruleAnchorType.trim() ? ruleAnchorType.trim() : "article",
-      ruleAnchorLabel: typeof ruleAnchorLabel === "string" ? ruleAnchorLabel.trim() || null : null,
+      ruleAnchorLabel: normalizedRuleAnchorLabel,
       conflictResolutionStatus: typeof conflictResolutionStatus === "string" && conflictResolutionStatus.trim() ? conflictResolutionStatus.trim() : "none",
       sourceText: excerpt.sourceText,
       sourcePage: excerpt.sourcePage,
@@ -4409,8 +4423,21 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
     const allowedStatuses = new Set(["draft", "in_review", "validated", "published"]);
     const nextStatus = allowedStatuses.has(String(req.body.status || "")) ? String(req.body.status) : "draft";
 
+    const inferredArticleCode =
+      (typeof rule.articleCode === "string" && rule.articleCode.trim() && rule.articleCode.trim().toLowerCase() !== "manual")
+        ? rule.articleCode.trim()
+        : (inferArticleCodeFromCalibrationText(rule.ruleAnchorLabel || rule.ruleLabel || rule.sourceText) || null);
+    const inferredRuleAnchorLabel =
+      (typeof rule.ruleAnchorLabel === "string" && rule.ruleAnchorLabel.trim())
+        ? rule.ruleAnchorLabel.trim()
+        : (buildReviewedSourceArticle(inferredArticleCode) || rule.ruleLabel || null);
+
     if (nextStatus === "published") {
-      const publicationCheck = validateIndexedRuleForPublication(rule);
+      const publicationCheck = validateIndexedRuleForPublication({
+        ...rule,
+        articleCode: inferredArticleCode || rule.articleCode,
+        ruleAnchorLabel: inferredRuleAnchorLabel,
+      });
       if (!publicationCheck.ok) {
         return res.status(400).json({ error: "PUBLISH_VALIDATION_FAILED", message: publicationCheck.message });
       }
@@ -4418,6 +4445,9 @@ router.post("/regulatory-calibration/rules/:id/status", async (req: AuthRequest,
 
     const [updated] = await db.update(indexedRegulatoryRulesTable)
       .set({
+        articleCode: inferredArticleCode || rule.articleCode,
+        ruleAnchorType: inferredRuleAnchorLabel ? (rule.ruleAnchorType || "article") : rule.ruleAnchorType,
+        ruleAnchorLabel: inferredRuleAnchorLabel,
         status: nextStatus,
         publishedAt: nextStatus === "published" ? new Date() : null,
         publishedBy: nextStatus === "published" ? req.user!.userId : null,
