@@ -59,6 +59,12 @@ type BuildabilitySourceDetail = {
   linkedRuleCount: number;
   requiresCrossDocumentResolution: boolean;
   relationResolutionNote: string | null;
+  visualCapture: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  visualSupportNote: string | null;
 };
 
 type BuildabilitySourceMeta = {
@@ -166,6 +172,8 @@ async function buildBuildabilitySourceDetails(
       linkedRuleCount: "linkedRuleCount" in rule ? Number(rule.linkedRuleCount || 0) : 0,
       requiresCrossDocumentResolution: "requiresCrossDocumentResolution" in rule ? !!rule.requiresCrossDocumentResolution : false,
       relationResolutionNote: "relationResolutionNote" in rule ? rule.relationResolutionNote ?? null : null,
+      visualCapture: "visualCapture" in rule ? rule.visualCapture ?? null : null,
+      visualSupportNote: "visualSupportNote" in rule ? rule.visualSupportNote ?? null : null,
     };
   };
 

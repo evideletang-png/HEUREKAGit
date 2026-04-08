@@ -92,6 +92,12 @@ export type PublishedIndexedRule = {
   sourceDocumentId: string | null;
   sourceDocumentKind: string | null;
   sourceDocumentName: string | null;
+  visualCapture: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  visualSupportNote: string | null;
 };
 export type StructuredUrbanRuleSource = CanonicalUrbanRule | PublishedIndexedRule;
 
@@ -204,10 +210,14 @@ function toPublishedIndexedRule(row: {
   status: string;
   documentId: string | null;
   documentName: string | null;
+  rawSuggestion?: unknown;
 }): PublishedIndexedRule {
   const ruleFamily = mapPublishedRuleFamily(row.themeCode, row.articleCode);
   const ruleValueType = mapPublishedRuleValueType(row.operator, row.valueNumeric, row.valueText);
   const sourceArticle = row.articleCode && row.articleCode.toLowerCase() !== "manual" ? `Article ${row.articleCode}` : null;
+  const rawSuggestion = row.rawSuggestion && typeof row.rawSuggestion === "object"
+    ? row.rawSuggestion as Record<string, unknown>
+    : null;
 
   return {
     id: row.id,
@@ -250,6 +260,12 @@ function toPublishedIndexedRule(row: {
     sourceDocumentId: row.documentId,
     sourceDocumentKind: row.documentId ? "town_hall_document" : null,
     sourceDocumentName: row.documentName,
+    visualCapture: rawSuggestion?.visualCapture
+      ? rawSuggestion.visualCapture as PublishedIndexedRule["visualCapture"]
+      : null,
+    visualSupportNote: typeof rawSuggestion?.visualSupportNote === "string"
+      ? rawSuggestion.visualSupportNote
+      : null,
   };
 }
 
@@ -820,6 +836,7 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
     confidenceScore: indexedRegulatoryRulesTable.confidenceScore,
     conflictFlag: indexedRegulatoryRulesTable.conflictFlag,
     status: indexedRegulatoryRulesTable.status,
+    rawSuggestion: indexedRegulatoryRulesTable.rawSuggestion,
     documentId: indexedRegulatoryRulesTable.documentId,
     documentName: townHallDocumentsTable.title,
     documentFileName: townHallDocumentsTable.fileName,
@@ -871,6 +888,7 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
           confidenceScore: indexedRegulatoryRulesTable.confidenceScore,
           conflictFlag: indexedRegulatoryRulesTable.conflictFlag,
           status: indexedRegulatoryRulesTable.status,
+          rawSuggestion: indexedRegulatoryRulesTable.rawSuggestion,
           zoneCode: regulatoryCalibrationZonesTable.zoneCode,
           overlayCode: regulatoryOverlaysTable.overlayCode,
           overlayLabel: regulatoryOverlaysTable.overlayLabel,
@@ -1012,6 +1030,8 @@ export function buildParsedRulesFromUrbanRules(rules: StructuredUrbanRuleSource[
       resolution_status: "resolutionStatus" in rule ? rule.resolutionStatus : null,
       linked_rule_count: "linkedRuleCount" in rule ? rule.linkedRuleCount : 0,
       relation_resolution_note: "relationResolutionNote" in rule ? rule.relationResolutionNote : null,
+      visual_capture: "visualCapture" in rule ? rule.visualCapture ?? null : null,
+      visual_support_note: "visualSupportNote" in rule ? rule.visualSupportNote ?? null : null,
       relations: "relations" in rule ? rule.relations : [],
     },
   }));

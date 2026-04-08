@@ -5081,6 +5081,7 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
       requiresCrossDocumentResolution: indexedRegulatoryRulesTable.requiresCrossDocumentResolution,
       resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
       linkedRuleCount: indexedRegulatoryRulesTable.linkedRuleCount,
+      rawSuggestion: indexedRegulatoryRulesTable.rawSuggestion,
       documentTitle: townHallDocumentsTable.title,
     })
       .from(indexedRegulatoryRulesTable)
@@ -5132,6 +5133,14 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
       rules: rules.map((rule) => ({
         ...rule,
         themeLabel: themeMap.get(rule.themeCode)?.label || rule.themeCode,
+        visualCapture:
+          rule.rawSuggestion && typeof rule.rawSuggestion === "object" && (rule.rawSuggestion as Record<string, unknown>).visualCapture
+            ? (rule.rawSuggestion as Record<string, unknown>).visualCapture
+            : null,
+        visualSupportNote:
+          rule.rawSuggestion && typeof rule.rawSuggestion === "object" && typeof (rule.rawSuggestion as Record<string, unknown>).visualSupportNote === "string"
+            ? String((rule.rawSuggestion as Record<string, unknown>).visualSupportNote)
+            : null,
       })),
       relations,
       conflicts,

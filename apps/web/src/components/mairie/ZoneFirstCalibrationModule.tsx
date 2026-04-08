@@ -130,6 +130,12 @@ type PublishedLibraryResponse = {
     proceduralEffect: string;
     requiresCrossDocumentResolution: boolean;
     resolutionStatus: string;
+    visualCapture: {
+      pageNumber: number;
+      previewDataUrl: string;
+      box?: { x: number; y: number; width: number; height: number };
+    } | null;
+    visualSupportNote: string | null;
   }>;
 };
 
@@ -836,6 +842,22 @@ export function ZoneFirstCalibrationModule({
                               : rule.valueText || "Valeur non structurée"}
                           </p>
                           {rule.conditionText && <p className="mt-1 text-xs text-muted-foreground">{rule.conditionText}</p>}
+                          {rule.visualCapture ? (
+                            <div className="mt-2 rounded-xl border bg-background/70 p-2">
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                                <Badge variant="outline">Preuve graphique</Badge>
+                                <span>page {rule.visualCapture.pageNumber}</span>
+                              </div>
+                              <img
+                                src={rule.visualCapture.previewDataUrl}
+                                alt={`Preuve graphique page ${rule.visualCapture.pageNumber}`}
+                                className="mt-2 max-h-32 rounded-lg border bg-white object-contain"
+                              />
+                              {rule.visualSupportNote ? (
+                                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{rule.visualSupportNote}</p>
+                              ) : null}
+                            </div>
+                          ) : null}
                           <p className="mt-2 text-xs text-muted-foreground">
                             {rule.documentTitle ? `${rule.documentTitle} · ` : ""}
                             page {rule.sourcePage}

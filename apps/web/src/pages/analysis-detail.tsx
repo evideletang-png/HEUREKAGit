@@ -136,6 +136,12 @@ type RegulatoryInsight = {
   confidence: AIConfidence | string;
   relevanceScore: number;
   relevanceReason?: string;
+  visualCapture?: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  visualSupportNote?: string;
 };
 
 type FieldEvidenceState = {
@@ -145,6 +151,12 @@ type FieldEvidenceState = {
   helperText: string;
   sourceLabel?: string | null;
   sourceExcerpt?: string | null;
+  visualCapture?: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  visualSupportNote?: string | null;
 };
 
 type BuildabilitySourceDetail = {
@@ -165,6 +177,12 @@ type BuildabilitySourceDetail = {
   linkedRuleCount: number;
   requiresCrossDocumentResolution: boolean;
   relationResolutionNote: string | null;
+  visualCapture: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  visualSupportNote: string | null;
 };
 
 type BuildabilitySourceMeta = {
@@ -225,6 +243,8 @@ function buildEvidenceState({
       helperText: `${missingHelper}${relationHint}`.trim(),
       sourceLabel: null,
       sourceExcerpt: null,
+      visualCapture: null,
+      visualSupportNote: null,
     };
   }
 
@@ -236,6 +256,8 @@ function buildEvidenceState({
       helperText: `${defaultHelper}${relationHint}`.trim(),
       sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
       sourceExcerpt: sourceDetail?.sourceExcerpt || null,
+      visualCapture: sourceDetail?.visualCapture || null,
+      visualSupportNote: sourceDetail?.visualSupportNote || null,
     };
   }
 
@@ -247,6 +269,8 @@ function buildEvidenceState({
       helperText: `${explicitHelper}${relationHint}`.trim(),
       sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
       sourceExcerpt: sourceDetail?.sourceExcerpt || null,
+      visualCapture: sourceDetail?.visualCapture || null,
+      visualSupportNote: sourceDetail?.visualSupportNote || null,
     };
   }
 
@@ -257,6 +281,8 @@ function buildEvidenceState({
     helperText: `${derivedHelper}${relationHint}`.trim(),
     sourceLabel: formatBuildabilitySourceDetail(sourceDetail),
     sourceExcerpt: sourceDetail?.sourceExcerpt || null,
+    visualCapture: sourceDetail?.visualCapture || null,
+    visualSupportNote: sourceDetail?.visualSupportNote || null,
   };
 }
 
@@ -274,6 +300,27 @@ function formatBuildabilitySourceDetail(sourceDetail?: BuildabilitySourceDetail 
 
   if (parts.length === 0) return null;
   return `Source : ${parts.join(" · ")}`;
+}
+
+function renderBuildabilityVisualProof(evidence: FieldEvidenceState) {
+  if (!evidence.visualCapture) return null;
+
+  return (
+    <div className="mt-2 w-full rounded-lg border bg-background/80 p-2 text-left">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <Badge variant="outline">Preuve graphique</Badge>
+        <span>page {evidence.visualCapture.pageNumber}</span>
+      </div>
+      <img
+        src={evidence.visualCapture.previewDataUrl}
+        alt={`Preuve graphique page ${evidence.visualCapture.pageNumber}`}
+        className="mt-2 max-h-28 w-full rounded-md border bg-white object-contain"
+      />
+      {evidence.visualSupportNote ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{evidence.visualSupportNote}</p>
+      ) : null}
+    </div>
+  );
 }
 
 function formatBuildabilityConfidenceHint(meta?: BuildabilitySourceMeta) {
@@ -647,6 +694,8 @@ export default function AnalysisDetailPage() {
           confidence: article.confidence || "unknown",
           relevanceScore: Number(extra?.relevanceScore || 0),
           relevanceReason: typeof extra?.relevanceReason === "string" ? extra.relevanceReason : undefined,
+          visualCapture: extra?.visual_capture || null,
+          visualSupportNote: typeof extra?.visual_support_note === "string" ? extra.visual_support_note : undefined,
         };
       })
       .sort((left: RegulatoryInsight, right: RegulatoryInsight) => {
@@ -1611,6 +1660,22 @@ export default function AnalysisDetailPage() {
                            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg h-full max-h-96 overflow-y-auto font-mono text-xs text-gray-600">
                              {insight.sourceText}
                            </div>
+                           {insight.visualCapture ? (
+                             <div className="mt-3 rounded-lg border bg-background p-3">
+                               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                                 <Badge variant="outline">Preuve graphique</Badge>
+                                 <span>page {insight.visualCapture.pageNumber}</span>
+                               </div>
+                               <img
+                                 src={insight.visualCapture.previewDataUrl}
+                                 alt={`Preuve graphique page ${insight.visualCapture.pageNumber}`}
+                                 className="mt-3 max-h-48 w-full rounded-md border bg-white object-contain"
+                               />
+                               {insight.visualSupportNote ? (
+                                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{insight.visualSupportNote}</p>
+                               ) : null}
+                             </div>
+                           ) : null}
                          </div>
                        </div>
                       </CardContent>
@@ -1673,6 +1738,7 @@ export default function AnalysisDetailPage() {
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{footprintEvidence.helperText}</p>
                         {footprintEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{footprintEvidence.sourceLabel}</p>}
                         {footprintEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{footprintEvidence.sourceExcerpt}</p>}
+                        {renderBuildabilityVisualProof(footprintEvidence)}
 	                    </div>
 	                    <div className="p-6 flex flex-col items-center text-center">
 	                      <p className="text-sm text-muted-foreground mb-2">Droit à bâtir restant</p>
@@ -1681,6 +1747,7 @@ export default function AnalysisDetailPage() {
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{remainingFootprintEvidence.helperText}</p>
                         {remainingFootprintEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{remainingFootprintEvidence.sourceLabel}</p>}
                         {remainingFootprintEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{remainingFootprintEvidence.sourceExcerpt}</p>}
+                        {renderBuildabilityVisualProof(remainingFootprintEvidence)}
 	                    </div>
 	                    <div className="p-6 flex flex-col items-center text-center">
 	                      <p className="text-sm text-muted-foreground mb-2">Hauteur Max.</p>
@@ -1689,6 +1756,7 @@ export default function AnalysisDetailPage() {
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{heightEvidence.helperText}</p>
                         {heightEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{heightEvidence.sourceLabel}</p>}
                         {heightEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{heightEvidence.sourceExcerpt}</p>}
+                        {renderBuildabilityVisualProof(heightEvidence)}
 	                    </div>
 	                    <div className="p-6 flex flex-col items-center text-center">
 	                      <p className="text-sm text-muted-foreground mb-2">Pleine Terre</p>
@@ -1697,6 +1765,7 @@ export default function AnalysisDetailPage() {
                         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{greenSpaceEvidence.helperText}</p>
                         {greenSpaceEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{greenSpaceEvidence.sourceLabel}</p>}
                         {greenSpaceEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{greenSpaceEvidence.sourceExcerpt}</p>}
+                        {renderBuildabilityVisualProof(greenSpaceEvidence)}
 	                    </div>
 	                  </div>
 	                  <div className="p-6 bg-muted/30 border-t border-border">
@@ -1709,6 +1778,7 @@ export default function AnalysisDetailPage() {
                           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setbackRoadEvidence.helperText}</p>
                           {setbackRoadEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{setbackRoadEvidence.sourceLabel}</p>}
                           {setbackRoadEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{setbackRoadEvidence.sourceExcerpt}</p>}
+                          {renderBuildabilityVisualProof(setbackRoadEvidence)}
 	                      </div>
 	                      <div className="bg-background p-4 rounded-lg border border-border shadow-sm">
 	                        <span className="block text-sm text-muted-foreground mb-1">Recul limites séparatives (Art. 7)</span>
@@ -1717,6 +1787,7 @@ export default function AnalysisDetailPage() {
                           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setbackBoundaryEvidence.helperText}</p>
                           {setbackBoundaryEvidence.sourceLabel && <p className="mt-2 text-[11px] font-medium text-primary/80">{setbackBoundaryEvidence.sourceLabel}</p>}
                           {setbackBoundaryEvidence.sourceExcerpt && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/90 line-clamp-3">{setbackBoundaryEvidence.sourceExcerpt}</p>}
+                          {renderBuildabilityVisualProof(setbackBoundaryEvidence)}
 	                      </div>
 	                    </div>
 	                  </div>
