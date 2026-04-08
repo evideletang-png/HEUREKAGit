@@ -4282,6 +4282,7 @@ router.get("/plu-zone-reviews", async (req: AuthRequest, res) => {
         heading: section.heading,
         startPage: section.reviewedStartPage ?? section.startPage,
         endPage: section.reviewedEndPage ?? section.endPage,
+        sourceText: section.sourceText || null,
         isSubZone: section.reviewedIsSubZone ?? section.isSubZone,
         documentType: section.documentType,
         sourceAuthority: section.sourceAuthority,

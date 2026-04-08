@@ -72,6 +72,7 @@ type PluZoneReviewSection = {
   heading: string;
   startPage: number | null;
   endPage: number | null;
+  sourceText: string | null;
   isSubZone: boolean;
   documentType: string | null;
   sourceAuthority: number;
@@ -193,9 +194,49 @@ type CalibrationZoneHints = {
     id: string;
     zoneCode: string;
     zoneLabel: string | null;
+    guidanceNotes: string | null;
     searchKeywords: string[];
+    referenceStartPage: number | null;
+    referenceEndPage: number | null;
   }>;
 };
+
+function normalizeFilterText(raw: string) {
+  return raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function inferArticleFromExcerpt(raw: string) {
+  const match = raw.match(/\b(?:ARTICLE|ART\.?)\s*(\d{1,2})\b/i);
+  return match?.[1] || null;
+}
+
+function extractKeywordHits(sourceText: string | null | undefined, keywords: string[]) {
+  if (!sourceText || keywords.length === 0) return [];
+
+  const normalizedKeywords = keywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length > 0);
+  if (normalizedKeywords.length === 0) return [];
+
+  const lines = sourceText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return normalizedKeywords.flatMap((keyword) => {
+    const normalizedKeyword = normalizeFilterText(keyword);
+    return lines.flatMap((line, index) => {
+      if (!normalizeFilterText(line).includes(normalizedKeyword)) return [];
+      const window = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 2));
+      const snippet = window.join(" ").replace(/\s+/g, " ").trim();
+      return [{
+        keyword,
+        snippet,
+        articleCode: inferArticleFromExcerpt(snippet),
+      }];
+    });
+  }).filter((hit, index, all) => all.findIndex((candidate) => candidate.keyword === hit.keyword && candidate.snippet === hit.snippet) === index);
+}
 
 function getTextQualityBadgeMeta(label?: string) {
   switch (label) {
@@ -1566,10 +1607,10 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const allDocs = pluDocsData?.documents ?? [];
   const knowledgeConflicts = knowledgeSummaryData?.conflicts ?? [];
   const zoneReviewSections = zoneReviewsData?.sections ?? [];
-  const zoneKeywordMap = useMemo(() => {
-    const map = new Map<string, string[]>();
+  const zoneCalibrationMap = useMemo(() => {
+    const map = new Map<string, CalibrationZoneHints["zones"][number]>();
     for (const zone of calibrationZonesData?.zones ?? []) {
-      map.set(zone.zoneCode.trim().toUpperCase(), zone.searchKeywords || []);
+      map.set(zone.zoneCode.trim().toUpperCase(), zone);
     }
     return map;
   }, [calibrationZonesData?.zones]);
@@ -1912,7 +1953,9 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                       const statusMeta = getZoneReviewStatusMeta(section.reviewStatus);
                       const StatusIcon = statusMeta.icon;
                       const linkedDoc = section.document?.id ? allDocs.find((doc) => doc.id === section.document?.id) : null;
-                      const zoneKeywords = zoneKeywordMap.get(section.zoneCode.trim().toUpperCase()) || [];
+                      const configuredZone = zoneCalibrationMap.get(section.zoneCode.trim().toUpperCase()) || null;
+                      const zoneKeywords = configuredZone?.searchKeywords || [];
+                      const keywordHits = extractKeywordHits(section.sourceText, zoneKeywords);
                       return (
                         <div key={section.id} className="rounded-xl border bg-background p-4">
                           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1968,6 +2011,19 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                   <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">
                                     Guidage actif
                                   </p>
+                                  {(configuredZone?.referenceStartPage || configuredZone?.referenceEndPage) && (
+                                    <p className="mt-2 text-[11px] text-sky-800/90">
+                                      Pages de référence :
+                                      {" "}
+                                      {configuredZone?.referenceStartPage || "?"}
+                                      {configuredZone?.referenceEndPage && configuredZone.referenceEndPage !== configuredZone.referenceStartPage ? ` à ${configuredZone.referenceEndPage}` : ""}
+                                    </p>
+                                  )}
+                                  {configuredZone?.guidanceNotes && (
+                                    <p className="mt-2 text-[11px] text-sky-800/90">
+                                      {configuredZone.guidanceNotes}
+                                    </p>
+                                  )}
                                   <div className="mt-2 flex flex-wrap gap-2">
                                     {zoneKeywords.map((keyword) => (
                                       <Badge key={`${section.id}-${keyword}`} variant="outline" className="border-sky-200 bg-sky-50 text-sky-800">
@@ -1975,6 +2031,38 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                       </Badge>
                                     ))}
                                   </div>
+                                </div>
+                              )}
+                              {configuredZone && keywordHits.length > 0 && (
+                                <div className="rounded-lg border border-primary/15 bg-primary/[0.03] px-3 py-3">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                                    Textes retrouvés via les filtres
+                                  </p>
+                                  <div className="mt-3 space-y-2">
+                                    {keywordHits.slice(0, 6).map((hit, index) => (
+                                      <div key={`${section.id}-${hit.keyword}-${index}`} className="rounded-lg border bg-background px-3 py-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Badge variant="outline" className="text-[10px]">{hit.keyword}</Badge>
+                                          {hit.articleCode && (
+                                            <Badge variant="secondary" className="text-[10px]">
+                                              Art. {hit.articleCode}
+                                            </Badge>
+                                          )}
+                                        </div>
+                                        <p className="mt-2 text-xs text-foreground/85">{hit.snippet}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {configuredZone && zoneKeywords.length > 0 && keywordHits.length === 0 && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[11px] text-amber-800">
+                                  Aucun extrait n’a encore été retrouvé avec les mots-clés configurés dans cette zone. Ajuste les mots-clés ou les pages de référence si besoin.
+                                </div>
+                              )}
+                              {!configuredZone && (
+                                <div className="rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                                  Cette zone détectée n’est pas encore reliée à une zone calibrée dans l’onglet `Zones`. Configure-la pour voir les pages de référence, les mots-clés et les extraits filtrés ici.
                                 </div>
                               )}
                             </div>
