@@ -5,9 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
-  Eye,
   FileText,
-  FolderCog,
   Loader2,
   MapPin,
   RefreshCw,
@@ -192,11 +190,6 @@ export function ZoneFirstCalibrationModule({
   });
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [zoneDrafts, setZoneDrafts] = useState<Record<string, typeof zoneForm>>({});
-  const [detectedDrafts, setDetectedDrafts] = useState<Record<string, {
-    reviewedZoneCode: string;
-    reviewedStartPage: string;
-    reviewedEndPage: string;
-  }>>({});
 
   const { data: overviewData } = useQuery<OverviewResponse>({
     queryKey: ["reg-calibration-overview", currentCommune],
@@ -210,7 +203,7 @@ export function ZoneFirstCalibrationModule({
     enabled: currentCommune !== "all",
   });
 
-  const { data: detectedZonesData, isLoading: loadingDetectedZones } = useQuery<DetectedZoneReviewData>({
+  const { data: detectedZonesData } = useQuery<DetectedZoneReviewData>({
     queryKey: ["reg-calibration-zone-reviews", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/plu-zone-reviews?commune=${encodeURIComponent(currentCommune)}`),
     enabled: currentCommune !== "all" && !activeZoneId,
@@ -295,30 +288,6 @@ export function ZoneFirstCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const reviewDetectedZoneMutation = useMutation({
-    mutationFn: async ({
-      id,
-      reviewStatus,
-      reviewedZoneCode,
-      reviewedStartPage,
-      reviewedEndPage,
-    }: {
-      id: string;
-      reviewStatus: "validated" | "to_review" | "rejected";
-      reviewedZoneCode?: string;
-      reviewedStartPage?: number | null;
-      reviewedEndPage?: number | null;
-    }) => apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
-      method: "POST",
-      body: JSON.stringify({ reviewStatus, reviewedZoneCode, reviewedStartPage, reviewedEndPage }),
-    }),
-    onSuccess: () => {
-      refreshAll();
-      toast({ title: "Détection mise à jour" });
-    },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
-  });
-
   const rebuildMutation = useMutation({
     mutationFn: async () => apiFetch("/api/mairie/regulatory-calibration/rebuild", {
       method: "POST",
@@ -350,11 +319,6 @@ export function ZoneFirstCalibrationModule({
         return left.zoneCode.localeCompare(right.zoneCode, "fr");
       }),
     [zonesData?.zones],
-  );
-
-  const pendingDetections = useMemo(
-    () => (detectedZonesData?.sections || []).filter((section) => section.reviewStatus !== "validated" && section.reviewStatus !== "rejected"),
-    [detectedZonesData?.sections],
   );
 
   const publishedRuleGroups = useMemo(() => {
@@ -522,115 +486,6 @@ export function ZoneFirstCalibrationModule({
             </div>
           </CardContent>
         </Card>
-
-        {pendingDetections.length > 0 && (
-          <Card className="border-primary/10 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FolderCog className="h-4 w-4 text-primary" />
-                Détections en attente
-              </CardTitle>
-              <CardDescription>
-                Les zones auto-détectées servent uniquement de premier cadrage. Valide-les pour les faire basculer dans la liste des zones actives.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {loadingDetectedZones ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Lecture des détections…
-                </div>
-              ) : pendingDetections.map((section) => (
-                <div key={section.id} className="rounded-xl border bg-background p-4">
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),280px]">
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">{section.zoneCode}</Badge>
-                        <Badge variant="secondary">
-                          pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}
-                        </Badge>
-                        {section.document?.title && <Badge variant="outline">{section.document.title}</Badge>}
-                      </div>
-                      <p className="font-medium">{section.heading}</p>
-                      {section.sourceText && <p className="text-sm text-muted-foreground line-clamp-3">{section.sourceText}</p>}
-                    </div>
-                    <div className="space-y-3 rounded-xl border bg-muted/10 p-3">
-                      <Input
-                        placeholder="Code zone validé"
-                        value={detectedDrafts[section.id]?.reviewedZoneCode ?? section.zoneCode}
-                        onChange={(event) => setDetectedDrafts((current) => ({
-                          ...current,
-                          [section.id]: {
-                            reviewedZoneCode: event.target.value,
-                            reviewedStartPage: current[section.id]?.reviewedStartPage ?? String(section.startPage ?? ""),
-                            reviewedEndPage: current[section.id]?.reviewedEndPage ?? String(section.endPage ?? ""),
-                          },
-                        }))}
-                      />
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <Input
-                          placeholder="Page début"
-                          value={detectedDrafts[section.id]?.reviewedStartPage ?? String(section.startPage ?? "")}
-                          onChange={(event) => setDetectedDrafts((current) => ({
-                            ...current,
-                            [section.id]: {
-                              reviewedZoneCode: current[section.id]?.reviewedZoneCode ?? section.zoneCode,
-                              reviewedStartPage: event.target.value,
-                              reviewedEndPage: current[section.id]?.reviewedEndPage ?? String(section.endPage ?? ""),
-                            },
-                          }))}
-                        />
-                        <Input
-                          placeholder="Page fin"
-                          value={detectedDrafts[section.id]?.reviewedEndPage ?? String(section.endPage ?? "")}
-                          onChange={(event) => setDetectedDrafts((current) => ({
-                            ...current,
-                            [section.id]: {
-                              reviewedZoneCode: current[section.id]?.reviewedZoneCode ?? section.zoneCode,
-                              reviewedStartPage: current[section.id]?.reviewedStartPage ?? String(section.startPage ?? ""),
-                              reviewedEndPage: event.target.value,
-                            },
-                          }))}
-                        />
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => reviewDetectedZoneMutation.mutate({
-                            id: section.id,
-                            reviewStatus: "validated",
-                            reviewedZoneCode: detectedDrafts[section.id]?.reviewedZoneCode ?? section.zoneCode,
-                            reviewedStartPage: parsePositiveInt(detectedDrafts[section.id]?.reviewedStartPage ?? String(section.startPage ?? "")),
-                            reviewedEndPage: parsePositiveInt(detectedDrafts[section.id]?.reviewedEndPage ?? String(section.endPage ?? "")),
-                          })}
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          Activer
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => reviewDetectedZoneMutation.mutate({ id: section.id, reviewStatus: "to_review" })}
-                        >
-                          <Eye className="h-4 w-4" />
-                          À revoir
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => reviewDetectedZoneMutation.mutate({ id: section.id, reviewStatus: "rejected" })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Écarter
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
 
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
