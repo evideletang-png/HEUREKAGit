@@ -1132,7 +1132,8 @@ async function buildCalibrationPagesForDocument(doc: {
       return true;
     });
 
-    if (extractedPdfPages.length > 0) {
+    const hasUsableExtractedPdfText = extractedPdfPages.some((page) => String(page.text || "").replace(/\s+/g, " ").trim().length >= 40);
+    if (extractedPdfPages.length > 0 && hasUsableExtractedPdfText) {
       return extractedPdfPages;
     }
   }
