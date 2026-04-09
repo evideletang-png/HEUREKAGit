@@ -63,6 +63,7 @@ import {
   recomputeIndexedRuleRelationResolution,
   splitDocumentIntoCalibrationPages,
   validateIndexedRuleForPublication,
+  type CalibrationPage,
 } from "../services/regulatoryCalibrationService.js";
 import {
   buildExpertZoneAnalysis,
@@ -76,6 +77,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from "pdf-lib";
 import { VisionService } from "../services/visionService.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { MessagingService } from "../services/messagingService.js";
@@ -770,6 +772,229 @@ function buildPseudoPagesFromBoundedZoneText(args: {
   }
 
   return pages.filter((page) => page.pageNumber >= args.startPage && page.pageNumber <= args.endPage);
+}
+
+function normalizePdfLabelNumber(raw: string | null | undefined) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return null;
+  const numeric = Number.parseInt(trimmed.replace(/[^\d]/g, ""), 10);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function detectPrintedPageNumberFromText(text: string | null | undefined) {
+  const lines = String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return null;
+
+  const candidates = [
+    ...lines.slice(0, 4),
+    ...lines.slice(-4),
+  ];
+
+  for (const candidate of candidates) {
+    const strictMatch = candidate.match(/^page\s+(\d{1,4})$/i);
+    if (strictMatch?.[1]) {
+      const parsed = Number.parseInt(strictMatch[1], 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+
+  for (const candidate of candidates) {
+    const embeddedMatch = candidate.match(/\bpage\s+(\d{1,4})\b/i);
+    if (embeddedMatch?.[1]) {
+      const parsed = Number.parseInt(embeddedMatch[1], 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+
+  for (const candidate of candidates) {
+    const rawMatch = candidate.match(/^(\d{1,4})$/);
+    if (rawMatch?.[1]) {
+      const parsed = Number.parseInt(rawMatch[1], 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+
+  return null;
+}
+
+function toRoman(value: number, uppercase: boolean) {
+  if (!Number.isFinite(value) || value <= 0) return String(value);
+  const numerals: Array<[number, string]> = [
+    [1000, "M"],
+    [900, "CM"],
+    [500, "D"],
+    [400, "CD"],
+    [100, "C"],
+    [90, "XC"],
+    [50, "L"],
+    [40, "XL"],
+    [10, "X"],
+    [9, "IX"],
+    [5, "V"],
+    [4, "IV"],
+    [1, "I"],
+  ];
+  let remaining = Math.trunc(value);
+  let result = "";
+  for (const [amount, glyph] of numerals) {
+    while (remaining >= amount) {
+      result += glyph;
+      remaining -= amount;
+    }
+  }
+  return uppercase ? result : result.toLowerCase();
+}
+
+function toAlphabetic(value: number, uppercase: boolean) {
+  if (!Number.isFinite(value) || value <= 0) return String(value);
+  let remaining = Math.trunc(value);
+  let result = "";
+  while (remaining > 0) {
+    remaining -= 1;
+    result = String.fromCharCode(65 + (remaining % 26)) + result;
+    remaining = Math.floor(remaining / 26);
+  }
+  return uppercase ? result : result.toLowerCase();
+}
+
+function decodePdfStringLike(value: unknown) {
+  if (value instanceof PDFString || value instanceof PDFHexString) {
+    return value.decodeText().trim() || null;
+  }
+  return null;
+}
+
+function decodePdfNumberLike(value: unknown) {
+  if (value instanceof PDFNumber) {
+    const parsed = value.asNumber();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function collectPdfPageLabelEntries(node: PDFDict | null, entries: Array<{ pageIndex: number; dict: PDFDict }> = []) {
+  if (!node) return entries;
+
+  const nums = node.lookup(PDFName.of("Nums"), PDFArray);
+  if (nums) {
+    for (let index = 0; index < nums.size(); index += 2) {
+      const pageIndex = decodePdfNumberLike(nums.lookup(index));
+      const labelDict = nums.lookup(index + 1, PDFDict);
+      if (pageIndex !== null && labelDict) {
+        entries.push({ pageIndex, dict: labelDict });
+      }
+    }
+  }
+
+  const kids = node.lookup(PDFName.of("Kids"), PDFArray);
+  if (kids) {
+    for (let index = 0; index < kids.size(); index += 1) {
+      const child = kids.lookup(index, PDFDict);
+      if (child) collectPdfPageLabelEntries(child, entries);
+    }
+  }
+
+  return entries;
+}
+
+function buildPdfPageLabelSeries(pageCount: number, entries: Array<{ pageIndex: number; dict: PDFDict }>) {
+  if (!entries.length) return [] as Array<number | null>;
+
+  const sortedEntries = [...entries]
+    .filter((entry) => entry.pageIndex >= 0 && entry.pageIndex < pageCount)
+    .sort((left, right) => left.pageIndex - right.pageIndex);
+
+  if (!sortedEntries.length) return [] as Array<number | null>;
+
+  const labels: Array<number | null> = Array.from({ length: pageCount }, () => null);
+
+  sortedEntries.forEach((entry, index) => {
+    const nextPageIndex = sortedEntries[index + 1]?.pageIndex ?? pageCount;
+    const style = entry.dict.lookup(PDFName.of("S"), PDFName)?.decodeText?.() || "D";
+    const prefix = decodePdfStringLike(entry.dict.lookup(PDFName.of("P"))) || "";
+    const start = decodePdfNumberLike(entry.dict.lookup(PDFName.of("St"))) || 1;
+
+    for (let pageIndex = entry.pageIndex; pageIndex < nextPageIndex; pageIndex += 1) {
+      const ordinal = start + (pageIndex - entry.pageIndex);
+      let rendered = "";
+      switch (style) {
+        case "r":
+          rendered = `${prefix}${toRoman(ordinal, false)}`;
+          break;
+        case "R":
+          rendered = `${prefix}${toRoman(ordinal, true)}`;
+          break;
+        case "a":
+          rendered = `${prefix}${toAlphabetic(ordinal, false)}`;
+          break;
+        case "A":
+          rendered = `${prefix}${toAlphabetic(ordinal, true)}`;
+          break;
+        case "D":
+        default:
+          rendered = `${prefix}${ordinal}`;
+          break;
+      }
+      labels[pageIndex] = normalizePdfLabelNumber(rendered);
+    }
+  });
+
+  return labels;
+}
+
+async function extractPdfPageLabels(documentId: string, fileName: string | null | undefined) {
+  try {
+    const source = await ensureTownHallDocumentPersistentSource(documentId, fileName);
+    let buffer: Buffer | null = null;
+    if (source.filePath && fs.existsSync(source.filePath)) {
+      buffer = fs.readFileSync(source.filePath);
+    } else {
+      buffer = (await loadTownHallDocumentBlob(documentId))?.buffer || null;
+    }
+    if (!buffer?.length) return null;
+
+    const pdf = await PDFDocument.load(buffer, { ignoreEncryption: true });
+    const pageCount = pdf.getPageCount();
+    const catalogDict = (pdf.catalog as unknown as { dict: PDFDict }).dict;
+    const pageLabelsNode = catalogDict.lookup(PDFName.of("PageLabels"), PDFDict);
+    if (!pageLabelsNode) return null;
+
+    const entries = collectPdfPageLabelEntries(pageLabelsNode);
+    const labels = buildPdfPageLabelSeries(pageCount, entries);
+    return labels.length === pageCount ? labels : null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildCalibrationPagesForDocument(doc: {
+  id: string;
+  fileName: string | null | undefined;
+  rawText: string | null | undefined;
+}) {
+  const rawPages = splitDocumentIntoCalibrationPages(doc.rawText || "");
+  if (rawPages.length === 0) {
+    return [] as Array<CalibrationPage & { actualPageNumber: number }>;
+  }
+
+  const pdfPageLabels = await extractPdfPageLabels(doc.id, doc.fileName);
+  const canTrustPdfLabels = Array.isArray(pdfPageLabels) && pdfPageLabels.length === rawPages.length;
+
+  return rawPages.map((page, index) => {
+    const displayPageNumber =
+      (canTrustPdfLabels ? pdfPageLabels?.[index] : null)
+      || detectPrintedPageNumberFromText(page.text)
+      || page.pageNumber;
+
+    return {
+      ...page,
+      actualPageNumber: page.pageNumber,
+      pageNumber: displayPageNumber,
+    };
+  });
 }
 
 function buildZoneKeywordMatches(args: {
@@ -3665,9 +3890,11 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         .where(eq(townHallDocumentsTable.id, zone.referenceDocumentId))
         .limit(1);
       if (referenceDocument) {
+        const mappedPages = await buildCalibrationPagesForDocument(referenceDocument);
         await rebuildThematicSegmentsForZone({
           zone,
           referenceDocument,
+          pages: mappedPages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
           userId: req.user!.userId,
         });
       }
@@ -3746,9 +3973,11 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
         .where(eq(townHallDocumentsTable.id, updated.referenceDocumentId))
         .limit(1);
       if (referenceDocument) {
+        const mappedPages = await buildCalibrationPagesForDocument(referenceDocument);
         await rebuildThematicSegmentsForZone({
           zone: updated,
           referenceDocument,
+          pages: mappedPages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
           userId: req.user!.userId,
         });
       }
@@ -3826,7 +4055,9 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
           .then((rows) => rows[0] || null)
       : null;
 
-    const allPages = splitDocumentIntoCalibrationPages(referenceDocument?.rawText || "");
+    const allPages = referenceDocument
+      ? await buildCalibrationPagesForDocument(referenceDocument)
+      : [];
     const effectiveStartPage = zone.referenceStartPage ?? zoneSections[0]?.reviewedStartPage ?? zoneSections[0]?.startPage ?? null;
     const effectiveEndPage = zone.referenceEndPage ?? zoneSections[zoneSections.length - 1]?.reviewedEndPage ?? zoneSections[zoneSections.length - 1]?.endPage ?? null;
     const boundedPages = allPages.filter((page) => {
@@ -4456,9 +4687,11 @@ router.post("/regulatory-calibration/rebuild", async (req: AuthRequest, res) => 
         .where(eq(townHallDocumentsTable.id, zone.referenceDocumentId))
         .limit(1);
       if (!referenceDocument) continue;
+      const mappedPages = await buildCalibrationPagesForDocument(referenceDocument);
       const rebuilt = await rebuildThematicSegmentsForZone({
         zone,
         referenceDocument,
+        pages: mappedPages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
         userId: req.user!.userId,
       });
       rebuiltSegmentCount += rebuilt.createdCount;
