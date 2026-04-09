@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Satellite, SlidersHorizontal, Trees } from "lucide-react";
 import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
 import L from "leaflet";
+import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS } from "@/lib/mapTiles";
 
 type BaseLayerKey = "plan" | "satellite" | "cadastre";
 
@@ -20,25 +21,28 @@ type AnalysisParcelMapProps = {
 
 const BASE_LAYERS: Record<
   BaseLayerKey,
-  { label: string; icon: typeof MapPinned; url: string; attribution: string }
+  { label: string; icon: typeof MapPinned; url: string; attribution: string; tileOptions: Record<string, unknown> }
 > = {
   plan: {
     label: "Plan",
     icon: MapPinned,
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; Carto",
+    url: SHARED_MAP_TILE_LAYERS.plan.url,
+    attribution: SHARED_MAP_TILE_LAYERS.plan.attribution,
+    tileOptions: SHARED_MAP_TILE_LAYERS.plan.tileOptions,
   },
   satellite: {
-    label: "Satellite",
+    label: "Satellite HD",
     icon: Satellite,
-    url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-    attribution: "&copy; IGN",
+    url: SHARED_MAP_TILE_LAYERS.satellite.url,
+    attribution: SHARED_MAP_TILE_LAYERS.satellite.attribution,
+    tileOptions: SHARED_MAP_TILE_LAYERS.satellite.tileOptions,
   },
   cadastre: {
     label: "Cadastre",
     icon: Layers3,
-    url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-    attribution: "&copy; IGN",
+    url: SHARED_MAP_TILE_LAYERS.cadastre.url,
+    attribution: SHARED_MAP_TILE_LAYERS.cadastre.attribution,
+    tileOptions: SHARED_MAP_TILE_LAYERS.cadastre.tileOptions,
   },
 };
 
@@ -77,10 +81,10 @@ function FitMapBounds({
   useEffect(() => {
     const allPoints = [...parcelPositions, ...buildingRings.flat()];
     if (allPoints.length >= 3) {
-      map.fitBounds(L.latLngBounds(allPoints), { padding: [28, 28] });
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [28, 28], maxZoom: 20.5 });
       return;
     }
-    map.setView(mapCenter, 19);
+    map.setView(mapCenter, 20);
   }, [map, mapCenter, parcelPositions, buildingRings]);
 
   return null;
@@ -259,13 +263,28 @@ export function AnalysisParcelMap({
         )}
       </div>
 
-      <MapContainer center={mapCenter} zoom={19} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
+      <MapContainer
+        center={mapCenter}
+        zoom={20}
+        maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}
+        zoomSnap={SHARED_MAP_CONTAINER_OPTIONS.zoomSnap}
+        zoomDelta={SHARED_MAP_CONTAINER_OPTIONS.zoomDelta}
+        wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
+        zoomAnimation={false}
+        fadeAnimation={false}
+        style={{ height: "100%", width: "100%" }}
+        scrollWheelZoom
+      >
         <FitMapBounds
           mapCenter={mapCenter}
           parcelPositions={parcelPositions}
           buildingRings={buildingShapes.map((shape) => shape.positions)}
         />
-        <TileLayer url={activeBaseLayer.url} attribution={activeBaseLayer.attribution} />
+        <TileLayer
+          url={activeBaseLayer.url}
+          attribution={activeBaseLayer.attribution}
+          {...activeBaseLayer.tileOptions}
+        />
 
         <Polygon positions={parcelPositions} pathOptions={{ color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.14, weight: 3.2 }}>
           {showParcelLabel && (
