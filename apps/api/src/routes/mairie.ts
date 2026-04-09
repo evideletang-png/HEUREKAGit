@@ -945,7 +945,7 @@ function buildPdfPageLabelSeries(pageCount: number, entries: Array<{ pageIndex: 
   return labels;
 }
 
-async function extractPdfPageLabels(documentId: string, fileName: string | null | undefined) {
+async function extractPdfPageLabelData(documentId: string, fileName: string | null | undefined) {
   try {
     const source = await ensureTownHallDocumentPersistentSource(documentId, fileName);
     let buffer: Buffer | null = null;
@@ -960,27 +960,100 @@ async function extractPdfPageLabels(documentId: string, fileName: string | null 
     const pageCount = pdf.getPageCount();
     const catalogDict = (pdf.catalog as unknown as { dict: PDFDict }).dict;
     const pageLabelsNode = catalogDict.lookup(PDFName.of("PageLabels"), PDFDict);
-    if (!pageLabelsNode) return null;
+    if (!pageLabelsNode) {
+      return { pageCount, labels: null as Array<number | null> | null };
+    }
 
     const entries = collectPdfPageLabelEntries(pageLabelsNode);
     const labels = buildPdfPageLabelSeries(pageCount, entries);
-    return labels.length === pageCount ? labels : null;
+    return {
+      pageCount,
+      labels: labels.length === pageCount ? labels : null,
+    };
   } catch {
     return null;
   }
+}
+
+function extractPdfTextByPage(filePath: string, actualPageNumber: number) {
+  const runPdftotext = (mode: "layout" | "raw") => {
+    const args = mode === "layout"
+      ? ["-layout", "-f", String(actualPageNumber), "-l", String(actualPageNumber), "-enc", "UTF-8", filePath, "-"]
+      : ["-raw", "-f", String(actualPageNumber), "-l", String(actualPageNumber), "-enc", "UTF-8", filePath, "-"];
+    return execFileSync("pdftotext", args, {
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024 * 16,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  };
+
+  try {
+    const layout = normalizeExtractedText(runPdftotext("layout"));
+    if (layout) return layout;
+  } catch {}
+
+  try {
+    const raw = normalizeExtractedText(runPdftotext("raw"));
+    if (raw) return raw;
+  } catch {}
+
+  return "";
 }
 
 async function buildCalibrationPagesForDocument(doc: {
   id: string;
   fileName: string | null | undefined;
   rawText: string | null | undefined;
+}, options?: {
+  startPage?: number | null;
+  endPage?: number | null;
 }) {
+  const pageLabelData = await extractPdfPageLabelData(doc.id, doc.fileName);
+  const source = await ensureTownHallDocumentPersistentSource(doc.id, doc.fileName);
+
+  if (source.filePath && pageLabelData?.pageCount) {
+    const labels = pageLabelData.labels;
+    const actualPages = Array.from({ length: pageLabelData.pageCount }, (_, index) => index + 1);
+    const candidateActualPages =
+      labels && (options?.startPage || options?.endPage)
+        ? actualPages.filter((actualPageNumber) => {
+            const displayedPage = labels[actualPageNumber - 1];
+            if (options?.startPage && displayedPage !== null && displayedPage < options.startPage) return false;
+            if (options?.endPage && displayedPage !== null && displayedPage > options.endPage) return false;
+            return true;
+          })
+        : actualPages;
+
+    const extractedPdfPages = candidateActualPages.map((actualPageNumber) => {
+      const text = extractPdfTextByPage(source.filePath!, actualPageNumber);
+      const displayedPageNumber =
+        labels?.[actualPageNumber - 1]
+        || detectPrintedPageNumberFromText(text)
+        || actualPageNumber;
+      return {
+        pageNumber: displayedPageNumber,
+        actualPageNumber,
+        text,
+        startOffset: 0,
+        endOffset: text.length,
+      };
+    }).filter((page) => {
+      if (options?.startPage && page.pageNumber < options.startPage) return false;
+      if (options?.endPage && page.pageNumber > options.endPage) return false;
+      return true;
+    });
+
+    if (extractedPdfPages.length > 0) {
+      return extractedPdfPages;
+    }
+  }
+
   const rawPages = splitDocumentIntoCalibrationPages(doc.rawText || "");
   if (rawPages.length === 0) {
     return [] as Array<CalibrationPage & { actualPageNumber: number }>;
   }
 
-  const pdfPageLabels = await extractPdfPageLabels(doc.id, doc.fileName);
+  const pdfPageLabels = pageLabelData?.labels || null;
   const canTrustPdfLabels = Array.isArray(pdfPageLabels) && pdfPageLabels.length === rawPages.length;
 
   return rawPages.map((page, index) => {
@@ -994,6 +1067,10 @@ async function buildCalibrationPagesForDocument(doc: {
       actualPageNumber: page.pageNumber,
       pageNumber: displayPageNumber,
     };
+  }).filter((page) => {
+    if (options?.startPage && page.pageNumber < options.startPage) return false;
+    if (options?.endPage && page.pageNumber > options.endPage) return false;
+    return true;
   });
 }
 
@@ -3890,7 +3967,10 @@ router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
         .where(eq(townHallDocumentsTable.id, zone.referenceDocumentId))
         .limit(1);
       if (referenceDocument) {
-        const mappedPages = await buildCalibrationPagesForDocument(referenceDocument);
+        const mappedPages = await buildCalibrationPagesForDocument(referenceDocument, {
+          startPage: zone.referenceStartPage,
+          endPage: zone.referenceEndPage,
+        });
         await rebuildThematicSegmentsForZone({
           zone,
           referenceDocument,
@@ -3973,7 +4053,10 @@ router.patch("/regulatory-calibration/zones/:id", async (req: AuthRequest, res) 
         .where(eq(townHallDocumentsTable.id, updated.referenceDocumentId))
         .limit(1);
       if (referenceDocument) {
-        const mappedPages = await buildCalibrationPagesForDocument(referenceDocument);
+        const mappedPages = await buildCalibrationPagesForDocument(referenceDocument, {
+          startPage: updated.referenceStartPage,
+          endPage: updated.referenceEndPage,
+        });
         await rebuildThematicSegmentsForZone({
           zone: updated,
           referenceDocument,
@@ -4055,11 +4138,14 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
           .then((rows) => rows[0] || null)
       : null;
 
-    const allPages = referenceDocument
-      ? await buildCalibrationPagesForDocument(referenceDocument)
-      : [];
     const effectiveStartPage = zone.referenceStartPage ?? zoneSections[0]?.reviewedStartPage ?? zoneSections[0]?.startPage ?? null;
     const effectiveEndPage = zone.referenceEndPage ?? zoneSections[zoneSections.length - 1]?.reviewedEndPage ?? zoneSections[zoneSections.length - 1]?.endPage ?? null;
+    const allPages = referenceDocument
+      ? await buildCalibrationPagesForDocument(referenceDocument, {
+          startPage: effectiveStartPage,
+          endPage: effectiveEndPage,
+        })
+      : [];
     const boundedPages = allPages.filter((page) => {
       if (effectiveStartPage && page.pageNumber < effectiveStartPage) return false;
       if (effectiveEndPage && page.pageNumber > effectiveEndPage) return false;
@@ -4687,7 +4773,10 @@ router.post("/regulatory-calibration/rebuild", async (req: AuthRequest, res) => 
         .where(eq(townHallDocumentsTable.id, zone.referenceDocumentId))
         .limit(1);
       if (!referenceDocument) continue;
-      const mappedPages = await buildCalibrationPagesForDocument(referenceDocument);
+      const mappedPages = await buildCalibrationPagesForDocument(referenceDocument, {
+        startPage: zone.referenceStartPage,
+        endPage: zone.referenceEndPage,
+      });
       const rebuilt = await rebuildThematicSegmentsForZone({
         zone,
         referenceDocument,
