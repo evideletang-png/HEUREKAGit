@@ -4172,9 +4172,17 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
             endPage: effectiveEndPage,
           })
         : [];
+    const hasStrictPdfWindow = !!(
+      referenceDocumentId
+      && effectiveStartPage
+      && effectiveEndPage
+      && effectiveEndPage >= effectiveStartPage
+    );
     const analysisPages =
       boundedPages.length > 0
         ? boundedPages
+        : hasStrictPdfWindow
+          ? []
         : pseudoBoundedPages.length > 0
           ? pseudoBoundedPages
         : sectionTextPages.length > 0
@@ -4209,6 +4217,15 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       listZoneThematicSegments(zone.id),
     ]);
 
+    const boundedPersistedSegments = persistedSegments.filter((segment) => {
+      if (!effectiveStartPage && !effectiveEndPage) return true;
+      const segmentStart = segment.sourcePageStart || 0;
+      const segmentEnd = segment.sourcePageEnd || segment.sourcePageStart || 0;
+      if (effectiveStartPage && segmentEnd < effectiveStartPage) return false;
+      if (effectiveEndPage && segmentStart > effectiveEndPage) return false;
+      return true;
+    });
+
     const generatedAiSegments =
       referenceDocumentId && workspacePages.some((page) => page.text.trim().length > 0)
         ? buildZoneThematicSegmentsFromPages({
@@ -4242,8 +4259,8 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
           }))
         : [];
 
-    const manualPersistedSegments = persistedSegments.filter((segment) => !segment.derivedFromAi);
-    const fallbackPersistedAiSegments = persistedSegments.filter((segment) => segment.derivedFromAi);
+    const manualPersistedSegments = boundedPersistedSegments.filter((segment) => !segment.derivedFromAi);
+    const fallbackPersistedAiSegments = boundedPersistedSegments.filter((segment) => segment.derivedFromAi);
     const derivedSegments = [
       ...(generatedAiSegments.length > 0 ? generatedAiSegments : fallbackPersistedAiSegments),
       ...manualPersistedSegments,
