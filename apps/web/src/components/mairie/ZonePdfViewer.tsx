@@ -17,6 +17,7 @@ type ZonePdfViewerProps = {
   documentTitle: string;
   pageNumbers: number[];
   fallbackPages?: Array<{ pageNumber: number; text: string }>;
+  onPagesTextExtracted?: (pages: Array<{ pageNumber: number; text: string }>) => void;
   onTextSelected: (selection: { text: string; pageNumber: number; pageEndNumber: number | null }) => void;
   onVisualSelected?: (capture: {
     pageNumber: number;
@@ -83,6 +84,7 @@ export function ZonePdfViewer({
   documentTitle,
   pageNumbers,
   fallbackPages = [],
+  onPagesTextExtracted,
   onTextSelected,
   onVisualSelected,
   className,
@@ -98,6 +100,7 @@ export function ZonePdfViewer({
   const [visualDraft, setVisualDraft] = useState<VisualDraftSelection | null>(null);
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
   const [pdfPageLabels, setPdfPageLabels] = useState<Array<string | null> | null>(null);
+  const [renderedPageTexts, setRenderedPageTexts] = useState<Record<number, string>>({});
 
   useEffect(() => {
     const element = containerRef.current;
@@ -248,6 +251,7 @@ export function ZonePdfViewer({
     setPdfLoading(true);
     setPdfNumPages(null);
     setPdfPageLabels(null);
+    setRenderedPageTexts({});
 
     fetch(`/api/mairie/documents/${documentId}/view`, {
       credentials: "include",
@@ -282,6 +286,46 @@ export function ZonePdfViewer({
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [documentId]);
+
+  useEffect(() => {
+    if (!onPagesTextExtracted) return;
+    const pages = sortedPages.map((pageNumber) => ({
+      pageNumber,
+      text: renderedPageTexts[pageNumber] || "",
+    }));
+    if (pages.some((page) => page.text.trim().length > 0)) {
+      onPagesTextExtracted(pages);
+    }
+  }, [onPagesTextExtracted, renderedPageTexts, sortedPages]);
+
+  const captureRenderedPageText = (requestedPageNumber: number) => {
+    const readRenderedText = (attempt = 0) => {
+      const container = pageCanvasRefs.current[requestedPageNumber];
+      if (!container) return;
+
+      const textLayer = container.querySelector(".react-pdf__Page__textContent") as HTMLElement | null;
+      const rawText = textLayer?.innerText?.trim()
+        || textLayer?.textContent?.trim()
+        || "";
+      const text = rawText.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+
+      if (!text && attempt < 5) {
+        window.setTimeout(() => readRenderedText(attempt + 1), 80 * (attempt + 1));
+        return;
+      }
+
+      setRenderedPageTexts((current) => (
+        current[requestedPageNumber] === text
+          ? current
+          : {
+              ...current,
+              [requestedPageNumber]: text,
+            }
+      ));
+    };
+
+    requestAnimationFrame(() => readRenderedText(0));
+  };
 
   if (pdfLoading) {
     return (
@@ -442,6 +486,7 @@ export function ZonePdfViewer({
                 width={viewerWidth}
                 renderAnnotationLayer
                 renderTextLayer
+                onRenderSuccess={() => captureRenderedPageText(requestedPageNumber)}
               />
               {visualDraft && visualDraft.pageNumber === requestedPageNumber ? (
                 <div

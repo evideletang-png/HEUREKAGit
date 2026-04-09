@@ -4588,6 +4588,169 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
   }
 });
 
+router.post("/regulatory-calibration/zones/:id/infer-from-pages", async (req: AuthRequest, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ZONE_ID_REQUIRED" });
+
+    const [zone] = await db.select().from(regulatoryCalibrationZonesTable).where(eq(regulatoryCalibrationZonesTable.id, id)).limit(1);
+    if (!zone) return res.status(404).json({ error: "ZONE_NOT_FOUND" });
+
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined || zone.communeId);
+    if (!access.ok) return res.status(access.status).json(access.error);
+
+    const rawPages: Array<{ pageNumber?: unknown; text?: unknown }> = Array.isArray(req.body.pages) ? req.body.pages : [];
+    const pages = rawPages
+      .map((page) => ({
+        pageNumber: normalizeOptionalPositivePage(page?.pageNumber) || null,
+        text: typeof page?.text === "string" ? page.text : "",
+      }))
+      .filter((page): page is { pageNumber: number; text: string } => !!page.pageNumber && page.text.trim().length > 0);
+
+    if (pages.length === 0) {
+      return res.json({
+        segments: [],
+        articleAnchors: [],
+        keywordMatches: [],
+        expertAnalysis: null,
+      });
+    }
+
+    const themes = await ensureRegulatoryThemeTaxonomySeed();
+    const [referenceDocument] = zone.referenceDocumentId
+      ? await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, zone.referenceDocumentId)).limit(1)
+      : [null];
+    const zoneRules = await db.select()
+      .from(indexedRegulatoryRulesTable)
+      .where(eq(indexedRegulatoryRulesTable.zoneId, zone.id))
+      .orderBy(indexedRegulatoryRulesTable.articleCode, indexedRegulatoryRulesTable.sourcePage, indexedRegulatoryRulesTable.updatedAt);
+
+    const generatedSegments = buildZoneThematicSegmentsFromPages({
+      communeId: zone.communeId,
+      zoneId: zone.id,
+      documentId: zone.referenceDocumentId || referenceDocument?.id || "viewer-pdf",
+      pages,
+    }).map((segment) => ({
+      id: `generated-${segment.zoneId}-${segment.themeCode}-${segment.sourcePageStart}-${segment.anchorLabel || "segment"}`,
+      communeId: segment.communeId,
+      zoneId: segment.zoneId,
+      overlayId: segment.overlayId,
+      documentId: segment.documentId,
+      sourcePageStart: segment.sourcePageStart,
+      sourcePageEnd: segment.sourcePageEnd ?? null,
+      anchorType: segment.anchorType,
+      anchorLabel: segment.anchorLabel ?? null,
+      themeCode: segment.themeCode,
+      sourceTextFull: segment.sourceTextFull,
+      sourceTextNormalized: segment.sourceTextNormalized ?? null,
+      visualAttachmentMeta: segment.visualAttachmentMeta ?? {},
+      derivedFromAi: true,
+      status: "suggested",
+      createdBy: null,
+      updatedBy: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+
+    const themeMap = new Map(themes.map((theme) => [theme.code, theme]));
+    const expertAnalysis = buildExpertZoneAnalysis({
+      commune: access.targetCommune,
+      zone: {
+        zoneCode: zone.zoneCode,
+        zoneLabel: zone.zoneLabel,
+        parentZoneCode: zone.parentZoneCode,
+      },
+      referenceDocument: referenceDocument
+        ? {
+            id: referenceDocument.id,
+            title: referenceDocument.title,
+            fileName: referenceDocument.fileName,
+            documentType: referenceDocument.documentType,
+          }
+        : null,
+      overlays: [],
+      segments: generatedSegments.map((segment) => ({
+        ...segment,
+        documentTitle: referenceDocument?.title || referenceDocument?.fileName || null,
+      })),
+      rules: zoneRules.map((rule) => ({
+        id: rule.id,
+        zoneCode: zone.zoneCode,
+        zoneLabel: zone.zoneLabel,
+        overlayId: rule.overlayId,
+        overlayCode: null,
+        overlayLabel: null,
+        overlayType: rule.overlayType,
+        normativeEffect: rule.normativeEffect,
+        proceduralEffect: rule.proceduralEffect,
+        applicabilityScope: rule.applicabilityScope,
+        ruleAnchorType: rule.ruleAnchorType,
+        ruleAnchorLabel: rule.ruleAnchorLabel,
+        isRelationalRule: rule.isRelationalRule,
+        requiresCrossDocumentResolution: rule.requiresCrossDocumentResolution,
+        resolutionStatus: rule.resolutionStatus,
+        linkedRuleCount: rule.linkedRuleCount,
+        relationResolutionNote: null,
+        relations: [],
+        ruleFamily: rule.themeCode,
+        ruleTopic: rule.themeCode,
+        ruleLabel: rule.ruleLabel,
+        ruleTextRaw: rule.sourceText,
+        ruleSummary: rule.interpretationNote,
+        ruleValueType: rule.operator ? "structured" : null,
+        ruleValueMin: null,
+        ruleValueMax: null,
+        ruleValueExact: sanitizeZoneRuleValueNumeric(rule),
+        ruleUnit: rule.unit,
+        ruleCondition: rule.conditionText,
+        ruleException: null,
+        sourcePage: rule.sourcePage,
+        sourceArticle: rule.articleCode,
+        sourceExcerpt: rule.sourceText,
+        confidenceScore: rule.confidenceScore,
+        reviewStatus: rule.status,
+        requiresManualValidation: rule.status !== "published",
+        ruleConflictFlag: rule.conflictFlag,
+        sourceDocumentId: rule.documentId,
+        sourceDocumentKind: referenceDocument?.documentType || null,
+        sourceDocumentName: referenceDocument?.title || referenceDocument?.fileName || null,
+        visualCapture: null,
+        visualSupportNote: null,
+      })),
+    });
+
+    return res.json({
+      segments: generatedSegments.map((segment) => ({
+        ...segment,
+        themeLabel: themeMap.get(segment.themeCode)?.label || segment.themeCode,
+        articleCode: inferArticleCodeFromCalibrationText(segment.anchorLabel || segment.sourceTextFull),
+        previewText: segment.sourceTextFull.length > 280 ? `${segment.sourceTextFull.slice(0, 277)}...` : segment.sourceTextFull,
+        document: referenceDocument
+          ? {
+              id: referenceDocument.id,
+              title: referenceDocument.title,
+              fileName: referenceDocument.fileName,
+            }
+          : null,
+      })),
+      articleAnchors: buildZoneArticleAnchors(pages).sort((left, right) => {
+        const leftArticle = Number.parseInt(left.articleCode || "999", 10);
+        const rightArticle = Number.parseInt(right.articleCode || "999", 10);
+        if (leftArticle !== rightArticle) return leftArticle - rightArticle;
+        return left.pageNumber - right.pageNumber;
+      }),
+      keywordMatches: buildZoneKeywordMatches({
+        pages,
+        keywords: zone.searchKeywords || [],
+      }).sort((left, right) => left.pageNumber - right.pageNumber),
+      expertAnalysis,
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/zones/:id/infer-from-pages POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
 router.post("/regulatory-calibration/zones/:id/segments", async (req: AuthRequest, res) => {
   try {
     const zoneId = req.params.id as string;

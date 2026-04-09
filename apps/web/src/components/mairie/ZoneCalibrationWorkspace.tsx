@@ -216,6 +216,13 @@ type ZoneWorkspaceResponse = {
   workspaceReady: boolean;
 };
 
+type InferredWorkspaceResponse = {
+  segments: ZoneWorkspaceResponse["segments"];
+  articleAnchors: ZoneWorkspaceResponse["articleAnchors"];
+  keywordMatches: ZoneWorkspaceResponse["keywordMatches"];
+  expertAnalysis: ZoneWorkspaceResponse["expertAnalysis"];
+};
+
 async function apiFetch(path: string, options: RequestInit = {}) {
   const response = await fetch(path, {
     headers: {
@@ -383,6 +390,7 @@ export function ZoneCalibrationWorkspace({
   const [, setLocation] = useLocation();
   const selectionEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const zoneRulesRef = useRef<HTMLDivElement | null>(null);
+  const inferenceSignatureRef = useRef<string>("");
   const [selection, setSelection] = useState<{
     text: string;
     pageNumber: number;
@@ -395,6 +403,8 @@ export function ZoneCalibrationWorkspace({
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [detailRule, setDetailRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
   const [editingRule, setEditingRule] = useState<ZoneWorkspaceResponse["rules"][number] | null>(null);
+  const [viewerPagesText, setViewerPagesText] = useState<Array<{ pageNumber: number; text: string }>>([]);
+  const [inferredWorkspace, setInferredWorkspace] = useState<InferredWorkspaceResponse | null>(null);
   const [manualArticleMode, setManualArticleMode] = useState(false);
   const [manualArticle, setManualArticle] = useState({
     articleCode: "",
@@ -442,6 +452,22 @@ export function ZoneCalibrationWorkspace({
     enabled: currentCommune !== "all" && !!zoneId,
   });
 
+  const inferWorkspaceFromPagesMutation = useMutation({
+    mutationFn: async (pages: Array<{ pageNumber: number; text: string }>) => apiFetch(`/api/mairie/regulatory-calibration/zones/${zoneId}/infer-from-pages`, {
+      method: "POST",
+      body: JSON.stringify({
+        commune: currentCommune,
+        pages,
+      }),
+    }),
+    onSuccess: (payload: InferredWorkspaceResponse) => {
+      setInferredWorkspace(payload);
+    },
+    onError: () => {
+      setInferredWorkspace(null);
+    },
+  });
+
   useEffect(() => {
     if (!data) return;
     setZoneDraft({
@@ -455,6 +481,38 @@ export function ZoneCalibrationWorkspace({
       referenceEndPage: data.zone.referenceEndPage ? String(data.zone.referenceEndPage) : "",
     });
   }, [data]);
+
+  useEffect(() => {
+    inferenceSignatureRef.current = "";
+    setViewerPagesText([]);
+    setInferredWorkspace(null);
+  }, [zoneId, currentCommune]);
+
+  useEffect(() => {
+    if (!data) return;
+    if (data.segments.length > 0 || data.keywordMatches.length > 0 || (data.expertAnalysis?.articleOrThemeBlocks?.length || 0) > 0) {
+      setInferredWorkspace(null);
+      return;
+    }
+
+    const nonEmptyPages = viewerPagesText
+      .map((page) => ({ pageNumber: page.pageNumber, text: page.text.trim() }))
+      .filter((page) => page.text.length > 0);
+
+    if (nonEmptyPages.length === 0) return;
+
+    const signature = JSON.stringify(nonEmptyPages.map((page) => ({
+      pageNumber: page.pageNumber,
+      length: page.text.length,
+      head: page.text.slice(0, 120),
+    })));
+
+    if (inferWorkspaceFromPagesMutation.isPending) return;
+    if (inferenceSignatureRef.current === signature) return;
+
+    inferenceSignatureRef.current = signature;
+    inferWorkspaceFromPagesMutation.mutate(nonEmptyPages);
+  }, [data, viewerPagesText, inferWorkspaceFromPagesMutation]);
 
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-overview", currentCommune] });
@@ -621,7 +679,9 @@ export function ZoneCalibrationWorkspace({
       ].filter(Boolean);
       const normalizedArticleCode = selectionArticleCode.trim() || null;
       const selectedSegment = selectedSegmentId
-        ? data?.segments.find((segment) => segment.id === selectedSegmentId) || null
+        ? data?.segments.find((segment) => segment.id === selectedSegmentId)
+          || inferredWorkspace?.segments.find((segment) => segment.id === selectedSegmentId)
+          || null
         : null;
       const normalizedAnchorLabel = normalizedArticleCode
         ? `Article ${normalizedArticleCode}`
@@ -908,8 +968,15 @@ export function ZoneCalibrationWorkspace({
   const selectedExcerpt = selectedExcerptId
     ? data.excerpts.find((excerpt) => excerpt.id === selectedExcerptId) || null
     : null;
+  const visibleSegments = data.segments.length > 0 ? data.segments : (inferredWorkspace?.segments || []);
+  const visibleKeywordMatches = data.keywordMatches.length > 0 ? data.keywordMatches : (inferredWorkspace?.keywordMatches || []);
+  const visibleArticleAnchors = data.articleAnchors.length > 0 ? data.articleAnchors : (inferredWorkspace?.articleAnchors || []);
+  const visibleExpertAnalysis =
+    (data.expertAnalysis?.articleOrThemeBlocks?.length || 0) > 0
+      ? data.expertAnalysis
+      : inferredWorkspace?.expertAnalysis || data.expertAnalysis;
   const selectedSegment = selectedSegmentId
-    ? data.segments.find((segment) => segment.id === selectedSegmentId) || null
+    ? visibleSegments.find((segment) => segment.id === selectedSegmentId) || null
     : null;
   const activeVisualCapture =
     selection?.visualCapture
@@ -1036,7 +1103,7 @@ export function ZoneCalibrationWorkspace({
               </AccordionTrigger>
               <AccordionContent className="px-5 pb-5">
                 <div className="space-y-3">
-                  {data.expertAnalysis?.articleOrThemeBlocks?.length ? data.expertAnalysis.articleOrThemeBlocks.map((block) => (
+                  {visibleExpertAnalysis?.articleOrThemeBlocks?.length ? visibleExpertAnalysis.articleOrThemeBlocks.map((block) => (
                     <div key={block.key} className="rounded-xl border bg-muted/10 p-3">
                       <div className="flex flex-wrap items-center gap-2">
                         {block.articleCode ? <Badge variant="outline">Art. {block.articleCode}</Badge> : null}
@@ -1060,7 +1127,7 @@ export function ZoneCalibrationWorkspace({
               </AccordionTrigger>
               <AccordionContent className="px-5 pb-5">
                 <div className="space-y-3">
-                  {data.segments.length > 0 ? data.segments.map((segment) => (
+                  {visibleSegments.length > 0 ? visibleSegments.map((segment) => (
                     <div key={segment.id} className={`rounded-xl border p-3 ${selectedSegmentId === segment.id ? "border-primary bg-primary/5" : "bg-muted/10"}`}>
                       <div className="flex flex-wrap items-center gap-2">
                         {segment.articleCode ? <Badge variant="outline">Art. {segment.articleCode}</Badge> : null}
@@ -1102,7 +1169,7 @@ export function ZoneCalibrationWorkspace({
               </AccordionTrigger>
               <AccordionContent className="px-5 pb-5">
                 <div className="space-y-3">
-                  {data.keywordMatches.length > 0 ? data.keywordMatches.map((match, index) => (
+                  {visibleKeywordMatches.length > 0 ? visibleKeywordMatches.map((match, index) => (
                     <div key={`${match.keyword}-${match.pageNumber}-${index}`} className="rounded-xl border bg-muted/10 p-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">{match.keyword}</Badge>
@@ -1136,7 +1203,7 @@ export function ZoneCalibrationWorkspace({
             </AccordionItem>
           </Accordion>
 
-          {data.expertAnalysis && (
+          {visibleExpertAnalysis && (
             <Card className="border-primary/10 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-base">Lecture experte de la zone</CardTitle>
@@ -1145,11 +1212,11 @@ export function ZoneCalibrationWorkspace({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <p className="leading-relaxed text-muted-foreground">{data.expertAnalysis.professionalInterpretation}</p>
-                {data.expertAnalysis.crossEffects.length > 0 && (
+                <p className="leading-relaxed text-muted-foreground">{visibleExpertAnalysis.professionalInterpretation}</p>
+                {visibleExpertAnalysis.crossEffects.length > 0 && (
                   <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Effets croisés</div>
-                    {data.expertAnalysis.crossEffects.slice(0, 3).map((effect, index) => (
+                    {visibleExpertAnalysis.crossEffects.slice(0, 3).map((effect, index) => (
                       <p key={`${effect}-${index}`} className="text-sm text-muted-foreground">{effect}</p>
                     ))}
                   </div>
@@ -1177,6 +1244,7 @@ export function ZoneCalibrationWorkspace({
                   documentTitle={data.referenceDocument.title || data.referenceDocument.fileName || "Document"}
                   pageNumbers={pageNumbers}
                   fallbackPages={data.pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text }))}
+                  onPagesTextExtracted={setViewerPagesText}
                   onTextSelected={({ text, pageNumber, pageEndNumber }) => {
                     setSelectedSegmentId(null);
                     setSelectedExcerptId(null);
