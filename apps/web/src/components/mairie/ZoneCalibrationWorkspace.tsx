@@ -485,6 +485,15 @@ export function ZoneCalibrationWorkspace({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const rerunZoneSearch = async () => {
+    try {
+      await saveZoneMutation.mutateAsync();
+      await refetch();
+    } catch {
+      // the save mutation already surfaces the blocking error to the user
+    }
+  };
+
   const createExcerptMutation = useMutation({
     mutationFn: async (payload: {
       segmentId: string | null;
@@ -1012,8 +1021,8 @@ export function ZoneCalibrationWorkspace({
                   {saveZoneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Enregistrer la zone
                 </Button>
-                <Button variant="outline" onClick={() => refetch()} disabled={isFetching}>
-                  {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <Button variant="outline" onClick={rerunZoneSearch} disabled={isFetching || saveZoneMutation.isPending}>
+                  {isFetching || saveZoneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   Relancer la recherche
                 </Button>
               </div>

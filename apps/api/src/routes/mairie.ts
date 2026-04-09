@@ -789,7 +789,7 @@ function detectPrintedPageNumberFromText(text: string | null | undefined) {
   if (lines.length === 0) return null;
 
   const candidates = [
-    ...lines.slice(0, 4),
+    ...lines.slice(0, 2),
     ...lines.slice(-4),
   ];
 
@@ -809,8 +809,8 @@ function detectPrintedPageNumberFromText(text: string | null | undefined) {
     }
   }
 
-  for (const candidate of candidates) {
-    const rawMatch = candidate.match(/^(\d{1,4})$/);
+  for (const candidate of lines.slice(-2)) {
+    const rawMatch = candidate.match(/^(?:[-–—\[\(]?\s*)?(\d{1,4})(?:\s*[-–—\]\)]|\s*\/\s*\d{1,4})?$/);
     if (rawMatch?.[1]) {
       const parsed = Number.parseInt(rawMatch[1], 10);
       if (Number.isFinite(parsed) && parsed > 0) return parsed;
@@ -1013,16 +1013,22 @@ async function buildCalibrationPagesForDocument(doc: {
 
   if (source.filePath && pageLabelData?.pageCount) {
     const labels = pageLabelData.labels;
+    const hasUsablePdfLabels = Array.isArray(labels) && labels.some((label) => typeof label === "number" && Number.isFinite(label));
     const actualPages = Array.from({ length: pageLabelData.pageCount }, (_, index) => index + 1);
-    const candidateActualPages =
-      labels && (options?.startPage || options?.endPage)
+    let candidateActualPages =
+      hasUsablePdfLabels && (options?.startPage || options?.endPage)
         ? actualPages.filter((actualPageNumber) => {
-            const displayedPage = labels[actualPageNumber - 1];
-            if (options?.startPage && displayedPage !== null && displayedPage < options.startPage) return false;
-            if (options?.endPage && displayedPage !== null && displayedPage > options.endPage) return false;
+            const displayedPage = labels?.[actualPageNumber - 1] ?? null;
+            if (displayedPage === null) return false;
+            if (options?.startPage && displayedPage < options.startPage) return false;
+            if (options?.endPage && displayedPage > options.endPage) return false;
             return true;
           })
         : actualPages;
+
+    if (candidateActualPages.length === 0) {
+      candidateActualPages = actualPages;
+    }
 
     const extractedPdfPages = candidateActualPages.map((actualPageNumber) => {
       const text = extractPdfTextByPage(source.filePath!, actualPageNumber);
@@ -4261,8 +4267,14 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
 
     const manualPersistedSegments = boundedPersistedSegments.filter((segment) => !segment.derivedFromAi);
     const fallbackPersistedAiSegments = boundedPersistedSegments.filter((segment) => segment.derivedFromAi);
+    const aiSegmentsForWorkspace =
+      generatedAiSegments.length > 0
+        ? generatedAiSegments
+        : hasStrictPdfWindow
+          ? []
+          : fallbackPersistedAiSegments;
     const derivedSegments = [
-      ...(generatedAiSegments.length > 0 ? generatedAiSegments : fallbackPersistedAiSegments),
+      ...aiSegmentsForWorkspace,
       ...manualPersistedSegments,
     ].sort((left, right) => {
       const pageDelta = (left.sourcePageStart || Number.POSITIVE_INFINITY) - (right.sourcePageStart || Number.POSITIVE_INFINITY);
