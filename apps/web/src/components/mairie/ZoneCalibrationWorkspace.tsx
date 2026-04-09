@@ -770,7 +770,7 @@ export function ZoneCalibrationWorkspace({
       visualAttachmentMeta: selection.visualCapture ? { visualCapture: selection.visualCapture } : {},
     };
 
-    if (selectedSegmentId) {
+    if (selectedSegmentId && !selectedSegmentId.startsWith("generated-")) {
       await updateSegmentMutation.mutateAsync({
         segmentId: selectedSegmentId,
         ...payload,
@@ -1073,7 +1073,7 @@ export function ZoneCalibrationWorkspace({
                         >
                           Utiliser
                         </Button>
-                        {data.permissions.canEditCalibration && (
+                        {data.permissions.canEditCalibration && !segment.id.startsWith("generated-") && (
                           <Button variant="outline" size="sm" onClick={() => deleteSegmentMutation.mutate(segment.id)} disabled={deleteSegmentMutation.isPending}>
                             Supprimer
                           </Button>

@@ -236,7 +236,88 @@ function buildSegmentPreview(text: string) {
   return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized;
 }
 
+function buildPageOffsetRanges(pages: PageSlice[]) {
+  const separator = "\n\f\n";
+  const ranges: Array<{ pageNumber: number; start: number; end: number }> = [];
+  let cursor = 0;
+
+  pages.forEach((page, index) => {
+    const text = String(page.text || "").trim();
+    ranges.push({
+      pageNumber: page.pageNumber,
+      start: cursor,
+      end: cursor + text.length,
+    });
+    cursor += text.length;
+    if (index < pages.length - 1) {
+      cursor += separator.length;
+    }
+  });
+
+  return ranges;
+}
+
+function resolvePageNumberAtOffset(
+  ranges: Array<{ pageNumber: number; start: number; end: number }>,
+  offset: number,
+) {
+  for (const range of ranges) {
+    if (offset >= range.start && offset <= range.end) {
+      return range.pageNumber;
+    }
+  }
+
+  let fallback = ranges[0]?.pageNumber || 1;
+  for (const range of ranges) {
+    if (offset >= range.start) {
+      fallback = range.pageNumber;
+    }
+  }
+  return fallback;
+}
+
+function buildArticleBoundedBlocks(pages: PageSlice[]) {
+  const separator = "\n\f\n";
+  const combinedText = pages.map((page) => String(page.text || "").trim()).join(separator);
+  if (!combinedText.trim()) return [] as Array<{
+    sourcePageStart: number;
+    sourcePageEnd: number;
+    anchorLabel: string | null;
+    anchorType: SourceAnchorType;
+    text: string;
+  }>;
+
+  const ranges = buildPageOffsetRanges(pages);
+  const markers = Array.from(
+    combinedText.matchAll(/(^|\n)\s*((?:[A-Z0-9]{1,8}\s*[-–—]\s*)?ARTICLE\s*\d{1,2}\b[^\n]*)/gim),
+  ).map((match) => ({
+    start: (match.index || 0) + (match[1]?.length || 0),
+    label: normalizeSpacing(match[2] || ""),
+  })).filter((marker) => marker.label.length > 0);
+
+  if (markers.length === 0) return [];
+
+  return markers.map((marker, index) => {
+    const next = markers[index + 1];
+    const end = next ? next.start : combinedText.length;
+    const start = marker.start;
+    const text = normalizeSpacing(combinedText.slice(start, end));
+    return {
+      sourcePageStart: resolvePageNumberAtOffset(ranges, start),
+      sourcePageEnd: resolvePageNumberAtOffset(ranges, Math.max(start, end - 1)),
+      anchorLabel: marker.label,
+      anchorType: "article" as const,
+      text,
+    };
+  }).filter((block) => block.text.length >= 40);
+}
+
 function buildSegmentBlocks(pages: PageSlice[]) {
+  const articleBlocks = buildArticleBoundedBlocks(pages);
+  if (articleBlocks.length > 0) {
+    return articleBlocks;
+  }
+
   const blocks: Array<{
     sourcePageStart: number;
     sourcePageEnd: number;
@@ -292,7 +373,15 @@ function buildSegmentBlocks(pages: PageSlice[]) {
 
       const currentTheme = detectThemeCode({ anchorLabel: current.anchorLabel, text: current.lines.join("\n") });
       const nextTheme = detectThemeCode({ anchorLabel: nextAnchorLabel, text: rawBlock });
-      const shouldSplit = !!nextAnchorLabel || (nextTheme !== currentTheme && rawBlock.length > 120);
+      const shouldSplit =
+        !!nextAnchorLabel
+        || (
+          !current.anchorLabel
+          && nextTheme !== currentTheme
+          && rawBlock.length > 220
+          && firstLine.length <= 120
+          && !/[.;!?]$/.test(firstLine)
+        );
 
       if (shouldSplit) {
         flush();

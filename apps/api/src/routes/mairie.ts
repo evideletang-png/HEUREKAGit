@@ -3892,41 +3892,51 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       listZoneThematicSegments(zone.id),
     ]);
 
-    const derivedSegments = persistedSegments.length > 0
-      ? persistedSegments
-      : (
-        referenceDocumentId && workspacePages.length > 0
-          ? buildZoneThematicSegmentsFromPages({
-              communeId: communeKey,
-              zoneId: zone.id,
-              documentId: referenceDocumentId,
-              pages: workspacePages.map((page) => ({
-                pageNumber: page.pageNumber,
-                text: page.text,
-              })),
-            }).map((segment) => ({
-              id: `generated-${segment.zoneId}-${segment.themeCode}-${segment.sourcePageStart}-${segment.anchorLabel || "segment"}`,
-              communeId: segment.communeId,
-              zoneId: segment.zoneId,
-              overlayId: segment.overlayId,
-              documentId: segment.documentId,
-              sourcePageStart: segment.sourcePageStart,
-              sourcePageEnd: segment.sourcePageEnd ?? null,
-              anchorType: segment.anchorType,
-              anchorLabel: segment.anchorLabel ?? null,
-              themeCode: segment.themeCode,
-              sourceTextFull: segment.sourceTextFull,
-              sourceTextNormalized: segment.sourceTextNormalized ?? null,
-              visualAttachmentMeta: segment.visualAttachmentMeta ?? {},
-              derivedFromAi: true,
-              status: "suggested",
-              createdBy: null,
-              updatedBy: null,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            }))
-          : []
-      );
+    const generatedAiSegments =
+      referenceDocumentId && workspacePages.some((page) => page.text.trim().length > 0)
+        ? buildZoneThematicSegmentsFromPages({
+            communeId: communeKey,
+            zoneId: zone.id,
+            documentId: referenceDocumentId,
+            pages: workspacePages.map((page) => ({
+              pageNumber: page.pageNumber,
+              text: page.text,
+            })),
+          }).map((segment) => ({
+            id: `generated-${segment.zoneId}-${segment.themeCode}-${segment.sourcePageStart}-${segment.anchorLabel || "segment"}`,
+            communeId: segment.communeId,
+            zoneId: segment.zoneId,
+            overlayId: segment.overlayId,
+            documentId: segment.documentId,
+            sourcePageStart: segment.sourcePageStart,
+            sourcePageEnd: segment.sourcePageEnd ?? null,
+            anchorType: segment.anchorType,
+            anchorLabel: segment.anchorLabel ?? null,
+            themeCode: segment.themeCode,
+            sourceTextFull: segment.sourceTextFull,
+            sourceTextNormalized: segment.sourceTextNormalized ?? null,
+            visualAttachmentMeta: segment.visualAttachmentMeta ?? {},
+            derivedFromAi: true,
+            status: "suggested",
+            createdBy: null,
+            updatedBy: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }))
+        : [];
+
+    const manualPersistedSegments = persistedSegments.filter((segment) => !segment.derivedFromAi);
+    const fallbackPersistedAiSegments = persistedSegments.filter((segment) => segment.derivedFromAi);
+    const derivedSegments = [
+      ...(generatedAiSegments.length > 0 ? generatedAiSegments : fallbackPersistedAiSegments),
+      ...manualPersistedSegments,
+    ].sort((left, right) => {
+      const pageDelta = (left.sourcePageStart || Number.POSITIVE_INFINITY) - (right.sourcePageStart || Number.POSITIVE_INFINITY);
+      if (pageDelta !== 0) return pageDelta;
+      const endDelta = (left.sourcePageEnd || left.sourcePageStart || Number.POSITIVE_INFINITY) - (right.sourcePageEnd || right.sourcePageStart || Number.POSITIVE_INFINITY);
+      if (endDelta !== 0) return endDelta;
+      return String(left.anchorLabel || left.themeCode || "").localeCompare(String(right.anchorLabel || right.themeCode || ""), "fr", { numeric: true, sensitivity: "base" });
+    });
 
     const excerptDocumentIds = Array.from(new Set(zoneExcerpts.map((excerpt) => excerpt.documentId).filter((value): value is string => !!value)));
     const ruleDocumentIds = Array.from(new Set(zoneRules.map((rule) => rule.documentId).filter((value): value is string => !!value)));
@@ -3964,7 +3974,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       ? await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: referenceDocumentId })
       : { sections: [], rules: [] };
 
-    const articleAnchors = buildZoneArticleAnchors(analysisPages.map((page) => ({
+    const articleAnchors = buildZoneArticleAnchors(workspacePages.map((page) => ({
       pageNumber: page.pageNumber,
       text: page.text,
     }))).sort((left, right) => {
@@ -3974,7 +3984,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       return left.pageNumber - right.pageNumber;
     });
     const keywordMatches = buildZoneKeywordMatches({
-      pages: analysisPages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
+      pages: workspacePages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
       keywords: zone.searchKeywords || [],
     }).sort((left, right) => left.pageNumber - right.pageNumber);
     const excerptMap = new Map(zoneExcerpts.map((excerpt) => [excerpt.id, excerpt] as const));
