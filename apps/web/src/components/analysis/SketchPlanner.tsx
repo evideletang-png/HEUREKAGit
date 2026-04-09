@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { MapContainer, TileLayer, Polygon, Tooltip as LeafletTooltip, Rectangle, Marker } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Tooltip as LeafletTooltip, Rectangle, Marker, ZoomControl } from "react-leaflet";
 import L from "leaflet";
 import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS } from "@/lib/mapTiles";
 import * as turf from "@turf/turf";
@@ -418,8 +418,10 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
                     wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
                     zoomAnimation={false}
                     fadeAnimation={false}
+                    zoomControl={false}
                     style={{ height: "100%", width: "100%" }}
                   >
+                    <ZoomControl position="bottomright" />
                     <TileLayer
                       url={SHARED_MAP_TILE_LAYERS.plan.url}
                       attribution={SHARED_MAP_TILE_LAYERS.plan.attribution}

@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, Polygon, Marker, Popup, LayersControl } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Marker, Popup, LayersControl, ZoomControl } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,9 +40,11 @@ export function DossierSIGMap({ centroid, parcelShape, isAbfConcerned, constrain
         wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
         zoomAnimation={false}
         fadeAnimation={false}
+        zoomControl={false}
         style={{ height: "100%", width: "100%" }}
         scrollWheelZoom={false}
       >
+        <ZoomControl position="bottomright" />
         <LayersControl position="topright">
           <LayersControl.BaseLayer checked name="Plan">
             <TileLayer
@@ -56,6 +58,13 @@ export function DossierSIGMap({ centroid, parcelShape, isAbfConcerned, constrain
               url={SHARED_MAP_TILE_LAYERS.satellite.url}
               attribution={SHARED_MAP_TILE_LAYERS.satellite.attribution}
               {...SHARED_MAP_TILE_LAYERS.satellite.tileOptions}
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Satellite Plus">
+            <TileLayer
+              url={SHARED_MAP_TILE_LAYERS.satellite_plus.url}
+              attribution={SHARED_MAP_TILE_LAYERS.satellite_plus.attribution}
+              {...SHARED_MAP_TILE_LAYERS.satellite_plus.tileOptions}
             />
           </LayersControl.BaseLayer>
 

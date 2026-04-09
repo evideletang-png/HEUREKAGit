@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Satellite, SlidersHorizontal, Trees } from "lucide-react";
-import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap, ZoomControl } from "react-leaflet";
 import L from "leaflet";
-import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS } from "@/lib/mapTiles";
+import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS, SharedMapLayerKey } from "@/lib/mapTiles";
 
-type BaseLayerKey = "plan" | "satellite" | "cadastre";
+type BaseLayerKey = Extract<SharedMapLayerKey, "plan" | "satellite" | "satellite_plus" | "cadastre">;
 
 type AnalysisParcelMapProps = {
   mapCenter: [number, number];
@@ -36,6 +36,13 @@ const BASE_LAYERS: Record<
     url: SHARED_MAP_TILE_LAYERS.satellite.url,
     attribution: SHARED_MAP_TILE_LAYERS.satellite.attribution,
     tileOptions: SHARED_MAP_TILE_LAYERS.satellite.tileOptions,
+  },
+  satellite_plus: {
+    label: "Satellite Plus",
+    icon: Satellite,
+    url: SHARED_MAP_TILE_LAYERS.satellite_plus.url,
+    attribution: SHARED_MAP_TILE_LAYERS.satellite_plus.attribution,
+    tileOptions: SHARED_MAP_TILE_LAYERS.satellite_plus.tileOptions,
   },
   cadastre: {
     label: "Cadastre",
@@ -228,6 +235,9 @@ export function AnalysisParcelMap({
                 Surface sur carte
               </Button>
             </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+              `Satellite HD` utilise l'orthophoto IGN. `Satellite Plus` force une imagerie alternative plus agressive au zoom.
+            </p>
           </div>
         )}
 
@@ -272,6 +282,7 @@ export function AnalysisParcelMap({
         wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
         zoomAnimation={false}
         fadeAnimation={false}
+        zoomControl={false}
         style={{ height: "100%", width: "100%" }}
         scrollWheelZoom
       >
@@ -280,6 +291,7 @@ export function AnalysisParcelMap({
           parcelPositions={parcelPositions}
           buildingRings={buildingShapes.map((shape) => shape.positions)}
         />
+        <ZoomControl position="bottomright" />
         <TileLayer
           url={activeBaseLayer.url}
           attribution={activeBaseLayer.attribution}

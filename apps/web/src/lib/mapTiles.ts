@@ -1,4 +1,4 @@
-export type SharedMapLayerKey = "plan" | "satellite" | "cadastre";
+export type SharedMapLayerKey = "plan" | "satellite" | "satellite_plus" | "cadastre";
 
 export const SHARED_MAP_CONTAINER_OPTIONS = {
   zoomSnap: 0.25,
@@ -39,6 +39,16 @@ export const SHARED_MAP_TILE_LAYERS: Record<
       ...SHARED_TILE_LAYER_OPTIONS,
       detectRetina: true,
       maxNativeZoom: 19,
+      crossOrigin: true,
+    },
+  },
+  satellite_plus: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
+    tileOptions: {
+      ...SHARED_TILE_LAYER_OPTIONS,
+      detectRetina: true,
+      maxNativeZoom: 20,
       crossOrigin: true,
     },
   },
