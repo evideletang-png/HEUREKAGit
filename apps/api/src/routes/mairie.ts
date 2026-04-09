@@ -820,6 +820,85 @@ function detectPrintedPageNumberFromText(text: string | null | undefined) {
   return null;
 }
 
+function inferDisplayedPdfPageNumbers(args: {
+  pageCount: number;
+  pdfLabels?: Array<number | null> | null;
+  rawPages?: Array<{ pageNumber: number; text: string }> | null;
+}) {
+  const resolved: Array<number | null> = Array.from({ length: args.pageCount }, () => null);
+
+  if (Array.isArray(args.pdfLabels)) {
+    args.pdfLabels.forEach((label, index) => {
+      if (index >= args.pageCount) return;
+      if (typeof label === "number" && Number.isFinite(label) && label > 0) {
+        resolved[index] = label;
+      }
+    });
+  }
+
+  if (Array.isArray(args.rawPages)) {
+    args.rawPages.forEach((page, index) => {
+      if (index >= args.pageCount) return;
+      if (resolved[index] !== null) return;
+      const detected = detectPrintedPageNumberFromText(page.text);
+      if (typeof detected === "number" && Number.isFinite(detected) && detected > 0) {
+        resolved[index] = detected;
+      }
+    });
+  }
+
+  const knownIndices = resolved
+    .map((value, index) => ({ index, value }))
+    .filter((entry): entry is { index: number; value: number } => typeof entry.value === "number" && Number.isFinite(entry.value));
+
+  for (let cursor = 0; cursor < knownIndices.length - 1; cursor += 1) {
+    const current = knownIndices[cursor];
+    const next = knownIndices[cursor + 1];
+    const gap = next.index - current.index;
+    if (gap <= 1) continue;
+    if (next.value - current.value !== gap) continue;
+    for (let step = 1; step < gap; step += 1) {
+      resolved[current.index + step] = current.value + step;
+    }
+  }
+
+  const firstKnown = knownIndices[0];
+  if (firstKnown) {
+    for (let index = firstKnown.index - 1; index >= 0; index -= 1) {
+      const inferred = firstKnown.value - (firstKnown.index - index);
+      resolved[index] = inferred > 0 ? inferred : null;
+    }
+  }
+
+  const lastKnown = knownIndices[knownIndices.length - 1];
+  if (lastKnown) {
+    for (let index = lastKnown.index + 1; index < resolved.length; index += 1) {
+      resolved[index] = lastKnown.value + (index - lastKnown.index);
+    }
+  }
+
+  const offsets = knownIndices
+    .map(({ index, value }) => value - (index + 1))
+    .filter((value) => Number.isFinite(value));
+  if (offsets.length > 0) {
+    const offsetFrequencies = new Map<number, number>();
+    offsets.forEach((offset) => {
+      offsetFrequencies.set(offset, (offsetFrequencies.get(offset) || 0) + 1);
+    });
+    const dominantOffset = [...offsetFrequencies.entries()]
+      .sort((left, right) => right[1] - left[1])[0]?.[0];
+    if (typeof dominantOffset === "number" && Number.isFinite(dominantOffset)) {
+      resolved.forEach((value, index) => {
+        if (value !== null) return;
+        const inferred = index + 1 + dominantOffset;
+        resolved[index] = inferred > 0 ? inferred : null;
+      });
+    }
+  }
+
+  return resolved;
+}
+
 function toRoman(value: number, uppercase: boolean) {
   if (!Number.isFinite(value) || value <= 0) return String(value);
   const numerals: Array<[number, string]> = [
@@ -1008,17 +1087,21 @@ async function buildCalibrationPagesForDocument(doc: {
   startPage?: number | null;
   endPage?: number | null;
 }) {
+  const rawPages = splitDocumentIntoCalibrationPages(doc.rawText || "");
   const pageLabelData = await extractPdfPageLabelData(doc.id, doc.fileName);
   const source = await ensureTownHallDocumentPersistentSource(doc.id, doc.fileName);
+  const resolvedDisplayedPages = inferDisplayedPdfPageNumbers({
+    pageCount: pageLabelData?.pageCount || rawPages.length,
+    pdfLabels: pageLabelData?.labels || null,
+    rawPages,
+  });
 
   if (source.filePath && pageLabelData?.pageCount) {
-    const labels = pageLabelData.labels;
-    const hasUsablePdfLabels = Array.isArray(labels) && labels.some((label) => typeof label === "number" && Number.isFinite(label));
     const actualPages = Array.from({ length: pageLabelData.pageCount }, (_, index) => index + 1);
     let candidateActualPages =
-      hasUsablePdfLabels && (options?.startPage || options?.endPage)
+      (options?.startPage || options?.endPage)
         ? actualPages.filter((actualPageNumber) => {
-            const displayedPage = labels?.[actualPageNumber - 1] ?? null;
+            const displayedPage = resolvedDisplayedPages[actualPageNumber - 1] ?? null;
             if (displayedPage === null) return false;
             if (options?.startPage && displayedPage < options.startPage) return false;
             if (options?.endPage && displayedPage > options.endPage) return false;
@@ -1033,7 +1116,7 @@ async function buildCalibrationPagesForDocument(doc: {
     const extractedPdfPages = candidateActualPages.map((actualPageNumber) => {
       const text = extractPdfTextByPage(source.filePath!, actualPageNumber);
       const displayedPageNumber =
-        labels?.[actualPageNumber - 1]
+        resolvedDisplayedPages[actualPageNumber - 1]
         || detectPrintedPageNumberFromText(text)
         || actualPageNumber;
       return {
@@ -1054,17 +1137,13 @@ async function buildCalibrationPagesForDocument(doc: {
     }
   }
 
-  const rawPages = splitDocumentIntoCalibrationPages(doc.rawText || "");
   if (rawPages.length === 0) {
     return [] as Array<CalibrationPage & { actualPageNumber: number }>;
   }
 
-  const pdfPageLabels = pageLabelData?.labels || null;
-  const canTrustPdfLabels = Array.isArray(pdfPageLabels) && pdfPageLabels.length === rawPages.length;
-
   return rawPages.map((page, index) => {
     const displayPageNumber =
-      (canTrustPdfLabels ? pdfPageLabels?.[index] : null)
+      resolvedDisplayedPages[index]
       || detectPrintedPageNumberFromText(page.text)
       || page.pageNumber;
 
