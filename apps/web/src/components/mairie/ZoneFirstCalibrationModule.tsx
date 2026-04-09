@@ -251,7 +251,11 @@ export function ZoneFirstCalibrationModule({
     enabled: currentCommune !== "all" && !activeZoneId,
   });
 
-  const { data: permissionData } = useQuery<CalibrationPermissionsResponse>({
+  const {
+    data: permissionData,
+    isLoading: loadingPermissions,
+    isFetched: permissionsFetched,
+  } = useQuery<CalibrationPermissionsResponse>({
     queryKey: ["reg-calibration-permissions", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/permissions?commune=${encodeURIComponent(currentCommune)}`),
     enabled: currentCommune !== "all" && !activeZoneId,
@@ -433,8 +437,15 @@ export function ZoneFirstCalibrationModule({
     return Array.from(groups.values()).sort((left, right) => left.zoneCode.localeCompare(right.zoneCode, "fr"));
   }, [publishedData?.rules]);
 
-  const canManagePermissions = !!permissionData?.currentPermissions.canManagePermissions;
-  const canEditCalibration = !!permissionData?.currentPermissions.canEditCalibration;
+  const canManagePermissions = loadingPermissions
+    ? false
+    : !!permissionData?.currentPermissions.canManagePermissions;
+  const canEditCalibration = loadingPermissions
+    ? true
+    : currentCommune === "all"
+      ? false
+      : !!permissionData?.currentPermissions.canEditCalibration;
+  const showReadOnlyWarning = currentCommune !== "all" && permissionsFetched && !loadingPermissions && !canEditCalibration;
 
   if (activeZoneId) {
     return <ZoneCalibrationWorkspace currentCommune={currentCommune} zoneId={activeZoneId} />;
@@ -532,7 +543,7 @@ export function ZoneFirstCalibrationModule({
           </Button>
         </div>
 
-        {!canEditCalibration && (
+        {showReadOnlyWarning && (
           <Card className="border-amber-200 bg-amber-50 shadow-sm">
             <CardContent className="p-4 text-sm text-amber-900">
               Cette commune est actuellement en lecture seule pour ton profil. Tu peux consulter les zones et les règles, mais pas modifier la calibration.
