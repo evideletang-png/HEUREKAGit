@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Satellite, SlidersHorizontal, Trees } from "lucide-react";
-import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap, ZoomControl } from "react-leaflet";
+import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Plus, Minus, Satellite, SlidersHorizontal, Trees } from "lucide-react";
+import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS, SharedMapLayerKey } from "@/lib/mapTiles";
 
@@ -97,6 +97,16 @@ function FitMapBounds({
   return null;
 }
 
+function MapInstanceBridge({ onMapReady }: { onMapReady: (map: L.Map) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    onMapReady(map);
+  }, [map, onMapReady]);
+
+  return null;
+}
+
 export function AnalysisParcelMap({
   mapCenter,
   parcelPositions,
@@ -113,6 +123,7 @@ export function AnalysisParcelMap({
   const [showParcelLabel, setShowParcelLabel] = useState(true);
   const [showOptionsPanel, setShowOptionsPanel] = useState(true);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
 
   const buildingShapes = useMemo(
     () =>
@@ -273,6 +284,27 @@ export function AnalysisParcelMap({
         )}
       </div>
 
+      <div className="absolute bottom-4 right-4 z-[1000] flex flex-col gap-2">
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className="h-11 w-11 rounded-2xl border border-slate-200 bg-white/92 shadow-lg backdrop-blur"
+          onClick={() => mapInstance?.zoomIn()}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          className="h-11 w-11 rounded-2xl border border-slate-200 bg-white/92 shadow-lg backdrop-blur"
+          onClick={() => mapInstance?.zoomOut()}
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+      </div>
+
       <MapContainer
         center={mapCenter}
         zoom={20}
@@ -291,7 +323,7 @@ export function AnalysisParcelMap({
           parcelPositions={parcelPositions}
           buildingRings={buildingShapes.map((shape) => shape.positions)}
         />
-        <ZoomControl position="bottomright" />
+        <MapInstanceBridge onMapReady={setMapInstance} />
         <TileLayer
           url={activeBaseLayer.url}
           attribution={activeBaseLayer.attribution}
