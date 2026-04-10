@@ -49,7 +49,6 @@ export const SHARED_MAP_TILE_LAYERS: Record<
       ...SHARED_TILE_LAYER_OPTIONS,
       detectRetina: true,
       maxNativeZoom: 20,
-      crossOrigin: true,
     },
   },
   cadastre: {
