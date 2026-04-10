@@ -47,8 +47,9 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     attribution: "Tiles &copy; Esri",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: true,
-      maxNativeZoom: 20,
+      detectRetina: false,
+      maxNativeZoom: 19,
+      maxZoom: 20,
     },
   },
   cadastre: {
