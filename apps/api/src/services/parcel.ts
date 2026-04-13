@@ -66,6 +66,7 @@ export interface ParcelSelectionPreviewItem {
   isPrimary: boolean;
   isAdjacent: boolean;
   feature: any;
+  positions: [number, number][];
 }
 
 export interface BuildingData {
@@ -138,6 +139,19 @@ function getFeatureParcelRef(feature: any): string {
 }
 
 function mapParcelPreviewItem(feature: any, flags: { isPrimary: boolean; isAdjacent: boolean }): ParcelSelectionPreviewItem {
+  const geometry = feature?.geometry;
+  let positions: [number, number][] = [];
+
+  if (geometry?.type === "Polygon" && Array.isArray(geometry.coordinates?.[0])) {
+    positions = geometry.coordinates[0]
+      .filter((coord: any) => Array.isArray(coord) && coord.length >= 2)
+      .map((coord: any) => [Number(coord[1]), Number(coord[0])] as [number, number]);
+  } else if (geometry?.type === "MultiPolygon" && Array.isArray(geometry.coordinates?.[0]?.[0])) {
+    positions = geometry.coordinates[0][0]
+      .filter((coord: any) => Array.isArray(coord) && coord.length >= 2)
+      .map((coord: any) => [Number(coord[1]), Number(coord[0])] as [number, number]);
+  }
+
   return {
     idu: String(feature?.properties?.idu || getFeatureId(feature)),
     section: String(feature?.properties?.section || ""),
@@ -147,6 +161,7 @@ function mapParcelPreviewItem(feature: any, flags: { isPrimary: boolean; isAdjac
     isPrimary: flags.isPrimary,
     isAdjacent: flags.isAdjacent,
     feature,
+    positions,
   };
 }
 
