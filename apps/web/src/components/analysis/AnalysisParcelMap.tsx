@@ -7,7 +7,7 @@ import L from "leaflet";
 import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS, SharedMapLayerKey } from "@/lib/mapTiles";
 import { MapZoomButtons } from "@/components/map/MapZoomButtons";
 
-type BaseLayerKey = Extract<SharedMapLayerKey, "plan" | "satellite" | "satellite_plus" | "cadastre">;
+type BaseLayerKey = Extract<SharedMapLayerKey, "plan" | "satellite" | "cadastre">;
 
 type AnalysisParcelMapProps = {
   mapCenter: [number, number];
@@ -37,13 +37,6 @@ const BASE_LAYERS: Record<
     url: SHARED_MAP_TILE_LAYERS.satellite.url,
     attribution: SHARED_MAP_TILE_LAYERS.satellite.attribution,
     tileOptions: SHARED_MAP_TILE_LAYERS.satellite.tileOptions,
-  },
-  satellite_plus: {
-    label: "Satellite Plus",
-    icon: Satellite,
-    url: SHARED_MAP_TILE_LAYERS.satellite_plus.url,
-    attribution: SHARED_MAP_TILE_LAYERS.satellite_plus.attribution,
-    tileOptions: SHARED_MAP_TILE_LAYERS.satellite_plus.tileOptions,
   },
   cadastre: {
     label: "Cadastre",
@@ -89,10 +82,10 @@ function FitMapBounds({
   useEffect(() => {
     const allPoints = [...parcelPositions, ...buildingRings.flat()];
     if (allPoints.length >= 3) {
-      map.fitBounds(L.latLngBounds(allPoints), { padding: [28, 28], maxZoom: 20.5 });
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [28, 28], maxZoom: 20 });
       return;
     }
-    map.setView(mapCenter, 20);
+    map.setView(mapCenter, 19);
   }, [map, mapCenter, parcelPositions, buildingRings]);
 
   return null;
@@ -248,7 +241,7 @@ export function AnalysisParcelMap({
               </Button>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-              `Satellite HD` utilise l'orthophoto IGN. `Satellite Plus` force une imagerie alternative plus agressive au zoom.
+              `Satellite HD` utilise l'orthophoto IGN et `Cadastre` superpose le parcellaire officiel.
             </p>
           </div>
         )}
@@ -290,7 +283,7 @@ export function AnalysisParcelMap({
       <MapContainer
         className="map-custom-zoom"
         center={mapCenter}
-        zoom={20}
+        zoom={19}
         maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}
         zoomSnap={SHARED_MAP_CONTAINER_OPTIONS.zoomSnap}
         zoomDelta={SHARED_MAP_CONTAINER_OPTIONS.zoomDelta}

@@ -77,13 +77,6 @@ export function DossierSIGMap({ centroid, parcelShape, isAbfConcerned, constrain
               {...SHARED_MAP_TILE_LAYERS.satellite.tileOptions}
             />
           </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer name="Satellite Plus">
-            <TileLayer
-              url={SHARED_MAP_TILE_LAYERS.satellite_plus.url}
-              attribution={SHARED_MAP_TILE_LAYERS.satellite_plus.attribution}
-              {...SHARED_MAP_TILE_LAYERS.satellite_plus.tileOptions}
-            />
-          </LayersControl.BaseLayer>
 
           {/* Parcel Polygon */}
           {parcelShape && (

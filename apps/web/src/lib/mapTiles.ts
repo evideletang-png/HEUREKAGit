@@ -1,18 +1,14 @@
-export type SharedMapLayerKey = "plan" | "satellite" | "satellite_plus" | "cadastre";
+export type SharedMapLayerKey = "plan" | "satellite" | "cadastre";
 
 export const SHARED_MAP_CONTAINER_OPTIONS = {
-  zoomSnap: 0.25,
-  zoomDelta: 0.5,
-  wheelPxPerZoomLevel: 120,
-  maxZoom: 22,
+  zoomSnap: 1,
+  zoomDelta: 1,
+  wheelPxPerZoomLevel: 80,
+  maxZoom: 20,
 } as const;
 
 export const SHARED_TILE_LAYER_OPTIONS = {
-  keepBuffer: 8,
-  updateWhenIdle: true,
-  updateWhenZooming: false,
-  maxZoom: 22,
-  noWrap: true,
+  maxZoom: 20,
 } as const;
 
 export const SHARED_MAP_TILE_LAYERS: Record<
@@ -34,30 +30,18 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     },
   },
   satellite: {
-    url: "/api/tiles/satellite/{z}/{x}/{y}",
+    url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: false,
       maxNativeZoom: 19,
-    },
-  },
-  satellite_plus: {
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attribution: "Tiles &copy; Esri",
-    tileOptions: {
-      ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: false,
-      maxNativeZoom: 19,
-      maxZoom: 20,
     },
   },
   cadastre: {
-    url: "/api/tiles/cadastre/{z}/{x}/{y}",
+    url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: false,
       maxNativeZoom: 20,
     },
   },
