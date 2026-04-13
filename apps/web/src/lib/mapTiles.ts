@@ -34,7 +34,7 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     },
   },
   satellite: {
-    url: "https://data.geopf.fr/wmts?apikey=essentiels&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    url: "/api/tiles/satellite/{z}/{x}/{y}",
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
@@ -53,7 +53,7 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     },
   },
   cadastre: {
-    url: "https://data.geopf.fr/wmts?apikey=essentiels&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    url: "/api/tiles/cadastre/{z}/{x}/{y}",
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
