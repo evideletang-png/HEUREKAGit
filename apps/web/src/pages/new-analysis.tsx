@@ -10,7 +10,8 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useToast } from "@/hooks/use-toast";
 import { Card } from "@/components/ui/card";
 import { getApiUrl } from "@/lib/api";
-import { MapContainer, Polygon, TileLayer } from "react-leaflet";
+import { MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
+import L from "leaflet";
 
 type GeoSelection = {
   label: string;
@@ -47,6 +48,27 @@ function extractFirstRing(feature: Record<string, any> | null | undefined): numb
   if (!geometry?.coordinates) return null;
   if (geometry.type === "MultiPolygon") return geometry.coordinates?.[0]?.[0] ?? null;
   if (geometry.type === "Polygon") return geometry.coordinates?.[0] ?? null;
+  return null;
+}
+
+function FitParcelPreviewBounds({
+  polygons,
+  center,
+}: {
+  polygons: Array<{ positions: [number, number][] }>;
+  center: [number, number];
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    const allPoints = polygons.flatMap((polygon) => polygon.positions);
+    if (allPoints.length >= 3) {
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [24, 24], maxZoom: 20 });
+      return;
+    }
+    map.setView(center, 19);
+  }, [center, map, polygons]);
+
   return null;
 }
 
@@ -177,6 +199,34 @@ export default function NewAnalysisPage() {
         })
         .filter(Boolean) as { idu: string; label: string; isPrimary: boolean; positions: [number, number][] }[],
     [parcelPreview?.primaryParcel.idu, selectedParcels],
+  );
+
+  const parcelCandidatePolygons = useMemo(
+    () =>
+      parcelOptions
+        .map((parcel) => {
+          const ring = extractFirstRing(parcel.feature as Record<string, any>);
+          if (!ring) return null;
+          const isPrimary = parcel.idu === parcelPreview?.primaryParcel.idu;
+          const isSelected = selectedParcelIds.includes(parcel.idu);
+          return {
+            idu: parcel.idu,
+            label: parcel.parcelRef || `${parcel.section} ${parcel.numero}`,
+            isPrimary,
+            isSelected,
+            positions: ring.map((coords) => [coords[1], coords[0]] as [number, number]),
+            surfaceM2: parcel.contenanceM2,
+          };
+        })
+        .filter(Boolean) as Array<{
+          idu: string;
+          label: string;
+          isPrimary: boolean;
+          isSelected: boolean;
+          positions: [number, number][];
+          surfaceM2: number;
+        }>,
+    [parcelOptions, parcelPreview?.primaryParcel.idu, selectedParcelIds],
   );
 
   const canContinue = !!selectedGeo && !!parcelPreview?.primaryParcel && !isLoadingParcelPreview;
@@ -417,6 +467,75 @@ export default function NewAnalysisPage() {
                         Surface cadastrale cumulée : {Math.round(selectedParcelSurface)} m²
                       </p>
                     </div>
+
+                    {parcelCandidatePolygons.length > 0 && (
+                      <div className="rounded-xl border border-border bg-muted/10 p-3">
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-semibold">Carte de sélection du groupement foncier</p>
+                            <p className="text-sm text-muted-foreground">
+                              La parcelle principale reste bleue. Les parcelles adjacentes proposées apparaissent en orange, puis passent en vert quand elles sont sélectionnées.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+                              Principale
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                              Adjacente proposée
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                              Adjacente sélectionnée
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="h-80 overflow-hidden rounded-lg border border-border">
+                          <MapContainer center={[selectedGeo.lat, selectedGeo.lng]} zoom={19} scrollWheelZoom={false} style={{ height: "100%", width: "100%" }}>
+                            <FitParcelPreviewBounds polygons={parcelCandidatePolygons} center={[selectedGeo.lat, selectedGeo.lng]} />
+                            <TileLayer
+                              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            />
+                            {parcelCandidatePolygons.map((polygon) => {
+                              const color = polygon.isPrimary ? "#2563eb" : polygon.isSelected ? "#10b981" : "#f59e0b";
+                              const fillOpacity = polygon.isPrimary ? 0.28 : polygon.isSelected ? 0.22 : 0.14;
+                              return (
+                                <Polygon
+                                  key={polygon.idu}
+                                  positions={polygon.positions}
+                                  eventHandlers={polygon.isPrimary ? undefined : { click: () => toggleAdjacentParcel(polygon.idu) }}
+                                  pathOptions={{
+                                    color,
+                                    weight: polygon.isPrimary ? 3.5 : polygon.isSelected ? 3 : 2.5,
+                                    fillColor: color,
+                                    fillOpacity,
+                                  }}
+                                >
+                                  <LeafletTooltip sticky direction="top">
+                                    <div className="space-y-0.5 text-xs">
+                                      <div className="font-semibold">{polygon.label}</div>
+                                      <div>{Math.round(polygon.surfaceM2 || 0)} m²</div>
+                                      <div>
+                                        {polygon.isPrimary
+                                          ? "Parcelle principale"
+                                          : polygon.isSelected
+                                            ? "Adjacente sélectionnée"
+                                            : "Adjacente proposée"}
+                                      </div>
+                                      {!polygon.isPrimary && <div>Clique dans la liste pour ajouter ou retirer cette parcelle.</div>}
+                                    </div>
+                                  </LeafletTooltip>
+                                </Polygon>
+                              );
+                            })}
+                          </MapContainer>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
