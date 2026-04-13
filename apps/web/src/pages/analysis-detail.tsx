@@ -1565,6 +1565,19 @@ export default function AnalysisDetailPage() {
                                {topic.risks_and_servitudes?.length ? (
                                  <p className="text-xs text-muted-foreground">Risques / servitudes : {topic.risks_and_servitudes.join(" · ")}</p>
                                ) : null}
+                               {topic.source_decisions?.length ? (
+                                 <div className="rounded-lg border bg-muted/20 p-3">
+                                   <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Arbitrage des sources</div>
+                                   <div className="mt-2 space-y-2">
+                                     {topic.source_decisions.slice(0, 5).map((decision: any, decisionIndex: number) => (
+                                       <div key={`${decision.source_label}-${decisionIndex}`} className="text-xs text-muted-foreground">
+                                         <span className="font-medium text-foreground">{decision.source_label}</span>
+                                         {` — ${decision.decision} · ${decision.reason}`}
+                                       </div>
+                                     ))}
+                                   </div>
+                                 </div>
+                               ) : null}
                                {topic.warnings?.length ? (
                                  <p className="text-xs text-amber-700">Alertes : {topic.warnings.join(" · ")}</p>
                                ) : null}

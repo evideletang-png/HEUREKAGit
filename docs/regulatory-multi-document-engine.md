@@ -15,7 +15,8 @@ Responsabilité :
 - qualifier automatiquement les documents déposés,
 - détecter leur rôle documentaire,
 - distinguer les pièces textuelles, graphiques, mixtes et de risques,
-- repérer les premiers signaux de renvoi cross-document.
+- repérer les premiers signaux de renvoi cross-document,
+- exploiter aussi `structuredContent` pour mieux lire les légendes, secteurs, notes visuelles et métadonnées mixtes.
 
 Sortie principale :
 - `ClassifiedRegulatoryDocument`
@@ -24,7 +25,8 @@ Sortie principale :
 Responsabilité :
 - indexer la matière réglementaire par zone,
 - relier documents, segments, règles publiées, sections de zone et overlays,
-- produire un index thématique et canonique par article.
+- produire un index thématique et canonique par article,
+- détecter un sous-secteur probable quand plusieurs sources convergent.
 
 Sortie principale :
 - `ZoneRegulatoryIndex`
@@ -48,6 +50,7 @@ Responsabilité :
 - produire les JSON structurés de base :
   - `topic_analyses`
   - `article_summaries`
+  - `source_decisions` par thème, pour rendre explicites les sources retenues, gardées en contexte ou écartées.
 
 Sortie principale :
 - `RegulatoryEngineOutput`
@@ -85,6 +88,20 @@ Versions :
 5. L'IA arbitre cette lecture sans inventer de valeurs.
 6. Le résultat final est persisté dans `zone_analyses.structuredJson`.
 7. Le chat, la vue analyse et le workspace mairie consomment tous ce même objet.
+
+## Contrôle des données restituées
+
+Chaque thème peut désormais porter une liste `source_decisions` :
+- `retained_primary`
+- `retained_secondary`
+- `retained_graphical`
+- `retained_risk`
+- `discarded_context`
+- `discarded_low_confidence`
+
+L'objectif est double :
+- donner une vraie lisibilité sur le chemin d'interprétation,
+- éviter l'effet “boîte noire” quand l'IA arbitre entre plusieurs pièces ou renvois.
 
 ## Garde-fous
 
@@ -128,4 +145,3 @@ Vue :
 Rôle :
 - affiche la lecture experte consolidée,
 - expose les thèmes, les articles, les autres pièces et l'orchestration IA.
-

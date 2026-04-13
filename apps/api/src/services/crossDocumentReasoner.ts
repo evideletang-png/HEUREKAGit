@@ -8,6 +8,7 @@ import type {
   RegulatoryConfidence,
   RegulatoryEngineOutput,
   RegulatoryRuleType,
+  RegulatorySourceDecision,
   RegulatoryTopicAnalysis,
   ZoneRegulatoryIndex,
 } from "./regulatoryInterpretationTypes.js";
@@ -53,6 +54,23 @@ function buildSourceLabel(source: IndexedRegulatorySource) {
     source.anchor_label,
   ].filter(Boolean);
   return parts.join(" · ") || source.summary.slice(0, 120) || "Source non nommée";
+}
+
+function sourcePriorityScore(source: IndexedRegulatorySource) {
+  let score = 0;
+  if (source.source_type === "published_rule") score += 100;
+  if (source.source_type === "segment") score += 60;
+  if (source.source_type === "zone_section") score += 50;
+  if (source.source_type === "graphical_doc") score += 40;
+  if (source.source_type === "risk" || source.source_type === "overlay") score += 35;
+  if (source.qualification === "règle opposable directe") score += 20;
+  if (source.qualification === "règle opposable indirecte") score += 12;
+  if (source.confidence === "high") score += 12;
+  if (source.confidence === "medium") score += 6;
+  if (source.page_start != null) score += 2;
+  if (source.signals.some((signal) => signal.kind === "graphic_referral")) score += 3;
+  if (source.signals.some((signal) => signal.kind === "risk_referral" || signal.kind === "overlay_referral")) score += 2;
+  return score;
 }
 
 function truncate(text: string | null | undefined, max = 320) {
@@ -114,6 +132,80 @@ function buildReasoningSummary(args: {
     parts.push("Des risques ou servitudes superposés doivent être recoupés.");
   }
   return parts.join(" ");
+}
+
+function buildSourceDecisions(args: {
+  directRules: IndexedRegulatorySource[];
+  graphicalSources: IndexedRegulatorySource[];
+  indirectSources: IndexedRegulatorySource[];
+  riskSources: IndexedRegulatorySource[];
+  hasGraphicReferral: boolean;
+}): RegulatorySourceDecision[] {
+  const decisions: RegulatorySourceDecision[] = [];
+  const seen = new Set<string>();
+
+  const pushDecision = (
+    source: IndexedRegulatorySource,
+    decision: RegulatorySourceDecision["decision"],
+    reason: string,
+  ) => {
+    const key = `${decision}:${source.source_id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    decisions.push({
+      source_label: buildSourceLabel(source),
+      source_type: source.source_type,
+      decision,
+      reason,
+      confidence: source.confidence,
+    });
+  };
+
+  const rankedDirect = [...args.directRules].sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left));
+  const rankedIndirect = [...args.indirectSources].sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left));
+  const rankedGraphical = [...args.graphicalSources].sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left));
+  const rankedRisk = [...args.riskSources].sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left));
+
+  const primary = rankedDirect[0] || rankedIndirect[0] || rankedGraphical[0] || rankedRisk[0] || null;
+  if (primary) {
+    pushDecision(primary, "retained_primary", primary.source_type === "published_rule"
+      ? "Règle publiée calibrée retenue comme source principale pour ce thème."
+      : "Source textuelle la plus robuste retenue comme base de lecture pour ce thème.");
+  }
+
+  for (const source of rankedDirect.slice(primary?.source_id === rankedDirect[0]?.source_id ? 1 : 0, 3)) {
+    pushDecision(source, "retained_secondary", "Source textuelle conservée pour confirmer, nuancer ou compléter la source principale.");
+  }
+
+  for (const source of rankedIndirect.slice(0, 2)) {
+    pushDecision(source, "retained_secondary", "Source complémentaire conservée pour documenter les conditions, renvois ou précisions de lecture.");
+  }
+
+  if (args.hasGraphicReferral || rankedGraphical.length > 0) {
+    for (const source of rankedGraphical.slice(0, 2)) {
+      pushDecision(source, "retained_graphical", "Pièce graphique retenue car le thème dépend d’un renvoi au plan, à une légende ou à une prescription graphique.");
+    }
+  }
+
+  for (const source of rankedRisk.slice(0, 2)) {
+    pushDecision(source, "retained_risk", "Source de risque ou de servitude conservée comme contrainte superposée potentiellement plus contraignante.");
+  }
+
+  const rankedDiscarded = [...rankedIndirect.slice(2), ...rankedGraphical.slice(2), ...rankedRisk.slice(2)]
+    .sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left))
+    .slice(0, 3);
+
+  for (const source of rankedDiscarded) {
+    pushDecision(
+      source,
+      source.confidence === "low" ? "discarded_low_confidence" : "discarded_context",
+      source.confidence === "low"
+        ? "Source repérée mais écartée du cœur du raisonnement car trop faible ou trop ambiguë à ce stade."
+        : "Source conservée en contexte mais non retenue comme pièce structurante pour la règle principale.",
+    );
+  }
+
+  return decisions;
 }
 
 function articleStatusFromTopicAnalysis(analysis: RegulatoryTopicAnalysis): RegulatoryArticleSummary["status"] {
@@ -234,7 +326,7 @@ export function buildCrossDocumentReasoning(args: {
       ...bundle.graphical_sources,
       ...bundle.indirect_sources,
       ...bundle.risk_sources,
-    ];
+    ].sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left));
     const primarySource = orderedSources[0] || null;
     const conditions = unique(
       topicRules
@@ -281,6 +373,13 @@ export function buildCrossDocumentReasoning(args: {
       warnings,
     });
     const secondarySources = orderedSources.slice(1, 6).map(buildSourceLabel);
+    const sourceDecisions = buildSourceDecisions({
+      directRules: bundle.direct_rules,
+      graphicalSources: bundle.graphical_sources,
+      indirectSources: bundle.indirect_sources,
+      riskSources: bundle.risk_sources,
+      hasGraphicReferral: bundle.cross_document_signals.some((signal) => signal.kind === "graphic_referral"),
+    });
     const ruleSummary = primarySource
       ? truncate(primarySource.summary, 420)
       : `Aucune règle ferme n’a été stabilisée pour ${topicMeta.description.toLowerCase()}.`;
@@ -311,6 +410,7 @@ export function buildCrossDocumentReasoning(args: {
         graphicalDependencies: graphical.dependencies.map((dependency) => dependency.document_name),
         risksAndServitudes: risks.risks_and_servitudes,
       }),
+      source_decisions: sourceDecisions,
     };
   });
 

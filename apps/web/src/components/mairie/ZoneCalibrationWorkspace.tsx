@@ -103,6 +103,28 @@ type ZoneWorkspaceResponse = {
   }>;
   expertAnalysis: {
     analysisVersion: string;
+    documentSet?: Array<{
+      document_id: string;
+      source_name: string;
+      canonical_type: string;
+      normative_weight: string;
+      set_role: string;
+      confidence: string;
+    }>;
+    topicAnalyses?: Array<{
+      topic: string;
+      rule_type: string;
+      confidence: string;
+      rule_summary: string;
+      primary_source: string;
+      warnings: string[];
+      source_decisions?: Array<{
+        source_label: string;
+        decision: string;
+        reason: string;
+        confidence: string;
+      }>;
+    }>;
     articleOrThemeBlocks: Array<{
       key: string;
       articleCode: string | null;
@@ -1213,6 +1235,44 @@ export function ZoneCalibrationWorkspace({
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <p className="leading-relaxed text-muted-foreground">{visibleExpertAnalysis.professionalInterpretation}</p>
+                {visibleExpertAnalysis.documentSet?.length ? (
+                  <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Jeu documentaire retenu</div>
+                    <div className="flex flex-wrap gap-2">
+                      {visibleExpertAnalysis.documentSet.slice(0, 6).map((doc) => (
+                        <Badge key={doc.document_id} variant="secondary" className="gap-1">
+                          {doc.source_name}
+                          <span className="text-[10px] uppercase text-muted-foreground">{doc.canonical_type}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {visibleExpertAnalysis.topicAnalyses?.length ? (
+                  <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Arbitrage IA par thème</div>
+                    {visibleExpertAnalysis.topicAnalyses.slice(0, 3).map((topic) => (
+                      <div key={`${topic.topic}-${topic.primary_source}`} className="space-y-1 rounded-lg border bg-background/80 p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{topic.topic}</Badge>
+                          <Badge variant="secondary">{topic.rule_type}</Badge>
+                          <Badge variant="outline">Confiance {topic.confidence}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{topic.rule_summary}</p>
+                        {topic.source_decisions?.length ? (
+                          <div className="space-y-1 text-xs text-muted-foreground">
+                            {topic.source_decisions.slice(0, 3).map((decision, index) => (
+                              <p key={`${decision.source_label}-${index}`}>
+                                <span className="font-medium text-foreground">{decision.source_label}</span>
+                                {` — ${decision.decision} · ${decision.reason}`}
+                              </p>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 {visibleExpertAnalysis.crossEffects.length > 0 && (
                   <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Effets croisés</div>

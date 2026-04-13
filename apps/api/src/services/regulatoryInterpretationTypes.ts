@@ -8,6 +8,27 @@ export type RegulatoryRuleType =
 
 export type RegulatoryConfidence = "high" | "medium" | "low";
 
+export type RegulatorySourceDecision = {
+  source_label: string;
+  source_type:
+    | "published_rule"
+    | "segment"
+    | "zone_section"
+    | "document"
+    | "overlay"
+    | "risk"
+    | "graphical_doc";
+  decision:
+    | "retained_primary"
+    | "retained_secondary"
+    | "retained_graphical"
+    | "retained_risk"
+    | "discarded_context"
+    | "discarded_low_confidence";
+  reason: string;
+  confidence: RegulatoryConfidence;
+};
+
 export type RegulatoryDocumentCanonicalType =
   | "written_regulation"
   | "graphic_regulation"
@@ -195,6 +216,7 @@ export type RegulatoryTopicAnalysis = {
   warnings: string[];
   confidence: RegulatoryConfidence;
   reasoning_summary: string;
+  source_decisions?: RegulatorySourceDecision[];
 };
 
 export type RegulatoryArticleSummary = {

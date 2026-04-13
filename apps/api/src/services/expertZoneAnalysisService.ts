@@ -847,6 +847,10 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function buildTopicAnalysisKey(topic: { topic?: string | null; primary_source?: string | null }) {
+  return `${String(topic.topic || "").trim()}::${String(topic.primary_source || "").trim()}`;
+}
+
 export async function buildExpertZoneAnalysisWithAdjudication(args: Parameters<typeof buildExpertZoneAnalysis>[0]): Promise<ExpertZoneAnalysis> {
   const baseAnalysis = buildExpertZoneAnalysis(args);
   if (!baseAnalysis.multiDocumentAnalysis) {
@@ -868,11 +872,25 @@ export async function buildExpertZoneAnalysisWithAdjudication(args: Parameters<t
     return baseAnalysis;
   }
 
+  const baseTopicSourceDecisionMap = new Map(
+    (baseAnalysis.multiDocumentAnalysis?.topic_analyses || []).map((topic) => [
+      buildTopicAnalysisKey(topic),
+      topic.source_decisions || [],
+    ]),
+  );
+
+  const mergedTopicAnalyses = adjudication.topic_analyses.map((topic) => ({
+    ...topic,
+    source_decisions: topic.source_decisions?.length
+      ? topic.source_decisions
+      : (baseTopicSourceDecisionMap.get(buildTopicAnalysisKey(topic)) || []),
+  }));
+
   return {
     ...baseAnalysis,
     analysisVersion: "expert_zone_analysis_v3",
     aiOrchestration: adjudication,
-    topicAnalyses: adjudication.topic_analyses,
+    topicAnalyses: mergedTopicAnalyses,
     articleSummaries: adjudication.article_summaries,
     crossEffects: uniqueStrings([...baseAnalysis.crossEffects, ...adjudication.warnings]),
     professionalInterpretation: adjudication.professional_interpretation || baseAnalysis.professionalInterpretation,

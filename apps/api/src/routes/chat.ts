@@ -370,6 +370,20 @@ async function buildSystemPrompt(args: {
         expertZoneAnalysis.topicAnalyses?.length
           ? `Thèmes: ${expertZoneAnalysis.topicAnalyses.slice(0, 6).map((topic: any) => `${topic.topic} [${topic.confidence}]`).join(", ")}.`
           : "",
+        expertZoneAnalysis.topicAnalyses?.some((topic: any) => Array.isArray(topic.source_decisions) && topic.source_decisions.length > 0)
+          ? `Arbitrage des sources: ${expertZoneAnalysis.topicAnalyses
+              .slice(0, 4)
+              .map((topic: any) => {
+                const retained = (topic.source_decisions || [])
+                  .filter((decision: any) => String(decision.decision || "").startsWith("retained"))
+                  .slice(0, 2)
+                  .map((decision: any) => decision.source_label)
+                  .join(", ");
+                return retained ? `${topic.topic}: ${retained}` : null;
+              })
+              .filter(Boolean)
+              .join(" | ")}.`
+          : "",
         expertZoneAnalysis.crossEffects?.length
           ? `Effets croisés: ${expertZoneAnalysis.crossEffects.join(" ")}`
           : "",

@@ -71,9 +71,10 @@ MÉTHODE OBLIGATOIRE :
 1. Relire le jeu documentaire fourni.
 2. Relire les analyses thématiques déterministes.
 3. Croiser avec les blocs thématiques consolidés et les autres pièces.
-4. Arbitrer une version finale thème par thème.
-5. En déduire une synthèse canonique par article.
-6. Produire une conclusion opérationnelle prudente.
+4. Expliquer quelles sources tu retiens, lesquelles tu gardes seulement en contexte, et lesquelles tu écartes du cœur du raisonnement.
+5. Arbitrer une version finale thème par thème.
+6. En déduire une synthèse canonique par article.
+7. Produire une conclusion opérationnelle prudente.
 
 RÈGLES DE DÉCISION :
 - Quand une règle est publiée et claire, elle prime.
@@ -81,6 +82,7 @@ RÈGLES DE DÉCISION :
 - Quand une servitude / un risque ajoute une contrainte, la logique la plus contraignante doit être signalée.
 - Quand l'article n'existe pas explicitement, n'en invente pas ; rattache au thème canonique.
 - L'absence d'une règle dans le règlement littéral ne signifie jamais l'absence de règle.
+- Chaque thème doit expliciter les sources retenues en \`source_decisions\`, avec une logique de conservation ou d'écartement compréhensible.
 
 STYLE :
 - français professionnel,

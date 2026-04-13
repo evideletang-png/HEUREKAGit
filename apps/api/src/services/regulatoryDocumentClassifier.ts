@@ -37,6 +37,60 @@ type TownHallDocumentLike = {
   structuredContent?: unknown;
 };
 
+function extractStructuredContentStrings(input: unknown, depth = 0, bucket?: Set<string>) {
+  const values = bucket || new Set<string>();
+  if (input == null || depth > 4 || values.size > 120) return values;
+
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (trimmed.length >= 3) values.add(trimmed);
+    return values;
+  }
+
+  if (typeof input === "number" || typeof input === "boolean") {
+    return values;
+  }
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      extractStructuredContentStrings(item, depth + 1, values);
+      if (values.size > 120) break;
+    }
+    return values;
+  }
+
+  if (typeof input === "object") {
+    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+      const normalizedKey = key.replace(/[_-]+/g, " ").trim();
+      if (normalizedKey.length >= 3) values.add(normalizedKey);
+      extractStructuredContentStrings(value, depth + 1, values);
+      if (values.size > 120) break;
+    }
+  }
+
+  return values;
+}
+
+function buildDocumentHaystack(input: {
+  documentType?: string | null;
+  category?: string | null;
+  subCategory?: string | null;
+  rawText?: string | null;
+  sourceName?: string | null;
+  structuredContent?: unknown;
+}) {
+  return [
+    input.documentType || "",
+    input.category || "",
+    input.subCategory || "",
+    input.sourceName || "",
+    input.rawText || "",
+    Array.from(extractStructuredContentStrings(input.structuredContent)).join(" "),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
 const PRIORITY_TOPIC_TERMS: Array<{ topic: string; patterns: RegExp[] }> = [
   { topic: "hauteur", patterns: [/\bhauteur\b/i, /\bfa[iî]tage\b/i, /\b[ée]gout\b/i, /\bacrot[èe]re\b/i] },
   { topic: "emprise_sol", patterns: [/\bemprise au sol\b/i, /\bces\b/i, /\bcoefficient d['’ ]emprise\b/i] },
@@ -73,10 +127,9 @@ function inferCanonicalType(input: {
   subCategory?: string | null;
   rawText?: string | null;
   sourceName?: string | null;
+  structuredContent?: unknown;
 }): RegulatoryDocumentCanonicalType {
-  const hint = [input.documentType || "", input.category || "", input.subCategory || "", input.sourceName || "", input.rawText || ""]
-    .join(" ")
-    .toLowerCase();
+  const hint = buildDocumentHaystack(input);
 
   if (/\bppri\b/.test(hint)) return "ppri";
   if (/\bpprt\b/.test(hint)) return "pprt";
@@ -147,7 +200,12 @@ function extractZoneHints(profile: DocumentProfileLike | null | undefined, doc: 
   }
   const explicitZone = String((doc as any).zone || "").trim();
   if (explicitZone) hints.add(explicitZone);
-  const combinedText = [doc.title || "", doc.fileName || "", doc.rawText || ""].join(" ");
+  const combinedText = [
+    doc.title || "",
+    doc.fileName || "",
+    doc.rawText || "",
+    Array.from(extractStructuredContentStrings(doc.structuredContent)).join(" "),
+  ].join(" ");
   for (const match of combinedText.matchAll(/\b(?:zone|secteur|sous-zone)\s+([A-Z]{1,3}[A-Z0-9-]*)\b/g)) {
     const zoneCode = String(match[1] || "").trim();
     if (zoneCode.length > 0 && zoneCode.length <= 8) hints.add(zoneCode);
@@ -168,7 +226,13 @@ function extractTopicHints(profile: DocumentProfileLike | null | undefined, doc:
     }
   }
 
-  const haystack = [doc.title || "", doc.fileName || "", doc.documentType || "", doc.rawText || ""].join(" ");
+  const haystack = [
+    doc.title || "",
+    doc.fileName || "",
+    doc.documentType || "",
+    doc.rawText || "",
+    Array.from(extractStructuredContentStrings(doc.structuredContent)).join(" "),
+  ].join(" ");
   for (const entry of PRIORITY_TOPIC_TERMS) {
     if (entry.patterns.some((pattern) => pattern.test(haystack))) {
       hints.add(entry.topic);
@@ -279,12 +343,18 @@ export function classifyRegulatoryDocument(args: {
     subCategory,
     rawText: args.doc.rawText,
     sourceName: args.doc.title || args.doc.fileName || profile?.sourceName || null,
+    structuredContent: args.doc.structuredContent,
   });
   const legacyCanonicalType = normalizeLegacyCanonicalType(documentType, category, subCategory);
   const classifierConfidence = Number(profile?.classifierConfidence ?? rawClassification.suggestionConfidence ?? 0.6);
   const zoneHints = extractZoneHints(profile, args.doc);
   const structuredTopics = extractTopicHints(profile, args.doc);
-  const detectedSignals = detectSignals([args.doc.title || "", args.doc.fileName || "", args.doc.rawText || ""].join("\n"));
+  const detectedSignals = detectSignals([
+    args.doc.title || "",
+    args.doc.fileName || "",
+    args.doc.rawText || "",
+    Array.from(extractStructuredContentStrings(args.doc.structuredContent)).join("\n"),
+  ].join("\n"));
   const normativeWeight = inferNormativeWeight(canonicalType);
   const contentMode = inferContentMode({
     canonicalType,
@@ -379,6 +449,7 @@ export function inferCanonicalRegulatoryDocumentType(args: {
   subCategory?: string | null;
   rawText?: string | null;
   sourceName?: string | null;
+  structuredContent?: unknown;
 }) {
   return inferCanonicalType(args);
 }

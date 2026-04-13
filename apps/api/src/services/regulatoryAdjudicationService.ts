@@ -22,6 +22,20 @@ const ArticleStatusEnum = z.enum([
   "cross_document_required",
 ]);
 const ZonePlutotEnum = z.enum(["très restrictive", "restrictive", "intermédiaire", "souple", "très souple"]);
+const SourceDecisionSchema = z.object({
+  source_label: z.string(),
+  source_type: z.enum(["published_rule", "segment", "zone_section", "document", "overlay", "risk", "graphical_doc"]),
+  decision: z.enum([
+    "retained_primary",
+    "retained_secondary",
+    "retained_graphical",
+    "retained_risk",
+    "discarded_context",
+    "discarded_low_confidence",
+  ]),
+  reason: z.string(),
+  confidence: ConfidenceEnum,
+});
 
 const TopicAnalysisSchema = z.object({
   commune: z.string(),
@@ -51,6 +65,7 @@ const TopicAnalysisSchema = z.object({
   warnings: z.array(z.string()),
   confidence: ConfidenceEnum,
   reasoning_summary: z.string(),
+  source_decisions: z.array(SourceDecisionSchema).optional(),
 });
 
 const ArticleSummarySchema = z.object({
@@ -190,4 +205,3 @@ export async function adjudicateRegulatoryEngineOutput(args: {
     return null;
   }
 }
-

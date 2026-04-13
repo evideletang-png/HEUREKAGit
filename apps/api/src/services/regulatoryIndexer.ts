@@ -75,6 +75,34 @@ function normalizeZoneCode(value: string | null | undefined) {
   return normalizeExtractedText(value || "").replace(/\s+/g, "");
 }
 
+function extractSubzoneCandidates(baseZone: string, ...values: Array<string | null | undefined>) {
+  const normalizedBaseZone = normalizeZoneCode(baseZone);
+  const candidates = new Map<string, number>();
+
+  const registerCandidate = (rawCandidate: string, weight: number) => {
+    const candidate = String(rawCandidate || "").trim();
+    const normalizedCandidate = normalizeZoneCode(candidate);
+    if (!normalizedCandidate || normalizedCandidate === normalizedBaseZone) return;
+    if (!normalizedCandidate.startsWith(normalizedBaseZone)) return;
+    candidates.set(candidate, (candidates.get(candidate) || 0) + weight);
+  };
+
+  for (const value of values) {
+    const text = String(value || "");
+    if (!text.trim()) continue;
+
+    for (const match of text.matchAll(/\b(?:zone|secteur|sous-zone|sous secteur)\s+([0-9A-Z-]{2,10})\b/gi)) {
+      registerCandidate(String(match[1] || ""), 3);
+    }
+
+    for (const match of text.matchAll(/\b([0-9]?[A-Z]{1,4}[A-Z0-9-]{1,6})\b/g)) {
+      registerCandidate(String(match[1] || ""), 1);
+    }
+  }
+
+  return candidates;
+}
+
 function inferArticleCodeFromText(...values: Array<string | null | undefined>) {
   const merged = values.filter(Boolean).join("\n");
   const match = merged.match(/(?:article|art\.)\s*(\d{1,2})\b/i);
@@ -277,10 +305,16 @@ export function buildZoneRegulatoryIndex(args: {
   zoneSections?: ZoneSectionLike[];
 }) : ZoneRegulatoryIndex {
   const normalizedZone = normalizeZoneCode(args.zoneCode);
-  const subzoneCandidates = new Set<string>();
+  const subzoneCandidates = new Map<string, number>();
   const topicMap = new Map<string, IndexedTopicBundle>();
   const articleSourceMap = new Map<string, IndexedRegulatorySource[]>();
   const warnings: string[] = [];
+
+  const registerSubzoneCandidates = (candidates: Map<string, number>) => {
+    for (const [candidate, score] of candidates.entries()) {
+      subzoneCandidates.set(candidate, (subzoneCandidates.get(candidate) || 0) + score);
+    }
+  };
 
   for (const doc of args.documents) {
     const bundleTopics = doc.structured_topics.length > 0 ? doc.structured_topics : ["conditions_particulieres"];
@@ -306,12 +340,13 @@ export function buildZoneRegulatoryIndex(args: {
       signals: doc.detected_signals,
     };
 
-    doc.zone_hints.forEach((hint: string) => {
-      const normalizedHint = normalizeZoneCode(hint);
-      if (normalizedHint.startsWith(normalizedZone) && normalizedHint.length > normalizedZone.length) {
-        subzoneCandidates.add(hint);
-      }
-    });
+    registerSubzoneCandidates(extractSubzoneCandidates(
+      args.zoneCode,
+      ...doc.zone_hints,
+      ...doc.detected_signals.map((signal) => signal.excerpt || signal.label),
+      doc.source_name,
+      doc.reasoning_note,
+    ));
 
     for (const topic of bundleTopics) {
       const topicCode = inferTopicCode({ themeCode: topic });
@@ -363,6 +398,12 @@ export function buildZoneRegulatoryIndex(args: {
     bundle.indirect_sources.push(source);
     if (articleCode && !bundle.relevant_articles.includes(articleCode)) bundle.relevant_articles.push(articleCode);
     bundle.cross_document_signals.push(...source.signals);
+    registerSubzoneCandidates(extractSubzoneCandidates(
+      args.zoneCode,
+      segment.anchorLabel,
+      segment.sourceTextFull,
+      segment.documentTitle,
+    ));
     if (articleCode) {
       articleSourceMap.set(articleCode, [...(articleSourceMap.get(articleCode) || []), source]);
     }
@@ -412,9 +453,13 @@ export function buildZoneRegulatoryIndex(args: {
     }
     const zoneCode = getRuleZoneCode(rule);
     const normalizedRuleZone = normalizeZoneCode(zoneCode);
-    if (normalizedRuleZone.startsWith(normalizedZone) && normalizedRuleZone.length > normalizedZone.length) {
-      subzoneCandidates.add(zoneCode);
-    }
+    registerSubzoneCandidates(extractSubzoneCandidates(
+      args.zoneCode,
+      zoneCode,
+      getRuleAnchorLabel(rule),
+      rawText,
+      relationResolutionNote,
+    ));
   }
 
   for (const section of args.zoneSections || []) {
@@ -446,6 +491,12 @@ export function buildZoneRegulatoryIndex(args: {
     bundle.indirect_sources.push(source);
     if (articleCode && !bundle.relevant_articles.includes(articleCode)) bundle.relevant_articles.push(articleCode);
     bundle.cross_document_signals.push(...source.signals);
+    registerSubzoneCandidates(extractSubzoneCandidates(
+      args.zoneCode,
+      section.heading,
+      section.sourceText,
+      section.documentTitle,
+    ));
   }
 
   for (const overlay of args.overlays) {
@@ -514,7 +565,11 @@ export function buildZoneRegulatoryIndex(args: {
   return {
     commune: args.commune,
     identified_zone: args.zoneCode,
-    identified_subzone: Array.from(subzoneCandidates).sort((left, right) => right.length - left.length)[0] || null,
+    identified_subzone: Array.from(subzoneCandidates.entries())
+      .sort((left, right) => {
+        if (left[1] !== right[1]) return right[1] - left[1];
+        return right[0].length - left[0].length;
+      })[0]?.[0] || null,
     document_set: args.documents,
     topic_index,
     article_index,
