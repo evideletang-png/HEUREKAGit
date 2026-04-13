@@ -4,9 +4,13 @@ import { regulatoryCalibrationZonesTable } from "../../../../packages/db/src/sch
 import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regulatoryOverlays.js";
 import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
 import { zoneThematicSegmentsTable } from "../../../../packages/db/src/schema/zoneThematicSegments.js";
+import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
 import type { StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
 import { normalizeExtractedText } from "./textQualityService.js";
 import { REGULATORY_ARTICLE_REFERENCE, REGULATORY_THEME_SEED, splitDocumentIntoCalibrationPages } from "./regulatoryCalibrationService.js";
+import { adjudicateRegulatoryEngineOutput } from "./regulatoryAdjudicationService.js";
+import { buildMultiDocumentRegulatoryEngine } from "./multiDocumentRegulatoryEngine.js";
+import type { RegulatoryAiAdjudication, RegulatoryEngineOutput } from "./regulatoryInterpretationTypes.js";
 
 type CalibrationZone = typeof regulatoryCalibrationZonesTable.$inferSelect;
 type OverlayRow = typeof regulatoryOverlaysTable.$inferSelect;
@@ -66,7 +70,7 @@ export type ExpertZoneArticleOrThemeBlock = {
 };
 
 export type ExpertZoneAnalysis = {
-  analysisVersion: "expert_zone_analysis_v1";
+  analysisVersion: "expert_zone_analysis_v1" | "expert_zone_analysis_v2" | "expert_zone_analysis_v3";
   identification: {
     commune: string;
     zoneCode: string;
@@ -88,6 +92,11 @@ export type ExpertZoneAnalysis = {
     complementaryDocuments: string[];
   };
   articleOrThemeBlocks: ExpertZoneArticleOrThemeBlock[];
+  multiDocumentAnalysis?: RegulatoryEngineOutput | null;
+  aiOrchestration?: RegulatoryAiAdjudication | null;
+  documentSet?: RegulatoryEngineOutput["document_set"];
+  topicAnalyses?: RegulatoryEngineOutput["topic_analyses"];
+  articleSummaries?: RegulatoryEngineOutput["article_summaries"];
   crossEffects: string[];
   otherDocuments: Array<{
     title: string;
@@ -564,6 +573,18 @@ export function buildExpertZoneAnalysis(args: {
     documentTitle?: string | null;
   }>;
   rules: StructuredUrbanRuleSource[];
+  documents?: Array<Pick<TownHallDocumentRow, "id" | "title" | "fileName" | "documentType" | "category" | "subCategory" | "rawText" | "isOpposable" | "structuredContent">>;
+  documentProfiles?: Array<typeof documentKnowledgeProfilesTable.$inferSelect>;
+  zoneSections?: Array<{
+    id: string;
+    zoneCode: string;
+    heading: string | null;
+    sourceText: string | null;
+    startPage: number | null;
+    endPage: number | null;
+    townHallDocumentId?: string | null;
+    documentTitle?: string | null;
+  }>;
 }): ExpertZoneAnalysis {
   const themeGroups = new Map<string, {
     themeCode: string;
@@ -693,7 +714,7 @@ export function buildExpertZoneAnalysis(args: {
     ...(args.referenceDocument?.title ? [args.referenceDocument.title] : []),
     ...args.overlays.map((overlay) => `${overlay.overlayCode}${overlay.overlayType ? ` (${overlay.overlayType})` : ""}`),
   ]));
-  const otherDocuments = [
+  let otherDocuments: ExpertZoneAnalysis["otherDocuments"] = [
     ...args.overlays.map((overlay) => ({
       title: `${overlay.overlayCode}${overlay.overlayLabel ? ` · ${overlay.overlayLabel}` : ""}`,
       role: overlay.overlayType || "overlay",
@@ -725,8 +746,70 @@ export function buildExpertZoneAnalysis(args: {
         ? "maîtrise par accès et stationnement"
         : "règles de zone principales";
 
+  let multiDocumentAnalysis: RegulatoryEngineOutput | null = null;
+  let professionalInterpretation = [
+    `La zone ${args.zone.zoneCode} est désormais lue à partir de blocs thématiques cohérents plutôt qu’à partir de phrases isolées.`,
+    articleOrThemeBlocks.length > 0
+      ? `Les thèmes les plus structurants sont ${articleOrThemeBlocks.slice(0, 4).map((block) => block.themeLabel.toLowerCase()).join(", ")}.`
+      : "Aucun thème réglementaire suffisamment solide n’a encore été stabilisé.",
+    crossEffects[0] || "La lecture opérationnelle doit rester prudente tant que certaines pièces complémentaires n’ont pas été confirmées graphiquement.",
+  ].join(" ");
+  let operationalConclusion: ExpertZoneAnalysis["operationalConclusion"] = {
+    zonePlutot,
+    logiqueDominante: logicDominante,
+    facteursLimitantsPrincipaux: articleOrThemeBlocks
+      .filter((block) => block.niveauVigilance !== "faible")
+      .slice(0, 4)
+      .map((block) => block.themeLabel),
+    opportunitesPossibles: articleOrThemeBlocks
+      .filter((block) => ["hauteur", "emprise_sol", "destination"].includes(block.themeCode) && block.qualification !== "orientation de projet")
+      .slice(0, 3)
+      .map((block) => `${block.themeLabel} : ${block.ruleResumee}`),
+    pointsBloquantsPotentiels: [
+      ...articleOrThemeBlocks
+        .filter((block) => block.niveauVigilance === "fort")
+        .slice(0, 4)
+        .map((block) => `${block.themeLabel} — ${block.effetConcretConstructibilite}`),
+    ],
+    pointsAConfirmerSurPlanOuAnnexe: [
+      ...args.overlays.map((overlay) => `${overlay.overlayCode}${overlay.overlayType ? ` (${overlay.overlayType})` : ""}`),
+      ...(themeSet.has("recul_voie") || themeSet.has("recul_limite")
+        ? ["Vérifier les retraits graphiques, marges de recul et prescriptions localisées sur le plan."]
+        : []),
+    ].filter(Boolean),
+  };
+
+  if (args.documents && args.documentProfiles) {
+    const engine = buildMultiDocumentRegulatoryEngine({
+      commune: args.commune,
+      zoneCode: args.zone.zoneCode,
+      docs: args.documents,
+      profiles: args.documentProfiles,
+      segments: args.segments.map((segment) => ({
+        ...segment,
+        documentTitle: segment.documentTitle || null,
+      })),
+      rules: args.rules,
+      overlays: args.overlays.map((overlay) => ({
+        id: overlay.id,
+        overlayCode: overlay.overlayCode,
+        overlayLabel: overlay.overlayLabel,
+        overlayType: overlay.overlayType,
+        status: overlay.status,
+      })),
+      zoneSections: args.zoneSections || [],
+    });
+    multiDocumentAnalysis = engine.engineOutput;
+    otherDocuments = engine.otherDocuments.length > 0 ? engine.otherDocuments : otherDocuments;
+    professionalInterpretation = engine.professionalInterpretation;
+    operationalConclusion = engine.operationalConclusion;
+    for (const warning of engine.engineOutput.warnings.slice(0, 4)) {
+      if (!crossEffects.includes(warning)) crossEffects.push(warning);
+    }
+  }
+
   return {
-    analysisVersion: "expert_zone_analysis_v1",
+    analysisVersion: multiDocumentAnalysis ? "expert_zone_analysis_v2" : "expert_zone_analysis_v1",
     identification: {
       commune: args.commune,
       zoneCode: args.zone.zoneCode,
@@ -748,39 +831,52 @@ export function buildExpertZoneAnalysis(args: {
       complementaryDocuments,
     },
     articleOrThemeBlocks,
+    multiDocumentAnalysis,
+    aiOrchestration: null,
+    documentSet: multiDocumentAnalysis?.document_set,
+    topicAnalyses: multiDocumentAnalysis?.topic_analyses,
+    articleSummaries: multiDocumentAnalysis?.article_summaries,
     crossEffects,
     otherDocuments,
-    professionalInterpretation: [
-      `La zone ${args.zone.zoneCode} est désormais lue à partir de blocs thématiques cohérents plutôt qu’à partir de phrases isolées.`,
-      articleOrThemeBlocks.length > 0
-        ? `Les thèmes les plus structurants sont ${articleOrThemeBlocks.slice(0, 4).map((block) => block.themeLabel.toLowerCase()).join(", ")}.`
-        : "Aucun thème réglementaire suffisamment solide n’a encore été stabilisé.",
-      crossEffects[0] || "La lecture opérationnelle doit rester prudente tant que certaines pièces complémentaires n’ont pas été confirmées graphiquement.",
-    ].join(" "),
-    operationalConclusion: {
-      zonePlutot,
-      logiqueDominante: logicDominante,
-      facteursLimitantsPrincipaux: articleOrThemeBlocks
-        .filter((block) => block.niveauVigilance !== "faible")
-        .slice(0, 4)
-        .map((block) => block.themeLabel),
-      opportunitesPossibles: articleOrThemeBlocks
-        .filter((block) => ["hauteur", "emprise_sol", "destination"].includes(block.themeCode) && block.qualification !== "orientation de projet")
-        .slice(0, 3)
-        .map((block) => `${block.themeLabel} : ${block.ruleResumee}`),
-      pointsBloquantsPotentiels: [
-        ...articleOrThemeBlocks
-          .filter((block) => block.niveauVigilance === "fort")
-          .slice(0, 4)
-          .map((block) => `${block.themeLabel} — ${block.effetConcretConstructibilite}`),
-      ],
-      pointsAConfirmerSurPlanOuAnnexe: [
-        ...args.overlays.map((overlay) => `${overlay.overlayCode}${overlay.overlayType ? ` (${overlay.overlayType})` : ""}`),
-        ...(themeSet.has("recul_voie") || themeSet.has("recul_limite")
-          ? ["Vérifier les retraits graphiques, marges de recul et prescriptions localisées sur le plan."]
-          : []),
-      ].filter(Boolean),
-    },
+    professionalInterpretation,
+    operationalConclusion,
+  };
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+export async function buildExpertZoneAnalysisWithAdjudication(args: Parameters<typeof buildExpertZoneAnalysis>[0]): Promise<ExpertZoneAnalysis> {
+  const baseAnalysis = buildExpertZoneAnalysis(args);
+  if (!baseAnalysis.multiDocumentAnalysis) {
+    return baseAnalysis;
+  }
+
+  const adjudication = await adjudicateRegulatoryEngineOutput({
+    commune: args.commune,
+    zoneCode: args.zone.zoneCode,
+    zoneLabel: args.zone.zoneLabel,
+    referenceDocumentTitle: args.referenceDocument?.title || args.referenceDocument?.fileName || null,
+    engineOutput: baseAnalysis.multiDocumentAnalysis,
+    articleOrThemeBlocks: baseAnalysis.articleOrThemeBlocks,
+    crossEffects: baseAnalysis.crossEffects,
+    otherDocuments: baseAnalysis.otherDocuments,
+  });
+
+  if (!adjudication) {
+    return baseAnalysis;
+  }
+
+  return {
+    ...baseAnalysis,
+    analysisVersion: "expert_zone_analysis_v3",
+    aiOrchestration: adjudication,
+    topicAnalyses: adjudication.topic_analyses,
+    articleSummaries: adjudication.article_summaries,
+    crossEffects: uniqueStrings([...baseAnalysis.crossEffects, ...adjudication.warnings]),
+    professionalInterpretation: adjudication.professional_interpretation || baseAnalysis.professionalInterpretation,
+    operationalConclusion: adjudication.operational_conclusion || baseAnalysis.operationalConclusion,
   };
 }
 
@@ -881,6 +977,8 @@ export async function loadZoneSegmentsForCommuneZone(args: {
       referenceDocument: null,
       segments: [] as Array<ZoneThematicSegmentRow & { documentTitle: string | null }>,
       overlays: [] as OverlayRow[],
+      documents: [] as TownHallDocumentRow[],
+      documentProfiles: [] as Array<typeof documentKnowledgeProfilesTable.$inferSelect>,
       expertAnalysis: null as ExpertZoneAnalysis | null,
     };
   }
@@ -969,13 +1067,41 @@ export async function loadZoneSegmentsForCommuneZone(args: {
       .where(inArray(regulatoryOverlaysTable.id, overlaysByRules))
     : [];
 
-  const expertAnalysis = buildExpertZoneAnalysis({
+  const documents = await db.select()
+    .from(townHallDocumentsTable)
+    .where(or(
+      ...args.communeAliases.map((alias) => eq(sql`lower(${townHallDocumentsTable.commune})`, alias.toLowerCase())),
+    )!);
+
+  const documentProfiles = args.communeAliases.length > 0
+    ? await db.select()
+      .from(documentKnowledgeProfilesTable)
+      .where(inArray(documentKnowledgeProfilesTable.municipalityId, args.communeAliases))
+    : [];
+
+  const zoneSections = referenceDocument
+    ? [{
+        id: `reference-${referenceDocument.id}`,
+        zoneCode: zone.zoneCode,
+        heading: referenceDocument.title || referenceDocument.fileName || null,
+        sourceText: referenceDocument.rawText || null,
+        startPage: zone.referenceStartPage || null,
+        endPage: zone.referenceEndPage || null,
+        townHallDocumentId: referenceDocument.id,
+        documentTitle: referenceDocument.title || referenceDocument.fileName || null,
+      }]
+    : [];
+
+  const expertAnalysis = await buildExpertZoneAnalysisWithAdjudication({
     commune: args.commune,
     zone,
     referenceDocument,
     overlays,
     segments,
     rules: args.structuredRules,
+    documents,
+    documentProfiles,
+    zoneSections,
   });
 
   return {
@@ -983,6 +1109,8 @@ export async function loadZoneSegmentsForCommuneZone(args: {
     referenceDocument,
     segments,
     overlays,
+    documents,
+    documentProfiles,
     expertAnalysis,
   };
 }

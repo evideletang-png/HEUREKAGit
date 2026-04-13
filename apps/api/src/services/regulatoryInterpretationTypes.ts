@@ -1,0 +1,249 @@
+export type RegulatoryRuleType =
+  | "textual"
+  | "textual_conditional"
+  | "graphical"
+  | "mixed"
+  | "cross_document"
+  | "undetermined";
+
+export type RegulatoryConfidence = "high" | "medium" | "low";
+
+export type RegulatoryDocumentCanonicalType =
+  | "written_regulation"
+  | "graphic_regulation"
+  | "zoning_map"
+  | "height_map"
+  | "special_provisions_map"
+  | "heritage_map"
+  | "oap"
+  | "annex_regulatory"
+  | "annex_calculation"
+  | "definitions_calculation"
+  | "sup_servitude"
+  | "ppri"
+  | "pprt"
+  | "risk_plan"
+  | "spr_heritage"
+  | "padd"
+  | "report"
+  | "informative"
+  | "unknown";
+
+export type RegulatoryDocumentContentMode = "text" | "graphical" | "mixed";
+
+export type RegulatoryNormativeWeight =
+  | "opposable_direct"
+  | "opposable_indirect"
+  | "orientation"
+  | "justification"
+  | "context";
+
+export type RegulatorySetRole =
+  | "primary"
+  | "secondary"
+  | "graphical_dependency"
+  | "risk_overlay"
+  | "context";
+
+export type CrossDocumentSignal = {
+  kind:
+    | "graphic_referral"
+    | "annex_referral"
+    | "risk_referral"
+    | "overlay_referral"
+    | "document_referral"
+    | "subsector_referral";
+  label: string;
+  excerpt: string | null;
+  confidence: RegulatoryConfidence;
+};
+
+export type ClassifiedRegulatoryDocument = {
+  document_id: string;
+  profile_id: string | null;
+  source_name: string;
+  canonical_type: RegulatoryDocumentCanonicalType;
+  legacy_canonical_type: string;
+  category: string | null;
+  sub_category: string | null;
+  document_type: string | null;
+  content_mode: RegulatoryDocumentContentMode;
+  normative_weight: RegulatoryNormativeWeight;
+  set_role: RegulatorySetRole;
+  is_opposable: boolean;
+  classifier_confidence: number;
+  source_authority: number;
+  extraction_mode: string | null;
+  extraction_reliability: number | null;
+  manual_review_required: boolean;
+  zone_hints: string[];
+  structured_topics: string[];
+  detected_signals: CrossDocumentSignal[];
+  relevance_score: number;
+  reasoning_note: string;
+};
+
+export type IndexedRegulatorySource = {
+  source_type:
+    | "published_rule"
+    | "segment"
+    | "zone_section"
+    | "document"
+    | "overlay"
+    | "risk"
+    | "graphical_doc";
+  source_id: string;
+  document_id: string | null;
+  document_title: string | null;
+  page_start: number | null;
+  page_end: number | null;
+  article_code: string | null;
+  anchor_type: string | null;
+  anchor_label: string | null;
+  theme_code: string | null;
+  summary: string;
+  raw_text: string | null;
+  qualification:
+    | "règle opposable directe"
+    | "règle opposable indirecte"
+    | "orientation de projet"
+    | "justification / doctrine locale"
+    | "information de contexte"
+    | "point à confirmer";
+  confidence: RegulatoryConfidence;
+  signals: CrossDocumentSignal[];
+};
+
+export type IndexedTopicBundle = {
+  topic_code: string;
+  topic_label: string;
+  relevant_articles: string[];
+  sources: IndexedRegulatorySource[];
+  direct_rules: IndexedRegulatorySource[];
+  indirect_sources: IndexedRegulatorySource[];
+  graphical_sources: IndexedRegulatorySource[];
+  risk_sources: IndexedRegulatorySource[];
+  cross_document_signals: CrossDocumentSignal[];
+};
+
+export type ZoneRegulatoryIndex = {
+  commune: string;
+  identified_zone: string;
+  identified_subzone: string | null;
+  document_set: ClassifiedRegulatoryDocument[];
+  topic_index: IndexedTopicBundle[];
+  article_index: Array<{
+    article: string;
+    title: string;
+    topic_codes: string[];
+    sources: IndexedRegulatorySource[];
+  }>;
+  warnings: string[];
+};
+
+export type GraphicalDependencyOutput = {
+  topic: string;
+  dependencies: Array<{
+    document_id: string;
+    document_name: string;
+    canonical_type: RegulatoryDocumentCanonicalType;
+    reason: string;
+    confidence: RegulatoryConfidence;
+  }>;
+  warnings: string[];
+  rule_type_override: RegulatoryRuleType | null;
+};
+
+export type RiskOverlayOutput = {
+  topic: string;
+  risks_and_servitudes: string[];
+  warnings: string[];
+  strongest_effect:
+    | "primary"
+    | "additive"
+    | "restrictive"
+    | "substitutive"
+    | "procedural"
+    | "informative";
+};
+
+export type RegulatoryTopicAnalysis = {
+  commune: string;
+  document_set: Array<{
+    document_id: string;
+    source_name: string;
+    canonical_type: RegulatoryDocumentCanonicalType;
+    normative_weight: RegulatoryNormativeWeight;
+    set_role: RegulatorySetRole;
+    confidence: RegulatoryConfidence;
+  }>;
+  analysis_scope: string;
+  identified_zone: string;
+  identified_subzone: string | null;
+  topic: string;
+  relevant_articles: string[];
+  rule_type: RegulatoryRuleType;
+  primary_source: string;
+  secondary_sources: string[];
+  rule_summary: string;
+  value: number | null;
+  unit: string;
+  conditions: string[];
+  exceptions: string[];
+  graphical_dependencies: string[];
+  risks_and_servitudes: string[];
+  warnings: string[];
+  confidence: RegulatoryConfidence;
+  reasoning_summary: string;
+};
+
+export type RegulatoryArticleSummary = {
+  article: string;
+  title: string;
+  status:
+    | "applicable"
+    | "sans_objet"
+    | "non_reglemente"
+    | "renvoi_document_graphique"
+    | "renvoi_annexe"
+    | "cross_document_required";
+  rule_type: RegulatoryRuleType;
+  summary: string;
+  key_values: string[];
+  conditions: string[];
+  exceptions: string[];
+  secondary_sources: string[];
+  warnings: string[];
+  confidence: RegulatoryConfidence;
+};
+
+export type RegulatoryEngineOutput = {
+  engine_version: "regulatory_multi_document_engine_v1";
+  document_set: ClassifiedRegulatoryDocument[];
+  analysis_scope: string;
+  identified_zone: string;
+  identified_subzone: string | null;
+  topic_analyses: RegulatoryTopicAnalysis[];
+  article_summaries: RegulatoryArticleSummary[];
+  warnings: string[];
+  reasoning_summary: string;
+};
+
+export type RegulatoryAiAdjudication = {
+  adjudication_version: "regulatory_ai_adjudication_v1";
+  orchestration_mode: "llm_adjudicated";
+  adjudication_confidence: RegulatoryConfidence;
+  topic_analyses: RegulatoryTopicAnalysis[];
+  article_summaries: RegulatoryArticleSummary[];
+  warnings: string[];
+  reasoning_summary: string;
+  professional_interpretation: string;
+  operational_conclusion: {
+    zonePlutot: "très restrictive" | "restrictive" | "intermédiaire" | "souple" | "très souple";
+    logiqueDominante: string;
+    facteursLimitantsPrincipaux: string[];
+    opportunitesPossibles: string[];
+    pointsBloquantsPotentiels: string[];
+    pointsAConfirmerSurPlanOuAnnexe: string[];
+  };
+};

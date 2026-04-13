@@ -326,12 +326,20 @@ async function buildSystemPrompt(args: {
       return null;
     }
   })();
-  const expertZoneAnalysis = parsedZoneStructured?.analysisVersion === "expert_zone_analysis_v1"
+  const expertZoneAnalysis = (
+    parsedZoneStructured?.analysisVersion === "expert_zone_analysis_v1"
+    || parsedZoneStructured?.analysisVersion === "expert_zone_analysis_v2"
+    || parsedZoneStructured?.analysisVersion === "expert_zone_analysis_v3"
+  )
     ? parsedZoneStructured
     : null;
 
   const articlesSafe = Array.isArray(articles) ? articles : [];
-  const articlesSummary = expertZoneAnalysis?.articleOrThemeBlocks?.length
+  const articlesSummary = expertZoneAnalysis?.articleSummaries?.length
+    ? expertZoneAnalysis.articleSummaries.map((article: any) =>
+        `- Article ${article.article || "N/D"} — ${article.title}: ${article.summary}${article.conditions?.length ? ` | Conditions: ${article.conditions.join("; ")}` : ""}${article.warnings?.length ? ` | Alertes: ${article.warnings.join("; ")}` : ""}${article.status ? ` | Statut: ${article.status}` : ""}`,
+      ).join("\n")
+    : expertZoneAnalysis?.articleOrThemeBlocks?.length
     ? expertZoneAnalysis.articleOrThemeBlocks.map((block: any) =>
         `- ${block.articleCode ? `Article ${block.articleCode}` : `Thème ${block.themeLabel}`} — ${block.anchorLabel || block.themeLabel}: ${block.ruleResumee}${block.exceptionsConditions ? ` | Conditions: ${block.exceptionsConditions}` : ""}${block.qualification ? ` | Qualification: ${block.qualification}` : ""}`,
       ).join("\n")
@@ -356,6 +364,12 @@ async function buildSystemPrompt(args: {
   const expertAnalysisSummary = expertZoneAnalysis
     ? [
         `Identification: zone ${expertZoneAnalysis.identification?.zoneCode || zoneAnalysis?.zoneCode || "N/D"}${expertZoneAnalysis.identification?.zoneLabel ? ` — ${expertZoneAnalysis.identification.zoneLabel}` : ""}.`,
+        expertZoneAnalysis.documentSet?.length
+          ? `Jeu documentaire: ${expertZoneAnalysis.documentSet.slice(0, 6).map((doc: any) => `${doc.source_name} (${doc.canonical_type})`).join(", ")}.`
+          : "",
+        expertZoneAnalysis.topicAnalyses?.length
+          ? `Thèmes: ${expertZoneAnalysis.topicAnalyses.slice(0, 6).map((topic: any) => `${topic.topic} [${topic.confidence}]`).join(", ")}.`
+          : "",
         expertZoneAnalysis.crossEffects?.length
           ? `Effets croisés: ${expertZoneAnalysis.crossEffects.join(" ")}`
           : "",

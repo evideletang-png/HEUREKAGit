@@ -651,7 +651,11 @@ export default function AnalysisDetailPage() {
       return null;
     }
   })();
-  const parsedExpertAnalysis = parsedDigest?.analysisVersion === "expert_zone_analysis_v1"
+  const parsedExpertAnalysis = (
+    parsedDigest?.analysisVersion === "expert_zone_analysis_v1"
+    || parsedDigest?.analysisVersion === "expert_zone_analysis_v2"
+    || parsedDigest?.analysisVersion === "expert_zone_analysis_v3"
+  )
     ? parsedDigest
     : null;
   const effectiveDigest = parsedExpertAnalysis?.digest || parsedDigest;
@@ -1511,7 +1515,63 @@ export default function AnalysisDetailPage() {
                          </div>
                        </div>
 
-                       {parsedExpertAnalysis.articleOrThemeBlocks?.length ? (
+                       {parsedExpertAnalysis.aiOrchestration ? (
+                         <div className="rounded-xl border bg-emerald-50/60 border-emerald-200/60 p-4">
+                           <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-emerald-900">
+                             <span>Orchestration IA active</span>
+                             <Badge variant="outline" className="border-emerald-300 text-emerald-800">
+                               {parsedExpertAnalysis.aiOrchestration.adjudication_confidence}
+                             </Badge>
+                           </div>
+                           <p className="mt-2 text-sm text-emerald-900">
+                             {parsedExpertAnalysis.aiOrchestration.reasoning_summary}
+                           </p>
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.documentSet?.length ? (
+                         <div className="rounded-xl border bg-muted/10 p-4">
+                           <div className="text-sm font-semibold mb-2 text-primary">Jeu documentaire mobilisé</div>
+                           <div className="flex flex-wrap gap-2">
+                             {parsedExpertAnalysis.documentSet.map((doc: any) => (
+                               <Badge key={`${doc.document_id}-${doc.canonical_type}`} variant="outline">
+                                 {doc.source_name} · {doc.canonical_type}
+                               </Badge>
+                             ))}
+                           </div>
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.topicAnalyses?.length ? (
+                         <div className="space-y-3">
+                           <div className="text-sm font-semibold text-primary">Lecture multi-documents par thème</div>
+                           {parsedExpertAnalysis.topicAnalyses.map((topic: any, index: number) => (
+                             <div key={`${topic.topic}-${index}`} className="rounded-xl border bg-background p-4 space-y-2">
+                               <div className="flex flex-wrap items-center gap-2">
+                                 <Badge variant="secondary">{topic.topic}</Badge>
+                                 <Badge variant="outline">{topic.rule_type}</Badge>
+                                 <Badge variant="outline">Confiance {topic.confidence}</Badge>
+                               </div>
+                               <p className="text-sm font-medium">{topic.rule_summary}</p>
+                               {topic.primary_source ? (
+                                 <p className="text-xs text-muted-foreground">Source principale : {topic.primary_source}</p>
+                               ) : null}
+                               {topic.conditions?.length ? (
+                                 <p className="text-xs text-muted-foreground">Conditions : {topic.conditions.join(" · ")}</p>
+                               ) : null}
+                               {topic.graphical_dependencies?.length ? (
+                                 <p className="text-xs text-muted-foreground">Dépendances graphiques : {topic.graphical_dependencies.join(" · ")}</p>
+                               ) : null}
+                               {topic.risks_and_servitudes?.length ? (
+                                 <p className="text-xs text-muted-foreground">Risques / servitudes : {topic.risks_and_servitudes.join(" · ")}</p>
+                               ) : null}
+                               {topic.warnings?.length ? (
+                                 <p className="text-xs text-amber-700">Alertes : {topic.warnings.join(" · ")}</p>
+                               ) : null}
+                             </div>
+                           ))}
+                         </div>
+                       ) : parsedExpertAnalysis.articleOrThemeBlocks?.length ? (
                          <div className="space-y-3">
                            <div className="text-sm font-semibold text-primary">Synthèse thème par thème</div>
                            {parsedExpertAnalysis.articleOrThemeBlocks.map((block: any) => (
@@ -1530,6 +1590,27 @@ export default function AnalysisDetailPage() {
                                ) : null}
                              </div>
                            ))}
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.articleSummaries?.length ? (
+                         <div className="rounded-xl border bg-muted/10 p-4">
+                           <div className="text-sm font-semibold mb-2 text-primary">Synthèse canonique par article</div>
+                           <div className="space-y-2">
+                             {parsedExpertAnalysis.articleSummaries.map((article: any, index: number) => (
+                               <div key={`${article.article}-${index}`} className="rounded-lg border bg-background/80 px-3 py-2">
+                                 <div className="flex flex-wrap items-center gap-2">
+                                   <Badge variant="outline">Article {article.article}</Badge>
+                                   <Badge variant="secondary">{article.status}</Badge>
+                                   <Badge variant="outline">{article.confidence}</Badge>
+                                 </div>
+                                 <p className="mt-2 text-sm font-medium">{article.title}</p>
+                                 <p className="text-sm text-muted-foreground">{article.summary}</p>
+                                 {article.key_values?.length ? <p className="text-xs text-muted-foreground">Valeurs clés : {article.key_values.join(" · ")}</p> : null}
+                                 {article.warnings?.length ? <p className="text-xs text-amber-700">Alertes : {article.warnings.join(" · ")}</p> : null}
+                               </div>
+                             ))}
+                           </div>
                          </div>
                        ) : null}
 

@@ -403,6 +403,44 @@ function buildRuleArticlesFromExpertBlocks(blocks: Array<{
   });
 }
 
+function buildRuleArticlesFromArticleSummaries(summaries: Array<{
+  article: string;
+  title: string;
+  status: string;
+  rule_type: string;
+  summary: string;
+  key_values: string[];
+  conditions: string[];
+  exceptions: string[];
+  secondary_sources: string[];
+  warnings: string[];
+  confidence: string;
+}>) {
+  return summaries.map((summary, index) => {
+    const articleNumber = Number.parseInt(String(summary.article || "").replace(/\D+/g, ""), 10);
+    return {
+      articleNumber: Number.isFinite(articleNumber) ? articleNumber : 1000 + index,
+      title: summary.title || `Article ${summary.article || index + 1}`,
+      sourceText: summary.summary || "",
+      summary: summary.summary || "",
+      impactText: summary.key_values.length > 0
+        ? `Valeurs clés : ${summary.key_values.join(" · ")}`
+        : "",
+      vigilanceText: [
+        `Statut ${summary.status}`,
+        summary.rule_type ? `Type ${summary.rule_type}` : "",
+        ...summary.conditions.map((condition) => `Condition : ${condition}`),
+        ...summary.exceptions.map((exception) => `Exception : ${exception}`),
+        ...summary.warnings.map((warning) => `Alerte : ${warning}`),
+      ].filter(Boolean).join(" · "),
+      confidence: summary.confidence || "unknown",
+      structuredJson: JSON.stringify({
+        articleSummary: summary,
+      }),
+    };
+  });
+}
+
 /**
  * Knowledge Routing Rules: Mapping piece codes to search priorities
  */
@@ -1441,7 +1479,9 @@ export async function orchestrateDossierAnalysis(
           issues: fullZoneAnalysis.issues || [],
         }
       : (fullZoneAnalysis.digest || {});
-    const articlesToPersist = zoneWorkspaceGraph.expertAnalysis?.articleOrThemeBlocks?.length
+    const articlesToPersist = zoneWorkspaceGraph.expertAnalysis?.articleSummaries?.length
+      ? buildRuleArticlesFromArticleSummaries(zoneWorkspaceGraph.expertAnalysis.articleSummaries)
+      : zoneWorkspaceGraph.expertAnalysis?.articleOrThemeBlocks?.length
       ? buildRuleArticlesFromExpertBlocks(zoneWorkspaceGraph.expertAnalysis.articleOrThemeBlocks)
       : (fullZoneAnalysis.articles || []).map((r: any) => {
           const rawArt = String(r.article || r.articleNumber || 0);

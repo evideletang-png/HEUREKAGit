@@ -66,7 +66,7 @@ import {
   type CalibrationPage,
 } from "../services/regulatoryCalibrationService.js";
 import {
-  buildExpertZoneAnalysis,
+  buildExpertZoneAnalysisWithAdjudication,
   buildZoneThematicSegmentsFromPages,
   listZoneThematicSegments,
   rebuildThematicSegmentsForZone,
@@ -4373,6 +4373,16 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         .filter((doc) => documentIds.includes(doc.id))
         .map((doc) => [doc.id, doc] as const),
     );
+    const documentProfiles = availableDocuments.length > 0
+      ? await db.select()
+        .from(documentKnowledgeProfilesTable)
+        .where(
+          and(
+            inArray(documentKnowledgeProfilesTable.municipalityId, communeAliases),
+            inArray(documentKnowledgeProfilesTable.townHallDocumentId, availableDocuments.map((doc) => doc.id)),
+          ),
+        )
+      : [];
 
     const ruleIds = zoneRules.map((rule) => rule.id);
     const relations = ruleIds.length > 0
@@ -4419,7 +4429,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       zoneRules.some((rule) => rule.overlayId === overlay.id)
       || derivedSegments.some((segment) => segment.overlayId === overlay.id),
     );
-    const expertAnalysis = buildExpertZoneAnalysis({
+    const expertAnalysis = await buildExpertZoneAnalysisWithAdjudication({
       commune: access.targetCommune,
       zone: {
         zoneCode: zone.zoneCode,
@@ -4438,6 +4448,20 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       segments: derivedSegments.map((segment) => ({
         ...segment,
         documentTitle: documentMap.get(segment.documentId)?.title || documentMap.get(segment.documentId)?.fileName || null,
+      })),
+      documents: availableDocuments,
+      documentProfiles,
+      zoneSections: zoneSections.map((section) => ({
+        id: section.id,
+        zoneCode: section.reviewedZoneCode || section.zoneCode,
+        heading: section.heading,
+        sourceText: section.sourceText || null,
+        startPage: section.reviewedStartPage ?? section.startPage,
+        endPage: section.reviewedEndPage ?? section.endPage,
+        townHallDocumentId: section.townHallDocumentId || null,
+        documentTitle: availableDocuments.find((doc) => doc.id === section.townHallDocumentId)?.title
+          || availableDocuments.find((doc) => doc.id === section.townHallDocumentId)?.fileName
+          || null,
       })),
       rules: zoneRules.map((rule) => ({
         id: rule.id,
@@ -4532,6 +4556,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         document: documentMap.get(segment.documentId) || null,
       })),
       expertAnalysis,
+      classifiedDocuments: expertAnalysis?.documentSet || [],
       articleAnchors,
       keywordMatches,
       detectedSections: zoneSections.map((section) => ({
@@ -4620,6 +4645,19 @@ router.post("/regulatory-calibration/zones/:id/infer-from-pages", async (req: Au
     const [referenceDocument] = zone.referenceDocumentId
       ? await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, zone.referenceDocumentId)).limit(1)
       : [null];
+    const documentAliases = Array.from(new Set([access.targetCommune, zone.communeId].map((value) => String(value || "").trim()).filter(Boolean)));
+    const availableDocuments = documentAliases.length > 0
+      ? await db.select()
+        .from(townHallDocumentsTable)
+        .where(or(
+          ...documentAliases.map((alias) => eq(sql`lower(${townHallDocumentsTable.commune})`, alias.toLowerCase())),
+        )!)
+      : (referenceDocument ? [referenceDocument] : []);
+    const documentProfiles = documentAliases.length > 0
+      ? await db.select()
+        .from(documentKnowledgeProfilesTable)
+        .where(inArray(documentKnowledgeProfilesTable.municipalityId, documentAliases))
+      : [];
     const zoneRules = await db.select()
       .from(indexedRegulatoryRulesTable)
       .where(eq(indexedRegulatoryRulesTable.zoneId, zone.id))
@@ -4653,7 +4691,7 @@ router.post("/regulatory-calibration/zones/:id/infer-from-pages", async (req: Au
     }));
 
     const themeMap = new Map(themes.map((theme) => [theme.code, theme]));
-    const expertAnalysis = buildExpertZoneAnalysis({
+    const expertAnalysis = await buildExpertZoneAnalysisWithAdjudication({
       commune: access.targetCommune,
       zone: {
         zoneCode: zone.zoneCode,
@@ -4673,6 +4711,18 @@ router.post("/regulatory-calibration/zones/:id/infer-from-pages", async (req: Au
         ...segment,
         documentTitle: referenceDocument?.title || referenceDocument?.fileName || null,
       })),
+      documents: availableDocuments,
+      documentProfiles,
+      zoneSections: referenceDocument ? [{
+        id: `reference-${referenceDocument.id}`,
+        zoneCode: zone.zoneCode,
+        heading: referenceDocument.title || referenceDocument.fileName || null,
+        sourceText: referenceDocument.rawText || null,
+        startPage: zone.referenceStartPage || null,
+        endPage: zone.referenceEndPage || null,
+        townHallDocumentId: referenceDocument.id,
+        documentTitle: referenceDocument.title || referenceDocument.fileName || null,
+      }] : [],
       rules: zoneRules.map((rule) => ({
         id: rule.id,
         zoneCode: zone.zoneCode,
@@ -4744,6 +4794,7 @@ router.post("/regulatory-calibration/zones/:id/infer-from-pages", async (req: Au
         keywords: zone.searchKeywords || [],
       }).sort((left, right) => left.pageNumber - right.pageNumber),
       expertAnalysis,
+      classifiedDocuments: expertAnalysis?.documentSet || [],
     });
   } catch (err) {
     logger.error("[mairie/regulatory-calibration/zones/:id/infer-from-pages POST]", err);
