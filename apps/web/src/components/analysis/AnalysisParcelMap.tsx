@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Plus, Minus, Satellite, SlidersHorizontal, Trees } from "lucide-react";
+import { Building2, ChevronDown, ChevronUp, Info, Layers3, MapPinned, Satellite, SlidersHorizontal, Trees } from "lucide-react";
 import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS, SharedMapLayerKey } from "@/lib/mapTiles";
+import { MapZoomButtons } from "@/components/map/MapZoomButtons";
 
 type BaseLayerKey = Extract<SharedMapLayerKey, "plan" | "satellite" | "satellite_plus" | "cadastre">;
 
@@ -284,28 +285,10 @@ export function AnalysisParcelMap({
         )}
       </div>
 
-      <div className="absolute bottom-4 right-4 z-[1000] flex flex-col gap-2">
-        <Button
-          type="button"
-          size="icon"
-          variant="secondary"
-          className="h-11 w-11 rounded-2xl border border-slate-200 bg-white/92 shadow-lg backdrop-blur"
-          onClick={() => mapInstance?.zoomIn()}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
-          variant="secondary"
-          className="h-11 w-11 rounded-2xl border border-slate-200 bg-white/92 shadow-lg backdrop-blur"
-          onClick={() => mapInstance?.zoomOut()}
-        >
-          <Minus className="h-4 w-4" />
-        </Button>
-      </div>
+      <MapZoomButtons map={mapInstance} />
 
       <MapContainer
+        className="map-custom-zoom"
         center={mapCenter}
         zoom={20}
         maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}

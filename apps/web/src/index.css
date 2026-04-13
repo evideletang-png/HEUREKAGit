@@ -169,3 +169,7 @@
 .leaflet-popup-content {
   margin: 0 !important;
 }
+
+.map-custom-zoom .leaflet-control-zoom {
+  display: none !important;
+}

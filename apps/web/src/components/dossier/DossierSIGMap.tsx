@@ -1,9 +1,12 @@
-import { MapContainer, TileLayer, Polygon, Marker, Popup, LayersControl, ZoomControl } from "react-leaflet";
+import { useEffect, useState } from "react";
+import { MapContainer, TileLayer, Polygon, Marker, Popup, LayersControl, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import L from "leaflet";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Landmark, ShieldAlert, Map as MapIcon } from "lucide-react";
 import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS } from "@/lib/mapTiles";
+import { MapZoomButtons } from "@/components/map/MapZoomButtons";
 
 interface DossierSIGMapProps {
   centroid: [number, number];
@@ -12,7 +15,18 @@ interface DossierSIGMapProps {
   constraints?: any[];
 }
 
+function MapInstanceBridge({ onMapReady }: { onMapReady: (map: L.Map) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    onMapReady(map);
+  }, [map, onMapReady]);
+
+  return null;
+}
+
 export function DossierSIGMap({ centroid, parcelShape, isAbfConcerned, constraints = [] }: DossierSIGMapProps) {
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   // Convert [lng, lat] to [lat, lng] for Leaflet
   const formatCoords = (coords: number[][]) => coords.map(c => [c[1], c[0]] as [number, number]);
 
@@ -31,7 +45,10 @@ export function DossierSIGMap({ centroid, parcelShape, isAbfConcerned, constrain
         )}
       </div>
 
+      <MapZoomButtons map={mapInstance} />
+
       <MapContainer
+        className="map-custom-zoom"
         center={centroid}
         zoom={19}
         maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}
@@ -44,7 +61,7 @@ export function DossierSIGMap({ centroid, parcelShape, isAbfConcerned, constrain
         style={{ height: "100%", width: "100%" }}
         scrollWheelZoom={false}
       >
-        <ZoomControl position="bottomright" />
+        <MapInstanceBridge onMapReady={setMapInstance} />
         <LayersControl position="topright">
           <LayersControl.BaseLayer checked name="Plan">
             <TileLayer
