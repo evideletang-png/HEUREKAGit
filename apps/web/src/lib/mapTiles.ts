@@ -12,6 +12,7 @@ export const SHARED_TILE_LAYER_OPTIONS = {
   updateWhenIdle: true,
   updateWhenZooming: false,
   maxZoom: 22,
+  noWrap: true,
 } as const;
 
 export const SHARED_MAP_TILE_LAYERS: Record<
@@ -37,9 +38,8 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: true,
+      detectRetina: false,
       maxNativeZoom: 19,
-      crossOrigin: true,
     },
   },
   satellite_plus: {
@@ -57,9 +57,8 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: true,
+      detectRetina: false,
       maxNativeZoom: 20,
-      crossOrigin: true,
     },
   },
 };
