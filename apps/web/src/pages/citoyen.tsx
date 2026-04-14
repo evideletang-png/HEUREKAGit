@@ -34,6 +34,41 @@ const communeHighlights = [
   "Échanges directs avec les services",
 ];
 
+const portalInfoCards = [
+  {
+    title: "Déposez vos demandes en ligne",
+    description: "Constituez un dossier, ajoutez vos pièces et transmettez-le au service instructeur sans vous déplacer.",
+    icon: FileText,
+  },
+  {
+    title: "Suivez l'instruction étape par étape",
+    description: "Consultez l’avancement de vos démarches, les demandes de compléments et les notifications en temps réel.",
+    icon: Search,
+  },
+  {
+    title: "Échangez avec la mairie",
+    description: "Centralisez vos messages, rendez-vous et éléments attendus dans un espace unique et lisible.",
+    icon: Users,
+  },
+];
+
+function getFirstName(fullName: string | null | undefined) {
+  const normalized = String(fullName || "").trim();
+  if (!normalized) return "Bonjour";
+  return normalized.split(/\s+/)[0] || normalized;
+}
+
+function getPortalCommuneName(documents: any[]) {
+  const communeCounts = new Map<string, number>();
+  for (const document of documents || []) {
+    const commune = String(document?.commune || "").trim();
+    if (!commune) continue;
+    communeCounts.set(commune, (communeCounts.get(commune) || 0) + 1);
+  }
+
+  return Array.from(communeCounts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] || "votre ville";
+}
+
 export default function CitoyenPage() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -54,18 +89,21 @@ export default function CitoyenPage() {
   }
 
   const documents = docsData?.documents || [];
+  const firstName = getFirstName(user?.name);
+  const communeName = getPortalCommuneName(documents);
+  const lastActivityLabel = documents[0] ? new Date(documents[0].createdAt).toLocaleDateString("fr-FR") : "Aucune";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 pb-20">
       <header className="bg-white/90 backdrop-blur border-b border-border/40 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-sm">
-              <Landmark className="w-4 h-4 text-primary-foreground" />
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/10 bg-white shadow-sm">
+              <img src="/favicon.svg" alt="Heureka Citoyen" className="h-8 w-8 rounded-lg" />
             </div>
             <div className="leading-tight">
-              <p className="font-bold text-primary tracking-tight">Mairie de Fondettes</p>
-              <p className="text-xs text-muted-foreground">Espace citoyen • 37230</p>
+              <p className="font-bold text-primary tracking-tight">Heureka Citoyen</p>
+              <p className="text-xs text-muted-foreground">Guichet numérique urbanisme • {communeName}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -84,11 +122,14 @@ export default function CitoyenPage() {
               <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
                 Portail urbanisme citoyen
               </Badge>
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
-                Bienvenue sur votre guichet numérique de la Mairie de Fondettes
-              </h1>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-primary">Bonjour {firstName},</p>
+                <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
+                  Bienvenue sur votre guichet numérique de la Mairie de {communeName}
+                </h1>
+              </div>
               <p className="text-slate-600 text-base md:text-lg">
-                Déposez vos demandes d'urbanisme, échangez avec le service instructeur et suivez votre dossier en temps réel dans une interface claire et moderne.
+                Déposez vos demandes d'urbanisme, échangez avec le service instructeur et suivez votre dossier dans un espace conçu pour rendre chaque étape lisible, documentée et accessible.
               </p>
               <div className="flex flex-wrap gap-2">
                 {communeHighlights.map((item) => (
@@ -108,11 +149,41 @@ export default function CitoyenPage() {
               <div className="rounded-2xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 <p className="font-medium flex items-center gap-1.5">
                   <MapPin className="w-4 h-4 text-primary" />
-                  Hôtel de Ville – Fondettes
+                  Hôtel de Ville – {communeName}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">35 rue Eugène Gouin, 37230 Fondettes</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Les coordonnées et permanences de votre commune sont centralisées ici pour faciliter vos démarches.
+                </p>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-primary/10 bg-white shadow-sm p-6 md:p-8">
+          <div className="space-y-2 mb-5">
+            <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
+              Informations relatives au portail citoyen
+            </Badge>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+              Un espace unique pour suivre vos demandes d’urbanisme
+            </h2>
+            <p className="text-sm md:text-base text-slate-600 max-w-3xl">
+              Ce portail vous permet de déposer un dossier, transmettre des pièces complémentaires, suivre l’avancement de l’instruction et retrouver les échanges liés à votre demande dans un seul espace.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {portalInfoCards.map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.title} className="rounded-2xl border bg-slate-50/80 p-4">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <p className="font-medium text-slate-900">{item.title}</p>
+                  <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -127,7 +198,7 @@ export default function CitoyenPage() {
           <Card className="border-primary/10">
             <CardHeader className="pb-2">
               <CardDescription>Dernière activité</CardDescription>
-              <CardTitle className="text-base">{documents[0] ? new Date(documents[0].createdAt).toLocaleDateString("fr-FR") : "Aucune"}</CardTitle>
+              <CardTitle className="text-base">{lastActivityLabel}</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">Consultez les nouveaux messages et pièces demandées.</CardContent>
           </Card>
