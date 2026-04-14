@@ -29,6 +29,8 @@ export type RegulatorySourceDecision = {
   confidence: RegulatoryConfidence;
 };
 
+export type AdjudicationSourceDecision = RegulatorySourceDecision;
+
 export type RegulatoryDocumentCanonicalType =
   | "written_regulation"
   | "graphic_regulation"
@@ -188,6 +190,81 @@ export type RiskOverlayOutput = {
     | "informative";
 };
 
+export type GraphicalDependency = {
+  document_id: string | null;
+  document_name: string;
+  canonical_type: RegulatoryDocumentCanonicalType | null;
+  reason: string;
+  confidence: RegulatoryConfidence;
+};
+
+export type RiskOverlayConstraint = {
+  label: string;
+  effect:
+    | "primary"
+    | "additive"
+    | "restrictive"
+    | "substitutive"
+    | "procedural"
+    | "informative";
+  confidence: RegulatoryConfidence;
+  note: string;
+};
+
+export type ZoneAndSubsectorResolution = {
+  requested_zone: string;
+  identified_zone: string;
+  identified_subzone: string | null;
+  confidence: RegulatoryConfidence;
+  warnings: string[];
+  supporting_sources: Array<{
+    label: string;
+    reason: string;
+    confidence: RegulatoryConfidence;
+  }>;
+};
+
+export type RegulatorySuggestion = {
+  suggestion_id: string;
+  commune: string;
+  identified_zone: string;
+  identified_subzone: string | null;
+  topic_code: string;
+  topic_label: string;
+  relevant_articles: string[];
+  rule_type: RegulatoryRuleType;
+  status: "suggested" | "needs_review" | "graphical_review_required";
+  primary_source: string;
+  secondary_sources: string[];
+  source_pages: Array<{
+    document_id: string | null;
+    document_title: string | null;
+    page_start: number | null;
+    page_end: number | null;
+    anchor_type: string | null;
+    anchor_label: string | null;
+    source_type:
+      | "published_rule"
+      | "segment"
+      | "zone_section"
+      | "document"
+      | "overlay"
+      | "risk"
+      | "graphical_doc";
+  }>;
+  suggestion_summary: string;
+  value: number | null;
+  unit: string;
+  conditions: string[];
+  exceptions: string[];
+  graphical_dependencies: GraphicalDependency[];
+  risks_and_servitudes: RiskOverlayConstraint[];
+  warnings: string[];
+  confidence: RegulatoryConfidence;
+  reasoning_summary: string;
+  source_decisions: RegulatorySourceDecision[];
+};
+
 export type RegulatoryTopicAnalysis = {
   commune: string;
   document_set: Array<{
@@ -240,13 +317,15 @@ export type RegulatoryArticleSummary = {
 };
 
 export type RegulatoryEngineOutput = {
-  engine_version: "regulatory_multi_document_engine_v1";
+  engine_version: "regulatory_multi_document_engine_v1" | "regulatory_multi_document_engine_v2";
   document_set: ClassifiedRegulatoryDocument[];
   analysis_scope: string;
   identified_zone: string;
   identified_subzone: string | null;
+  zone_resolution: ZoneAndSubsectorResolution;
   topic_analyses: RegulatoryTopicAnalysis[];
   article_summaries: RegulatoryArticleSummary[];
+  suggestions: RegulatorySuggestion[];
   warnings: string[];
   reasoning_summary: string;
 };

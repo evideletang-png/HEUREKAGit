@@ -103,6 +103,11 @@ type ZoneWorkspaceResponse = {
   }>;
   expertAnalysis: {
     analysisVersion: string;
+    identification?: {
+      identifiedZoneCode?: string;
+      identifiedSubzone?: string | null;
+      zoneResolutionConfidence?: string | null;
+    };
     documentSet?: Array<{
       document_id: string;
       source_name: string;
@@ -148,6 +153,27 @@ type ZoneWorkspaceResponse = {
       opportunitesPossibles: string[];
       pointsBloquantsPotentiels: string[];
       pointsAConfirmerSurPlanOuAnnexe: string[];
+    };
+    suggestions?: Array<{
+      suggestion_id: string;
+      topic_code: string;
+      topic_label: string;
+      relevant_articles: string[];
+      rule_type: string;
+      status: "suggested" | "needs_review" | "graphical_review_required";
+      primary_source: string;
+      secondary_sources: string[];
+      suggestion_summary: string;
+      conditions: string[];
+      exceptions: string[];
+      warnings: string[];
+      confidence: string;
+      reasoning_summary: string;
+    }>;
+    certaintyBuckets?: {
+      certain: Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>;
+      probable: Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>;
+      toConfirm: Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>;
     };
   } | null;
   articleAnchors: Array<{ articleCode: string; pageNumber: number; label: string; snippet: string }>;
@@ -377,6 +403,17 @@ function getStatusBadge(status: string) {
       return { label: "En revue", className: "bg-amber-50 text-amber-700 border-amber-200" };
     default:
       return { label: "Brouillon", className: "bg-muted text-muted-foreground border-border" };
+  }
+}
+
+function getSuggestionStatusMeta(status: "suggested" | "needs_review" | "graphical_review_required") {
+  switch (status) {
+    case "graphical_review_required":
+      return { label: "Lecture graphique à confirmer", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    case "needs_review":
+      return { label: "À relire", className: "bg-sky-50 text-sky-700 border-sky-200" };
+    default:
+      return { label: "Suggestion stable", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
   }
 }
 
@@ -1147,6 +1184,39 @@ export function ZoneCalibrationWorkspace({
           </Card>
 
           <Accordion type="multiple" className="space-y-4">
+            <AccordionItem value="suggestions" className="rounded-xl border bg-background shadow-sm">
+              <AccordionTrigger className="px-5 text-sm font-semibold">
+                Suggestions automatiques
+              </AccordionTrigger>
+              <AccordionContent className="px-5 pb-5">
+                <div className="space-y-3">
+                  {visibleExpertAnalysis?.suggestions?.length ? visibleExpertAnalysis.suggestions.map((suggestion) => {
+                    const statusMeta = getSuggestionStatusMeta(suggestion.status);
+                    return (
+                      <div key={suggestion.suggestion_id} className="rounded-xl border bg-muted/10 p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {suggestion.relevant_articles[0] ? <Badge variant="outline">Art. {suggestion.relevant_articles[0]}</Badge> : null}
+                          <Badge variant="secondary">{suggestion.topic_label}</Badge>
+                          <Badge variant="outline" className={statusMeta.className}>{statusMeta.label}</Badge>
+                          <Badge variant="outline">Confiance {suggestion.confidence}</Badge>
+                        </div>
+                        <p className="mt-2 text-sm font-medium">{suggestion.suggestion_summary}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">{suggestion.primary_source}</p>
+                        {suggestion.conditions?.length ? (
+                          <p className="mt-2 text-xs text-muted-foreground">Conditions : {suggestion.conditions.join(" · ")}</p>
+                        ) : null}
+                        {suggestion.warnings?.length ? (
+                          <p className="mt-2 text-xs text-amber-700">Alertes : {suggestion.warnings.join(" · ")}</p>
+                        ) : null}
+                      </div>
+                    );
+                  }) : (
+                    <p className="text-sm text-muted-foreground">Aucune suggestion structurée n’a encore été stabilisée dans cette plage.</p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
             <AccordionItem value="themes" className="rounded-xl border bg-background shadow-sm">
               <AccordionTrigger className="px-5 text-sm font-semibold">
                 Thèmes détectés dans la zone
@@ -1263,6 +1333,53 @@ export function ZoneCalibrationWorkspace({
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <p className="leading-relaxed text-muted-foreground">{visibleExpertAnalysis.professionalInterpretation}</p>
+                {visibleExpertAnalysis.identification?.identifiedSubzone ? (
+                  <div className="rounded-xl border bg-muted/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Résolution zone / sous-secteur</div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Zone lue comme <span className="font-medium text-foreground">{visibleExpertAnalysis.identification.identifiedZoneCode || data.zone.zoneCode}</span>
+                      {visibleExpertAnalysis.identification.identifiedSubzone ? ` · sous-secteur probable ${visibleExpertAnalysis.identification.identifiedSubzone}` : ""}
+                      {visibleExpertAnalysis.identification.zoneResolutionConfidence ? ` · confiance ${visibleExpertAnalysis.identification.zoneResolutionConfidence}` : ""}
+                    </p>
+                  </div>
+                ) : null}
+                {visibleExpertAnalysis.certaintyBuckets ? (
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <div className="rounded-xl border bg-emerald-50/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Certain</div>
+                      <div className="mt-2 space-y-2">
+                        {visibleExpertAnalysis.certaintyBuckets.certain.length ? visibleExpertAnalysis.certaintyBuckets.certain.slice(0, 3).map((entry) => (
+                          <div key={`certain-${entry.topic}-${entry.primarySource}`} className="text-xs text-emerald-950">
+                            <p className="font-medium">{entry.topic}</p>
+                            <p>{entry.summary}</p>
+                          </div>
+                        )) : <p className="text-xs text-emerald-900">Aucun point ferme n’est encore stabilisé.</p>}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border bg-sky-50/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-sky-800">Probable</div>
+                      <div className="mt-2 space-y-2">
+                        {visibleExpertAnalysis.certaintyBuckets.probable.length ? visibleExpertAnalysis.certaintyBuckets.probable.slice(0, 3).map((entry) => (
+                          <div key={`probable-${entry.topic}-${entry.primarySource}`} className="text-xs text-sky-950">
+                            <p className="font-medium">{entry.topic}</p>
+                            <p>{entry.summary}</p>
+                          </div>
+                        )) : <p className="text-xs text-sky-900">Aucun point probable particulier à signaler.</p>}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border bg-amber-50/70 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-amber-800">À confirmer</div>
+                      <div className="mt-2 space-y-2">
+                        {visibleExpertAnalysis.certaintyBuckets.toConfirm.length ? visibleExpertAnalysis.certaintyBuckets.toConfirm.slice(0, 3).map((entry) => (
+                          <div key={`confirm-${entry.topic}-${entry.primarySource}`} className="text-xs text-amber-950">
+                            <p className="font-medium">{entry.topic}</p>
+                            <p>{entry.summary}</p>
+                          </div>
+                        )) : <p className="text-xs text-amber-900">Aucun point critique supplémentaire à confirmer.</p>}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {visibleExpertAnalysis.documentSet?.length ? (
                   <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Jeu documentaire retenu</div>

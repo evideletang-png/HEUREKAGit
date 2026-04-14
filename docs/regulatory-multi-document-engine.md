@@ -8,6 +8,12 @@ Le moteur repose désormais sur trois couches :
 - une couche de raisonnement réglementaire multi-documents,
 - une couche d'arbitrage IA qui orchestre la lecture finale.
 
+Depuis cette refonte, le mode standard expose aussi :
+- une résolution automatique `zone / sous-secteur probable`,
+- des `suggestions` structurées non publiées par défaut,
+- une restitution par niveaux de certitude : `certain`, `probable`, `a confirmer`,
+- un mode expert relégué a la correction et non plus au flux principal.
+
 ## Modules principaux
 
 ### 1. `regulatoryDocumentClassifier.ts`
@@ -31,6 +37,16 @@ Responsabilité :
 Sortie principale :
 - `ZoneRegulatoryIndex`
 
+### 2 bis. `zoneAndSubsectorResolver.ts`
+Responsabilité :
+- arbitrer la zone réellement lue dans le corpus,
+- distinguer zone demandée et sous-secteur probable,
+- expliciter les sources qui soutiennent cette résolution,
+- remonter des alertes lorsque plusieurs sous-secteurs coexistent.
+
+Sortie principale :
+- `ZoneAndSubsectorResolution`
+
 ### 3. `graphicalRuleResolver.ts`
 Responsabilité :
 - détecter les dépendances aux documents graphiques,
@@ -50,6 +66,7 @@ Responsabilité :
 - produire les JSON structurés de base :
   - `topic_analyses`
   - `article_summaries`
+  - `suggestions`
   - `source_decisions` par thème, pour rendre explicites les sources retenues, gardées en contexte ou écartées.
 
 Sortie principale :
@@ -89,6 +106,11 @@ Versions :
 6. Le résultat final est persisté dans `zone_analyses.structuredJson`.
 7. Le chat, la vue analyse et le workspace mairie consomment tous ce même objet.
 
+Le flux standard est volontairement prudent :
+- les suggestions sont visibles,
+- elles ne deviennent pas des règles publiées automatiquement,
+- le workspace PDF sert d'abord a corriger/recadrer, puis a confirmer.
+
 ## Contrôle des données restituées
 
 Chaque thème peut désormais porter une liste `source_decisions` :
@@ -102,6 +124,16 @@ Chaque thème peut désormais porter une liste `source_decisions` :
 L'objectif est double :
 - donner une vraie lisibilité sur le chemin d'interprétation,
 - éviter l'effet “boîte noire” quand l'IA arbitre entre plusieurs pièces ou renvois.
+
+Les sorties exposent aussi des `certaintyBuckets` :
+- `certain`
+- `probable`
+- `a confirmer`
+
+Cela permet de distinguer immédiatement :
+- ce qui est déjà exploitable,
+- ce qui est plausible mais encore prudent,
+- ce qui doit être revu sur plan, annexe ou dans le workspace expert.
 
 ## Garde-fous
 

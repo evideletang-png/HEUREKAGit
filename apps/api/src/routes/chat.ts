@@ -364,6 +364,9 @@ async function buildSystemPrompt(args: {
   const expertAnalysisSummary = expertZoneAnalysis
     ? [
         `Identification: zone ${expertZoneAnalysis.identification?.zoneCode || zoneAnalysis?.zoneCode || "N/D"}${expertZoneAnalysis.identification?.zoneLabel ? ` — ${expertZoneAnalysis.identification.zoneLabel}` : ""}.`,
+        expertZoneAnalysis.identification?.identifiedSubzone
+          ? `Sous-secteur probable: ${expertZoneAnalysis.identification.identifiedSubzone}${expertZoneAnalysis.identification?.zoneResolutionConfidence ? ` [${expertZoneAnalysis.identification.zoneResolutionConfidence}]` : ""}.`
+          : "",
         expertZoneAnalysis.documentSet?.length
           ? `Jeu documentaire: ${expertZoneAnalysis.documentSet.slice(0, 6).map((doc: any) => `${doc.source_name} (${doc.canonical_type})`).join(", ")}.`
           : "",
@@ -386,6 +389,18 @@ async function buildSystemPrompt(args: {
           : "",
         expertZoneAnalysis.crossEffects?.length
           ? `Effets croisés: ${expertZoneAnalysis.crossEffects.join(" ")}`
+          : "",
+        expertZoneAnalysis.certaintyBuckets?.certain?.length
+          ? `Faits établis: ${expertZoneAnalysis.certaintyBuckets.certain.slice(0, 4).map((entry: any) => `${entry.topic}: ${entry.summary}`).join(" | ")}.`
+          : "",
+        expertZoneAnalysis.certaintyBuckets?.probable?.length
+          ? `Probable: ${expertZoneAnalysis.certaintyBuckets.probable.slice(0, 3).map((entry: any) => `${entry.topic}: ${entry.summary}`).join(" | ")}.`
+          : "",
+        expertZoneAnalysis.certaintyBuckets?.toConfirm?.length
+          ? `Points à confirmer: ${expertZoneAnalysis.certaintyBuckets.toConfirm.slice(0, 3).map((entry: any) => `${entry.topic}: ${entry.summary}`).join(" | ")}.`
+          : "",
+        expertZoneAnalysis.suggestions?.length
+          ? `Suggestions automatiques: ${expertZoneAnalysis.suggestions.slice(0, 4).map((suggestion: any) => `${suggestion.topic_label} [${suggestion.status}]`).join(", ")}.`
           : "",
         expertZoneAnalysis.professionalInterpretation
           ? `Lecture professionnelle: ${expertZoneAnalysis.professionalInterpretation}`

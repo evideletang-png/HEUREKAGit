@@ -10,7 +10,7 @@ import { normalizeExtractedText } from "./textQualityService.js";
 import { REGULATORY_ARTICLE_REFERENCE, REGULATORY_THEME_SEED, splitDocumentIntoCalibrationPages } from "./regulatoryCalibrationService.js";
 import { adjudicateRegulatoryEngineOutput } from "./regulatoryAdjudicationService.js";
 import { buildMultiDocumentRegulatoryEngine } from "./multiDocumentRegulatoryEngine.js";
-import type { RegulatoryAiAdjudication, RegulatoryEngineOutput } from "./regulatoryInterpretationTypes.js";
+import type { RegulatoryAiAdjudication, RegulatoryEngineOutput, RegulatorySuggestion } from "./regulatoryInterpretationTypes.js";
 
 type CalibrationZone = typeof regulatoryCalibrationZonesTable.$inferSelect;
 type OverlayRow = typeof regulatoryOverlaysTable.$inferSelect;
@@ -76,6 +76,9 @@ export type ExpertZoneAnalysis = {
     zoneCode: string;
     zoneLabel: string | null;
     parentZoneCode: string | null;
+    identifiedZoneCode?: string;
+    identifiedSubzone?: string | null;
+    zoneResolutionConfidence?: "high" | "medium" | "low" | null;
     referenceDocument: {
       id: string;
       title: string | null;
@@ -97,6 +100,12 @@ export type ExpertZoneAnalysis = {
   documentSet?: RegulatoryEngineOutput["document_set"];
   topicAnalyses?: RegulatoryEngineOutput["topic_analyses"];
   articleSummaries?: RegulatoryEngineOutput["article_summaries"];
+  suggestions?: RegulatorySuggestion[];
+  certaintyBuckets?: {
+    certain: Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>;
+    probable: Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>;
+    toConfirm: Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>;
+  };
   crossEffects: string[];
   otherDocuments: Array<{
     title: string;
@@ -564,6 +573,34 @@ function sortThemeBlocks(left: ExpertZoneArticleOrThemeBlock, right: ExpertZoneA
   return left.themeLabel.localeCompare(right.themeLabel, "fr");
 }
 
+function buildCertaintyBuckets(topicAnalyses: RegulatoryEngineOutput["topic_analyses"] | undefined) {
+  const buckets = {
+    certain: [] as Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>,
+    probable: [] as Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>,
+    toConfirm: [] as Array<{ topic: string; summary: string; primarySource: string; warnings: string[] }>,
+  };
+
+  for (const topic of topicAnalyses || []) {
+    const entry = {
+      topic: topic.topic,
+      summary: topic.rule_summary,
+      primarySource: topic.primary_source,
+      warnings: topic.warnings || [],
+    };
+    if (topic.confidence === "high" && topic.rule_type !== "graphical" && entry.warnings.length === 0) {
+      buckets.certain.push(entry);
+      continue;
+    }
+    if (topic.confidence === "low" || topic.rule_type === "graphical" || entry.warnings.length > 1) {
+      buckets.toConfirm.push(entry);
+      continue;
+    }
+    buckets.probable.push(entry);
+  }
+
+  return buckets;
+}
+
 export function buildExpertZoneAnalysis(args: {
   commune: string;
   zone: Pick<CalibrationZone, "zoneCode" | "zoneLabel" | "parentZoneCode">;
@@ -778,6 +815,8 @@ export function buildExpertZoneAnalysis(args: {
         : []),
     ].filter(Boolean),
   };
+  let certaintyBuckets: ExpertZoneAnalysis["certaintyBuckets"] | undefined;
+  let suggestions: RegulatorySuggestion[] | undefined;
 
   if (args.documents && args.documentProfiles) {
     const engine = buildMultiDocumentRegulatoryEngine({
@@ -800,6 +839,8 @@ export function buildExpertZoneAnalysis(args: {
       zoneSections: args.zoneSections || [],
     });
     multiDocumentAnalysis = engine.engineOutput;
+    suggestions = engine.engineOutput.suggestions;
+    certaintyBuckets = buildCertaintyBuckets(engine.engineOutput.topic_analyses);
     otherDocuments = engine.otherDocuments.length > 0 ? engine.otherDocuments : otherDocuments;
     professionalInterpretation = engine.professionalInterpretation;
     operationalConclusion = engine.operationalConclusion;
@@ -815,6 +856,9 @@ export function buildExpertZoneAnalysis(args: {
       zoneCode: args.zone.zoneCode,
       zoneLabel: args.zone.zoneLabel,
       parentZoneCode: args.zone.parentZoneCode,
+      identifiedZoneCode: multiDocumentAnalysis?.zone_resolution.identified_zone || args.zone.zoneCode,
+      identifiedSubzone: multiDocumentAnalysis?.zone_resolution.identified_subzone || null,
+      zoneResolutionConfidence: multiDocumentAnalysis?.zone_resolution.confidence || null,
       referenceDocument: args.referenceDocument ? {
         id: args.referenceDocument.id,
         title: args.referenceDocument.title,
@@ -836,6 +880,8 @@ export function buildExpertZoneAnalysis(args: {
     documentSet: multiDocumentAnalysis?.document_set,
     topicAnalyses: multiDocumentAnalysis?.topic_analyses,
     articleSummaries: multiDocumentAnalysis?.article_summaries,
+    suggestions,
+    certaintyBuckets,
     crossEffects,
     otherDocuments,
     professionalInterpretation,
@@ -892,6 +938,7 @@ export async function buildExpertZoneAnalysisWithAdjudication(args: Parameters<t
     aiOrchestration: adjudication,
     topicAnalyses: mergedTopicAnalyses,
     articleSummaries: adjudication.article_summaries,
+    certaintyBuckets: buildCertaintyBuckets(mergedTopicAnalyses),
     crossEffects: uniqueStrings([...baseAnalysis.crossEffects, ...adjudication.warnings]),
     professionalInterpretation: adjudication.professional_interpretation || baseAnalysis.professionalInterpretation,
     operationalConclusion: adjudication.operational_conclusion || baseAnalysis.operationalConclusion,

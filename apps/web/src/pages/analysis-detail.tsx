@@ -1489,6 +1489,12 @@ export default function AnalysisDetailPage() {
                              <p><span className="font-medium">Commune :</span> {parsedExpertAnalysis.identification?.commune || analysis.city || "N/D"}</p>
                              <p><span className="font-medium">Zone :</span> {parsedExpertAnalysis.identification?.zoneCode || analysis.zoneCode || "N/D"}</p>
                              {parsedExpertAnalysis.identification?.zoneLabel ? <p>{parsedExpertAnalysis.identification.zoneLabel}</p> : null}
+                             {parsedExpertAnalysis.identification?.identifiedSubzone ? (
+                               <p className="text-muted-foreground">
+                                 Sous-secteur probable : {parsedExpertAnalysis.identification.identifiedSubzone}
+                                 {parsedExpertAnalysis.identification?.zoneResolutionConfidence ? ` · confiance ${parsedExpertAnalysis.identification.zoneResolutionConfidence}` : ""}
+                               </p>
+                             ) : null}
                              {parsedExpertAnalysis.identification?.referenceDocument?.title ? (
                                <p className="text-muted-foreground">Doc. de référence : {parsedExpertAnalysis.identification.referenceDocument.title}</p>
                              ) : null}
@@ -1529,6 +1535,56 @@ export default function AnalysisDetailPage() {
                          </div>
                        ) : null}
 
+                       {parsedExpertAnalysis.certaintyBuckets ? (
+                         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                           <div className="rounded-xl border bg-emerald-50/60 p-4">
+                             <div className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Certain</div>
+                             <div className="mt-2 space-y-2">
+                               {parsedExpertAnalysis.certaintyBuckets.certain.length ? (
+                                 parsedExpertAnalysis.certaintyBuckets.certain.slice(0, 4).map((entry: any, index: number) => (
+                                   <div key={`certain-${index}`} className="text-xs text-emerald-950">
+                                     <p className="font-medium">{entry.topic}</p>
+                                     <p>{entry.summary}</p>
+                                   </div>
+                                 ))
+                               ) : (
+                                 <p className="text-xs text-emerald-900">Aucun point ferme n’a encore été stabilisé.</p>
+                               )}
+                             </div>
+                           </div>
+                           <div className="rounded-xl border bg-sky-50/60 p-4">
+                             <div className="text-xs font-semibold uppercase tracking-wide text-sky-800">Probable</div>
+                             <div className="mt-2 space-y-2">
+                               {parsedExpertAnalysis.certaintyBuckets.probable.length ? (
+                                 parsedExpertAnalysis.certaintyBuckets.probable.slice(0, 4).map((entry: any, index: number) => (
+                                   <div key={`probable-${index}`} className="text-xs text-sky-950">
+                                     <p className="font-medium">{entry.topic}</p>
+                                     <p>{entry.summary}</p>
+                                   </div>
+                                 ))
+                               ) : (
+                                 <p className="text-xs text-sky-900">Aucun point probable particulier à signaler.</p>
+                               )}
+                             </div>
+                           </div>
+                           <div className="rounded-xl border bg-amber-50/70 p-4">
+                             <div className="text-xs font-semibold uppercase tracking-wide text-amber-800">À confirmer</div>
+                             <div className="mt-2 space-y-2">
+                               {parsedExpertAnalysis.certaintyBuckets.toConfirm.length ? (
+                                 parsedExpertAnalysis.certaintyBuckets.toConfirm.slice(0, 4).map((entry: any, index: number) => (
+                                   <div key={`confirm-${index}`} className="text-xs text-amber-950">
+                                     <p className="font-medium">{entry.topic}</p>
+                                     <p>{entry.summary}</p>
+                                   </div>
+                                 ))
+                               ) : (
+                                 <p className="text-xs text-amber-900">Aucun point critique supplémentaire à confirmer.</p>
+                               )}
+                             </div>
+                           </div>
+                         </div>
+                       ) : null}
+
                        {parsedExpertAnalysis.documentSet?.length ? (
                          <div className="rounded-xl border bg-muted/10 p-4">
                            <div className="text-sm font-semibold mb-2 text-primary">Jeu documentaire mobilisé</div>
@@ -1539,6 +1595,30 @@ export default function AnalysisDetailPage() {
                                </Badge>
                              ))}
                            </div>
+                         </div>
+                       ) : null}
+
+                       {parsedExpertAnalysis.suggestions?.length ? (
+                         <div className="space-y-3">
+                           <div className="text-sm font-semibold text-primary">Suggestions automatiques à contrôler</div>
+                           {parsedExpertAnalysis.suggestions.slice(0, 6).map((suggestion: any) => (
+                             <div key={suggestion.suggestion_id} className="rounded-xl border bg-background p-4 space-y-2">
+                               <div className="flex flex-wrap items-center gap-2">
+                                 <Badge variant="secondary">{suggestion.topic_label}</Badge>
+                                 <Badge variant="outline">{suggestion.rule_type}</Badge>
+                                 <Badge variant="outline">{suggestion.status}</Badge>
+                                 <Badge variant="outline">Confiance {suggestion.confidence}</Badge>
+                               </div>
+                               <p className="text-sm font-medium">{suggestion.suggestion_summary}</p>
+                               <p className="text-xs text-muted-foreground">Source principale : {suggestion.primary_source}</p>
+                               {suggestion.conditions?.length ? (
+                                 <p className="text-xs text-muted-foreground">Conditions : {suggestion.conditions.join(" · ")}</p>
+                               ) : null}
+                               {suggestion.warnings?.length ? (
+                                 <p className="text-xs text-amber-700">Alertes : {suggestion.warnings.join(" · ")}</p>
+                               ) : null}
+                             </div>
+                           ))}
                          </div>
                        ) : null}
 

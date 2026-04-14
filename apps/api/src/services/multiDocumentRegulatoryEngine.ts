@@ -8,6 +8,7 @@ import {
 } from "./regulatoryOutputFormatter.js";
 import type { ClassifiedRegulatoryDocument, RegulatoryEngineOutput } from "./regulatoryInterpretationTypes.js";
 import type { StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
+import { resolveZoneAndSubsector } from "./zoneAndSubsectorResolver.js";
 
 type TownHallDocumentLike = {
   id: string;
@@ -85,6 +86,14 @@ export function buildMultiDocumentRegulatoryEngine(args: {
     zoneCode: args.zoneCode,
   });
 
+  const zoneResolution = resolveZoneAndSubsector({
+    requestedZoneCode: args.zoneCode,
+    documents: documentSet,
+    segments: args.segments,
+    rules: args.rules,
+    zoneSections: args.zoneSections || [],
+  });
+
   const index = buildZoneRegulatoryIndex({
     commune: args.commune,
     zoneCode: args.zoneCode,
@@ -100,6 +109,7 @@ export function buildMultiDocumentRegulatoryEngine(args: {
     overlays: args.overlays,
     rules: args.rules,
     documents: documentSet,
+    zoneResolution,
   });
 
   return {

@@ -9,6 +9,7 @@ import {
   Loader2,
   MapPin,
   RefreshCw,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -196,6 +197,19 @@ function getQualityBadge(document: DocumentSummary) {
   }
 }
 
+function getDetectedZoneStatusMeta(status: DetectedZoneReviewData["sections"][number]["reviewStatus"]) {
+  switch (status) {
+    case "validated":
+      return { label: "Validée", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "to_review":
+      return { label: "À revoir", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    case "rejected":
+      return { label: "Écartée", className: "bg-rose-50 text-rose-700 border-rose-200" };
+    default:
+      return { label: "Suggérée", className: "bg-sky-50 text-sky-700 border-sky-200" };
+  }
+}
+
 export function ZoneFirstCalibrationModule({
   currentCommune,
   documents,
@@ -226,6 +240,7 @@ export function ZoneFirstCalibrationModule({
     canPublishRules: boolean;
     canManagePermissions: boolean;
   }>>({});
+  const [showExpertTools, setShowExpertTools] = useState(false);
 
   const { data: overviewData } = useQuery<OverviewResponse>({
     queryKey: ["reg-calibration-overview", currentCommune],
@@ -350,6 +365,33 @@ export function ZoneFirstCalibrationModule({
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const reviewDetectedZoneMutation = useMutation({
+    mutationFn: async ({
+      id,
+      reviewedZoneCode,
+      reviewedStartPage,
+      reviewedEndPage,
+    }: {
+      id: string;
+      reviewedZoneCode?: string;
+      reviewedStartPage?: number | null;
+      reviewedEndPage?: number | null;
+    }) => apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        reviewStatus: "validated",
+        reviewedZoneCode,
+        reviewedStartPage,
+        reviewedEndPage,
+      }),
+    }),
+    onSuccess: () => {
+      refreshAll();
+      toast({ title: "Zone activée", description: "La zone suggérée a été basculée dans la liste des zones actives." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const savePermissionMutation = useMutation({
     mutationFn: async ({
       userId,
@@ -406,6 +448,11 @@ export function ZoneFirstCalibrationModule({
         return left.zoneCode.localeCompare(right.zoneCode, "fr");
       }),
     [zonesData?.zones],
+  );
+
+  const pendingDetectedSections = useMemo(
+    () => (detectedZonesData?.sections || []).filter((section) => section.reviewStatus !== "validated" && section.reviewStatus !== "rejected"),
+    [detectedZonesData?.sections],
   );
 
   const publishedRuleGroups = useMemo(() => {
@@ -535,12 +582,18 @@ export function ZoneFirstCalibrationModule({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-semibold text-primary">Zones & calibration</h3>
-            <p className="text-sm text-muted-foreground">Valide d’abord les zones utiles, puis administre chaque zone dans son propre workspace.</p>
+            <p className="text-sm text-muted-foreground">Le mode standard propose d’abord les zones détectées automatiquement. Le workspace sert ensuite surtout à corriger ou affiner ce que le moteur a compris.</p>
           </div>
-          <Button variant="outline" onClick={() => rebuildMutation.mutate()} disabled={!canEditCalibration || rebuildMutation.isPending}>
-            {rebuildMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Rebuild zone workspace
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setShowExpertTools((current) => !current)}>
+              <Sparkles className="h-4 w-4" />
+              {showExpertTools ? "Masquer les outils experts" : "Afficher les outils experts"}
+            </Button>
+            <Button variant="outline" onClick={() => rebuildMutation.mutate()} disabled={!canEditCalibration || rebuildMutation.isPending}>
+              {rebuildMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Rebuild zone workspace
+            </Button>
+          </div>
         </div>
 
         {showReadOnlyWarning && (
@@ -554,9 +607,77 @@ export function ZoneFirstCalibrationModule({
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <MapPin className="h-4 w-4 text-primary" />
-              Ajouter une zone active
+              <Sparkles className="h-4 w-4 text-primary" />
+              Zones suggérées automatiquement
             </CardTitle>
+            <CardDescription>
+              En mode standard, active simplement une zone suggérée puis ouvre son workspace seulement si tu veux corriger la lecture du moteur.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pendingDetectedSections.length > 0 ? pendingDetectedSections.slice(0, 8).map((section) => {
+              const status = getDetectedZoneStatusMeta(section.reviewStatus);
+              return (
+                <div key={section.id} className="rounded-xl border bg-background p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className={status.className}>{status.label}</Badge>
+                        <Badge variant="secondary">{section.zoneCode}</Badge>
+                        {(section.startPage || section.endPage) ? (
+                          <Badge variant="outline">
+                            pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}
+                          </Badge>
+                        ) : null}
+                        {section.document?.documentType ? (
+                          <Badge variant="outline">{section.document.documentType}</Badge>
+                        ) : null}
+                      </div>
+                      <p className="font-medium">{section.heading || `Zone ${section.zoneCode}`}</p>
+                      {section.sourceText ? (
+                        <p className="text-sm text-muted-foreground line-clamp-3">{section.sourceText}</p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Aperçu source indisponible pour cette détection.</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        disabled={!canEditCalibration || reviewDetectedZoneMutation.isPending}
+                        onClick={() => reviewDetectedZoneMutation.mutate({
+                          id: section.id,
+                          reviewedZoneCode: section.zoneCode,
+                          reviewedStartPage: section.startPage,
+                          reviewedEndPage: section.endPage,
+                        })}
+                      >
+                        {reviewDetectedZoneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                        Activer cette zone
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
+                {activeZones.length > 0
+                  ? "Le moteur a déjà produit des zones actives exploitables pour cette commune."
+                  : "Aucune zone suggérée n’est actuellement disponible. Tu peux utiliser les outils experts si tu veux créer ou corriger une zone manuellement."}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {(showExpertTools || activeZones.length === 0) && (
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4 text-primary" />
+              Ajouter une zone active (mode expert)
+            </CardTitle>
+            <CardDescription>
+              Cet encart reste disponible pour recadrer manuellement une zone si la détection automatique n’est pas suffisante.
+            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 xl:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
             <div className="space-y-3">
@@ -591,8 +712,9 @@ export function ZoneFirstCalibrationModule({
             </div>
           </CardContent>
         </Card>
+        )}
 
-        {canManagePermissions && (
+        {canManagePermissions && showExpertTools && (
           <Card className="border-primary/10 shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">Droits de calibration</CardTitle>
@@ -675,7 +797,7 @@ export function ZoneFirstCalibrationModule({
           <CardHeader>
             <CardTitle className="text-base">Zones actives</CardTitle>
             <CardDescription>
-              La liste reste légère. Toute l’administration détaillée d’une zone se fait dans la page dédiée.
+              La liste reste légère. Le workspace sert surtout à corriger, confirmer et publier ce que le moteur a déjà structuré.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -731,7 +853,7 @@ export function ZoneFirstCalibrationModule({
                         onClick={() => setLocation(`/portail-mairie/base-ia/zones/${zone.id}?commune=${encodeURIComponent(currentCommune)}`)}
                       >
                         <ArrowRight className="h-4 w-4" />
-                        Administrer
+                        Ouvrir le workspace
                       </Button>
                       <Button
                         variant="outline"

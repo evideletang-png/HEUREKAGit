@@ -3,13 +3,17 @@ import { resolveGraphicalDependencies } from "./graphicalRuleResolver.js";
 import { resolveRiskAndOverlayEffects } from "./riskAndOverlayResolver.js";
 import type {
   ClassifiedRegulatoryDocument,
+  GraphicalDependency,
   IndexedRegulatorySource,
+  RegulatorySuggestion,
   RegulatoryArticleSummary,
   RegulatoryConfidence,
   RegulatoryEngineOutput,
+  RiskOverlayConstraint,
   RegulatoryRuleType,
   RegulatorySourceDecision,
   RegulatoryTopicAnalysis,
+  ZoneAndSubsectorResolution,
   ZoneRegulatoryIndex,
 } from "./regulatoryInterpretationTypes.js";
 import type { StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
@@ -54,6 +58,18 @@ function buildSourceLabel(source: IndexedRegulatorySource) {
     source.anchor_label,
   ].filter(Boolean);
   return parts.join(" · ") || source.summary.slice(0, 120) || "Source non nommée";
+}
+
+function buildSourceReference(source: IndexedRegulatorySource): RegulatorySuggestion["source_pages"][number] {
+  return {
+    document_id: source.document_id,
+    document_title: source.document_title,
+    page_start: source.page_start,
+    page_end: source.page_end,
+    anchor_type: source.anchor_type,
+    anchor_label: source.anchor_label,
+    source_type: source.source_type,
+  };
 }
 
 function sourcePriorityScore(source: IndexedRegulatorySource) {
@@ -132,6 +148,21 @@ function buildReasoningSummary(args: {
     parts.push("Des risques ou servitudes superposés doivent être recoupés.");
   }
   return parts.join(" ");
+}
+
+function deriveSuggestionStatus(args: {
+  ruleType: RegulatoryRuleType;
+  confidence: RegulatoryConfidence;
+  warnings: string[];
+  graphicalDependencies: GraphicalDependency[];
+}) {
+  if (args.ruleType === "graphical" || (args.graphicalDependencies.length > 0 && args.ruleType !== "textual")) {
+    return "graphical_review_required" as const;
+  }
+  if (args.confidence === "low" || args.warnings.length > 0) {
+    return "needs_review" as const;
+  }
+  return "suggested" as const;
 }
 
 function buildSourceDecisions(args: {
@@ -293,7 +324,16 @@ export function buildCrossDocumentReasoning(args: {
   overlays: OverlayLike[];
   rules: StructuredUrbanRuleSource[];
   documents: ClassifiedRegulatoryDocument[];
+  zoneResolution?: ZoneAndSubsectorResolution;
 }): RegulatoryEngineOutput {
+  const zoneResolution = args.zoneResolution || {
+    requested_zone: args.index.identified_zone,
+    identified_zone: args.index.identified_zone,
+    identified_subzone: args.index.identified_subzone,
+    confidence: "medium" as const,
+    warnings: [],
+    supporting_sources: [],
+  };
   const topicBundles = args.index.topic_index.filter((bundle) =>
     PRIORITY_TOPICS.includes(bundle.topic_code as any)
     || bundle.direct_rules.length > 0
@@ -387,9 +427,9 @@ export function buildCrossDocumentReasoning(args: {
     return {
       commune: args.index.commune,
       document_set: summarizeDocuments(args.index.document_set),
-      analysis_scope: `zone:${args.index.identified_zone}`,
-      identified_zone: args.index.identified_zone,
-      identified_subzone: args.index.identified_subzone,
+      analysis_scope: `zone:${zoneResolution.identified_zone}`,
+      identified_zone: zoneResolution.identified_zone,
+      identified_subzone: zoneResolution.identified_subzone,
       topic: topicMeta.description,
       relevant_articles: bundle.relevant_articles,
       rule_type,
@@ -431,21 +471,98 @@ export function buildCrossDocumentReasoning(args: {
   );
 
   const warnings = unique([
+    ...zoneResolution.warnings,
     ...args.index.warnings,
     ...topic_analyses.flatMap((analysis) => analysis.warnings),
   ]);
 
+  const suggestions: RegulatorySuggestion[] = topicBundles.map((bundle, index) => {
+    const analysis = topic_analyses[index];
+    const graphical = resolveGraphicalDependencies({
+      topicCode: bundle.topic_code,
+      bundle,
+    });
+    const risks = resolveRiskAndOverlayEffects({
+      topicCode: bundle.topic_code,
+      bundle,
+      overlays: args.overlays,
+      documents: args.documents,
+      rules: args.rules.filter((rule) => {
+        const themeCode = "themeCode" in rule ? String(rule.themeCode || "") : "";
+        const ruleTopic = "ruleTopic" in rule ? String(rule.ruleTopic || "") : "";
+        return themeCode === bundle.topic_code || ruleTopic === bundle.topic_code;
+      }),
+    });
+    const orderedSources = [
+      ...bundle.direct_rules,
+      ...bundle.graphical_sources,
+      ...bundle.indirect_sources,
+      ...bundle.risk_sources,
+    ].sort((left, right) => sourcePriorityScore(right) - sourcePriorityScore(left));
+    const sourcePages = unique(
+      orderedSources
+        .slice(0, 5)
+        .map((source) => JSON.stringify(buildSourceReference(source))),
+    ).map((entry) => JSON.parse(entry));
+    const graphicalDependencies: GraphicalDependency[] = graphical.dependencies.map((dependency) => ({
+      document_id: dependency.document_id,
+      document_name: dependency.document_name,
+      canonical_type: dependency.canonical_type,
+      reason: dependency.reason,
+      confidence: dependency.confidence,
+    }));
+    const risksAndServitudes: RiskOverlayConstraint[] = risks.risks_and_servitudes.map((label) => ({
+      label,
+      effect: risks.strongest_effect,
+      confidence: analysis.confidence === "high" ? "medium" : analysis.confidence,
+      note: "Contrainte superposee a recouper avec la regle principale avant conclusion ferme.",
+    }));
+
+    return {
+      suggestion_id: `${zoneResolution.identified_zone}:${bundle.topic_code}:${bundle.relevant_articles[0] || "na"}:${index}`,
+      commune: args.index.commune,
+      identified_zone: zoneResolution.identified_zone,
+      identified_subzone: zoneResolution.identified_subzone,
+      topic_code: bundle.topic_code,
+      topic_label: bundle.topic_label,
+      relevant_articles: analysis.relevant_articles,
+      rule_type: analysis.rule_type,
+      status: deriveSuggestionStatus({
+        ruleType: analysis.rule_type,
+        confidence: analysis.confidence,
+        warnings: analysis.warnings,
+        graphicalDependencies,
+      }),
+      primary_source: analysis.primary_source,
+      secondary_sources: analysis.secondary_sources,
+      source_pages: sourcePages,
+      suggestion_summary: analysis.rule_summary,
+      value: analysis.value,
+      unit: analysis.unit,
+      conditions: analysis.conditions,
+      exceptions: analysis.exceptions,
+      graphical_dependencies: graphicalDependencies,
+      risks_and_servitudes: risksAndServitudes,
+      warnings: analysis.warnings,
+      confidence: analysis.confidence,
+      reasoning_summary: analysis.reasoning_summary,
+      source_decisions: analysis.source_decisions || [],
+    };
+  });
+
   return {
-    engine_version: "regulatory_multi_document_engine_v1",
+    engine_version: "regulatory_multi_document_engine_v2",
     document_set: args.index.document_set,
-    analysis_scope: `zone:${args.index.identified_zone}`,
-    identified_zone: args.index.identified_zone,
-    identified_subzone: args.index.identified_subzone,
+    analysis_scope: `zone:${zoneResolution.identified_zone}`,
+    identified_zone: zoneResolution.identified_zone,
+    identified_subzone: zoneResolution.identified_subzone,
+    zone_resolution: zoneResolution,
     topic_analyses,
     article_summaries,
+    suggestions,
     warnings,
     reasoning_summary: topic_analyses.length > 0
-      ? `Lecture multi-documents construite à partir de ${args.index.document_set.length} document(s), ${topic_analyses.length} thème(s) et ${article_summaries.filter((article) => article.status === "applicable").length} article(s) canoniques exploitables.`
+      ? `Lecture multi-documents construite à partir de ${args.index.document_set.length} document(s), ${topic_analyses.length} theme(s) et ${article_summaries.filter((article) => article.status === "applicable").length} article(s) canoniques exploitables.`
       : "Aucune lecture multi-documents suffisamment robuste n’a pu être stabilisée à ce stade.",
   };
 }
