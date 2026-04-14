@@ -548,16 +548,23 @@ function EditUserDialog({ user, open, onClose }: { user: any; open: boolean; onC
 
 function TerritoiresTab() {
   const { data: communes, isLoading } = useAdminListCommunes();
-  const [newName, setNewName] = useState("");
-  const [newZip, setNewZip] = useState("");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<{ name: string; zipCode?: string; inseeCode?: string } | null>(null);
+  const debouncedSearch = useDebounce(search, 300);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const { data: geoData, isFetching: isSearching } = useGeocodeAddress(
+    { q: debouncedSearch } as any,
+    { query: { enabled: debouncedSearch.length >= 2, queryKey: getGeocodeAddressQueryKey({ q: debouncedSearch } as any) } }
+  );
 
   const addMutation = useCreateAdminCommune({
     mutation: {
       onSuccess: () => {
-        toast({ title: "Commune ajoutée", description: `${newName} est désormais disponible.` });
-        setNewName(""); setNewZip("");
+        toast({ title: "Commune ajoutée", description: `${selected?.name} est désormais disponible.` });
+        setSelected(null);
+        setSearch("");
         queryClient.invalidateQueries({ queryKey: getAdminListCommunesQueryKey() });
       }
     }
@@ -565,8 +572,8 @@ function TerritoiresTab() {
 
   const deleteMutation = useDeleteAdminCommune({
     mutation: {
-      onSuccess: () => { 
-        toast({ title: "Commune supprimée" }); 
+      onSuccess: () => {
+        toast({ title: "Commune supprimée" });
         queryClient.invalidateQueries({ queryKey: getAdminListCommunesQueryKey() });
       }
     }
@@ -582,20 +589,59 @@ function TerritoiresTab() {
             <Plus className="w-5 h-5 text-primary" />
             Ajouter un territoire
           </CardTitle>
-          <CardDescription>Enregistrez une nouvelle commune pour qu'elle puisse être assignée aux agents.</CardDescription>
+          <CardDescription>Recherchez une commune pour l'enregistrer et l'assigner aux agents.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col md:flex-row gap-4 items-end">
             <div className="flex-1 space-y-1.5">
-              <Label className="text-xs font-bold uppercase text-muted-foreground">Nom de la commune</Label>
-              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ex: Tours" />
+              <Label className="text-xs font-bold uppercase text-muted-foreground">Rechercher une commune</Label>
+              {selected ? (
+                <div className="flex items-center gap-2 h-9 px-3 border border-border rounded-md bg-muted/40">
+                  <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-sm font-medium flex-1">{selected.name}</span>
+                  {selected.zipCode && <span className="text-xs text-muted-foreground font-mono">{selected.zipCode}</span>}
+                  {selected.inseeCode && <span className="text-[10px] text-muted-foreground">INSEE {selected.inseeCode}</span>}
+                  <button onClick={() => { setSelected(null); setSearch(""); }} className="text-muted-foreground hover:text-destructive ml-1">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="ex: Tours, 37000…"
+                    className="pl-8"
+                    autoComplete="off"
+                  />
+                  {isSearching && <Loader2 className="absolute right-2.5 top-2.5 w-4 h-4 animate-spin text-primary" />}
+                  {geoData?.results && geoData.results.length > 0 && search.length >= 2 && (
+                    <div className="absolute top-full left-0 w-full mt-1 bg-popover rounded-md shadow-lg border border-border overflow-hidden z-50 max-h-48 overflow-y-auto">
+                      {geoData.results.map((item: any, idx: number) => (
+                        <button key={idx} type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted flex flex-col gap-0.5 transition-colors border-b border-border/50 last:border-0"
+                          onClick={() => { setSelected({ name: item.city || item.label, zipCode: item.postcode, inseeCode: item.inseeCode }); setSearch(""); }}>
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-3 h-3 text-primary shrink-0" />
+                            <span className="text-sm font-medium">{item.city || item.label}</span>
+                          </div>
+                          {(item.inseeCode || item.postcode) && (
+                            <span className="text-[10px] text-muted-foreground ml-5">
+                              {item.postcode}{item.inseeCode ? ` — INSEE ${item.inseeCode}` : ""}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="w-full md:w-32 space-y-1.5">
-              <Label className="text-xs font-bold uppercase text-muted-foreground">Code Postal</Label>
-              <Input value={newZip} onChange={e => setNewZip(e.target.value)} placeholder="37000" />
-            </div>
-            <Button onClick={() => addMutation.mutate({ data: { name: newName, zipCode: newZip } })} disabled={!newName || addMutation.isPending}>
-              <Plus className="w-4 h-4 mr-2" />
+            <Button
+              onClick={() => selected && addMutation.mutate({ data: { name: selected.name, zipCode: selected.zipCode, inseeCode: selected.inseeCode } as any })}
+              disabled={!selected || addMutation.isPending}>
+              {addMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
               Ajouter
             </Button>
           </div>

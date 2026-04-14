@@ -111,15 +111,25 @@ router.get("/communes", async (_req, res) => {
 router.post("/communes", async (req: AuthRequest, res) => {
   try {
     const { name, zipCode, inseeCode, jurisdictionId } = req.body as { name?: string; zipCode?: string, inseeCode?: string, jurisdictionId?: string };
-    if (!name || !inseeCode || !jurisdictionId) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Nom, INSEE et Jurisdiction ID requis." });
+    if (!name) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Nom requis." });
     }
+
+    const finalInseeCode = inseeCode?.trim() || `auto-${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+    const finalJurisdictionId = jurisdictionId?.trim() || "default";
 
     const [row] = await db.insert(communesTable).values({
       name: name.trim(),
       zipCode: zipCode?.trim() || null,
-      inseeCode: inseeCode.trim(),
-      jurisdictionId: jurisdictionId.trim()
+      inseeCode: finalInseeCode,
+      jurisdictionId: finalJurisdictionId,
+    }).onConflictDoUpdate({
+      target: communesTable.name,
+      set: {
+        zipCode: zipCode?.trim() || null,
+        ...(inseeCode ? { inseeCode: inseeCode.trim() } : {}),
+        updatedAt: new Date(),
+      }
     }).returning();
     return res.status(201).json(row);
   } catch (err) {
@@ -318,6 +328,21 @@ router.put("/mairie/:userId/communes", async (req: AuthRequest, res) => {
             });
         }
       }
+    }
+
+    // Auto-create communes in communesTable so GovernanceTab (maillage) auto-populates
+    for (const communeName of cleaned) {
+      const inseeCode = inseeMapping?.[communeName];
+      const finalInseeCode = inseeCode?.trim() || `auto-${communeName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      await db.insert(communesTable)
+        .values({ name: communeName, inseeCode: finalInseeCode, jurisdictionId: "default" })
+        .onConflictDoUpdate({
+          target: communesTable.name,
+          set: inseeCode
+            ? { inseeCode: inseeCode.trim(), updatedAt: new Date() }
+            : { updatedAt: new Date() },
+        })
+        .catch(() => {}); // silently ignore inseeCode unique conflicts (edge case)
     }
 
     return res.json({ success: true, communes: cleaned });
