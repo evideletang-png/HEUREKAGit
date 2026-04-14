@@ -245,6 +245,32 @@ type InferredWorkspaceResponse = {
   expertAnalysis: ZoneWorkspaceResponse["expertAnalysis"];
 };
 
+function isPageWithinZoneWindow(pageNumber: number | null | undefined, startPage: number | null | undefined, endPage: number | null | undefined) {
+  if (!pageNumber || pageNumber <= 0) return false;
+  if (startPage && pageNumber < startPage) return false;
+  if (endPage && pageNumber > endPage) return false;
+  return true;
+}
+
+function hasMisalignedWorkspaceData(data: ZoneWorkspaceResponse) {
+  const startPage = data.zone.referenceStartPage;
+  const endPage = data.zone.referenceEndPage;
+
+  if (!startPage && !endPage) return false;
+
+  const hasOutOfWindowSegment = data.segments.some((segment) => {
+    const segmentStart = segment.sourcePageStart || null;
+    const segmentEnd = segment.sourcePageEnd || segment.sourcePageStart || null;
+    return !isPageWithinZoneWindow(segmentStart, startPage, endPage)
+      || !isPageWithinZoneWindow(segmentEnd, startPage, endPage);
+  });
+
+  const hasOutOfWindowAnchor = data.articleAnchors.some((anchor) => !isPageWithinZoneWindow(anchor.pageNumber, startPage, endPage));
+  const hasOutOfWindowKeyword = data.keywordMatches.some((match) => !isPageWithinZoneWindow(match.pageNumber, startPage, endPage));
+
+  return hasOutOfWindowSegment || hasOutOfWindowAnchor || hasOutOfWindowKeyword;
+}
+
 async function apiFetch(path: string, options: RequestInit = {}) {
   const response = await fetch(path, {
     headers: {
@@ -512,7 +538,8 @@ export function ZoneCalibrationWorkspace({
 
   useEffect(() => {
     if (!data) return;
-    if (data.segments.length > 0 || data.keywordMatches.length > 0 || (data.expertAnalysis?.articleOrThemeBlocks?.length || 0) > 0) {
+    const backendOutputMisaligned = hasMisalignedWorkspaceData(data);
+    if (!backendOutputMisaligned && (data.segments.length > 0 || data.keywordMatches.length > 0 || data.articleAnchors.length > 0)) {
       setInferredWorkspace(null);
       return;
     }
@@ -990,11 +1017,12 @@ export function ZoneCalibrationWorkspace({
   const selectedExcerpt = selectedExcerptId
     ? data.excerpts.find((excerpt) => excerpt.id === selectedExcerptId) || null
     : null;
-  const visibleSegments = data.segments.length > 0 ? data.segments : (inferredWorkspace?.segments || []);
-  const visibleKeywordMatches = data.keywordMatches.length > 0 ? data.keywordMatches : (inferredWorkspace?.keywordMatches || []);
-  const visibleArticleAnchors = data.articleAnchors.length > 0 ? data.articleAnchors : (inferredWorkspace?.articleAnchors || []);
+  const backendOutputMisaligned = hasMisalignedWorkspaceData(data);
+  const visibleSegments = !backendOutputMisaligned && data.segments.length > 0 ? data.segments : (inferredWorkspace?.segments || data.segments);
+  const visibleKeywordMatches = !backendOutputMisaligned && data.keywordMatches.length > 0 ? data.keywordMatches : (inferredWorkspace?.keywordMatches || data.keywordMatches);
+  const visibleArticleAnchors = !backendOutputMisaligned && data.articleAnchors.length > 0 ? data.articleAnchors : (inferredWorkspace?.articleAnchors || data.articleAnchors);
   const visibleExpertAnalysis =
-    (data.expertAnalysis?.articleOrThemeBlocks?.length || 0) > 0
+    !backendOutputMisaligned && (data.expertAnalysis?.articleOrThemeBlocks?.length || 0) > 0
       ? data.expertAnalysis
       : inferredWorkspace?.expertAnalysis || data.expertAnalysis;
   const selectedSegment = selectedSegmentId

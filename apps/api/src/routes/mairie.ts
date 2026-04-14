@@ -4625,12 +4625,19 @@ router.post("/regulatory-calibration/zones/:id/infer-from-pages", async (req: Au
     if (!access.ok) return res.status(access.status).json(access.error);
 
     const rawPages: Array<{ pageNumber?: unknown; text?: unknown }> = Array.isArray(req.body.pages) ? req.body.pages : [];
+    const startPage = zone.referenceStartPage ?? null;
+    const endPage = zone.referenceEndPage ?? null;
     const pages = rawPages
       .map((page) => ({
         pageNumber: normalizeOptionalPositivePage(page?.pageNumber) || null,
         text: typeof page?.text === "string" ? page.text : "",
       }))
-      .filter((page): page is { pageNumber: number; text: string } => !!page.pageNumber && page.text.trim().length > 0);
+      .filter((page): page is { pageNumber: number; text: string } => !!page.pageNumber && page.text.trim().length > 0)
+      .filter((page) => {
+        if (startPage && page.pageNumber < startPage) return false;
+        if (endPage && page.pageNumber > endPage) return false;
+        return true;
+      });
 
     if (pages.length === 0) {
       return res.json({
