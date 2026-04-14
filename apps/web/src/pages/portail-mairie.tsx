@@ -305,6 +305,14 @@ type DossierDetail = Dossier & {
 };
 
 type MairieSettings = {
+  citizenPortalTownHallName?: string;
+  citizenPortalAddressLine1?: string;
+  citizenPortalAddressLine2?: string;
+  citizenPortalPostalCode?: string;
+  citizenPortalCity?: string;
+  citizenPortalPhone?: string;
+  citizenPortalEmail?: string;
+  citizenPortalHours?: string;
   taRateCommunal?: number;
   taRateDept?: number;
   taxeFonciereRate?: number;
@@ -3562,6 +3570,50 @@ export default function PortailMairiePage() {
                           </div>
                         </div>
 
+                      </div>
+                      <div className="space-y-6 pt-8 border-t">
+                        <div className="space-y-4 p-4 border rounded-xl bg-muted/5">
+                          <h4 className="text-sm font-bold flex items-center gap-2 text-primary">
+                            <Building2 className="w-4 h-4" /> Portail citoyen
+                          </h4>
+                          <p className="text-[11px] text-muted-foreground">
+                            Ces informations sont affichées sur l’espace citoyen pour personnaliser le nom de la mairie et ses coordonnées d’accueil.
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Nom affiché de la mairie</label>
+                              <Input id="citizenPortalTownHallName" defaultValue={mairieSettingsData?.settings?.citizenPortalTownHallName ?? `Mairie de ${selectedCommune}`} placeholder={`Mairie de ${selectedCommune}`} />
+                            </div>
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Adresse ligne 1</label>
+                              <Input id="citizenPortalAddressLine1" defaultValue={mairieSettingsData?.settings?.citizenPortalAddressLine1 ?? ""} placeholder="Ex : 35 rue Eugène Gouin" />
+                            </div>
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Adresse ligne 2</label>
+                              <Input id="citizenPortalAddressLine2" defaultValue={mairieSettingsData?.settings?.citizenPortalAddressLine2 ?? ""} placeholder="Ex : Hôtel de Ville, accueil urbanisme" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Code postal</label>
+                              <Input id="citizenPortalPostalCode" defaultValue={mairieSettingsData?.settings?.citizenPortalPostalCode ?? ""} placeholder="37230" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Ville</label>
+                              <Input id="citizenPortalCity" defaultValue={mairieSettingsData?.settings?.citizenPortalCity ?? selectedCommune} placeholder={selectedCommune} />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Téléphone</label>
+                              <Input id="citizenPortalPhone" defaultValue={mairieSettingsData?.settings?.citizenPortalPhone ?? ""} placeholder="02 47 00 00 00" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Email</label>
+                              <Input id="citizenPortalEmail" defaultValue={mairieSettingsData?.settings?.citizenPortalEmail ?? ""} placeholder="urbanisme@mairie.fr" />
+                            </div>
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Permanences / horaires</label>
+                              <Input id="citizenPortalHours" defaultValue={mairieSettingsData?.settings?.citizenPortalHours ?? ""} placeholder="Ex : Lundi au vendredi de 9h à 12h, sur rendez-vous l’après-midi" />
+                            </div>
+                          </div>
+                        </div>
                         <div className="flex justify-end pt-4 border-t">
                           <Button 
                             className="gap-2 bg-yellow-600 hover:bg-yellow-700 h-10 px-8"
@@ -3569,6 +3621,14 @@ export default function PortailMairiePage() {
                               const getVal = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
                               
                               saveSettingsMutation.mutate({
+                                citizenPortalTownHallName: getVal("citizenPortalTownHallName"),
+                                citizenPortalAddressLine1: getVal("citizenPortalAddressLine1"),
+                                citizenPortalAddressLine2: getVal("citizenPortalAddressLine2"),
+                                citizenPortalPostalCode: getVal("citizenPortalPostalCode"),
+                                citizenPortalCity: getVal("citizenPortalCity"),
+                                citizenPortalPhone: getVal("citizenPortalPhone"),
+                                citizenPortalEmail: getVal("citizenPortalEmail"),
+                                citizenPortalHours: getVal("citizenPortalHours"),
                                 taRateCommunal: parseFloat(getVal("taRateCommunal")) / 100,
                                 taRateDept: parseFloat(getVal("taRateDept")) / 100,
                                 taxeFonciereRate: parseFloat(getVal("taxeFonciereRate")) / 100,
@@ -3591,7 +3651,7 @@ export default function PortailMairiePage() {
                             disabled={saveSettingsMutation.isPending}
                           >
                             {saveSettingsMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Verrouiller les paramètres fiscaux
+                            Sauvegarder les paramètres de commune
                           </Button>
                         </div>
                       </div>

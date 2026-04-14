@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,10 +70,33 @@ function getPortalCommuneName(documents: any[]) {
   return Array.from(communeCounts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] || "votre ville";
 }
 
+type CitizenPortalContext = {
+  commune: string | null;
+  townHallName: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  postalCode: string | null;
+  city: string | null;
+  phone: string | null;
+  email: string | null;
+  hours: string | null;
+  source: string;
+};
+
 export default function CitoyenPage() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { data: docsData, isLoading: docsLoading } = useGetApiDocuments();
+  const { data: portalContextData, isLoading: portalContextLoading } = useQuery<{ portalContext: CitizenPortalContext }>({
+    queryKey: ["citizen-portal-context"],
+    queryFn: async () => {
+      const response = await fetch("/api/dossiers/portal-context", { credentials: "include" });
+      if (!response.ok) throw new Error("Impossible de charger le contexte du portail citoyen.");
+      return response.json();
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -80,7 +104,7 @@ export default function CitoyenPage() {
     }
   }, [user, authLoading, setLocation]);
 
-  if (authLoading || docsLoading) {
+  if (authLoading || docsLoading || portalContextLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/40">
         <p>Chargement...</p>
@@ -90,7 +114,12 @@ export default function CitoyenPage() {
 
   const documents = docsData?.documents || [];
   const firstName = getFirstName(user?.name);
-  const communeName = getPortalCommuneName(documents);
+  const portalContext = portalContextData?.portalContext;
+  const communeName = portalContext?.commune || getPortalCommuneName(documents);
+  const townHallName = portalContext?.townHallName || `Mairie de ${communeName}`;
+  const hasPortalAddress = Boolean(
+    portalContext?.addressLine1 || portalContext?.addressLine2 || portalContext?.postalCode || portalContext?.city,
+  );
   const lastActivityLabel = documents[0] ? new Date(documents[0].createdAt).toLocaleDateString("fr-FR") : "Aucune";
 
   return (
@@ -125,7 +154,7 @@ export default function CitoyenPage() {
               <div className="space-y-2">
                 <p className="text-sm font-medium text-primary">Bonjour {firstName},</p>
                 <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
-                  Bienvenue sur votre guichet numérique de la Mairie de {communeName}
+                  Bienvenue sur votre guichet numérique de {townHallName}
                 </h1>
               </div>
               <p className="text-slate-600 text-base md:text-lg">
@@ -149,11 +178,24 @@ export default function CitoyenPage() {
               <div className="rounded-2xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 <p className="font-medium flex items-center gap-1.5">
                   <MapPin className="w-4 h-4 text-primary" />
-                  Hôtel de Ville – {communeName}
+                  {townHallName}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Les coordonnées et permanences de votre commune sont centralisées ici pour faciliter vos démarches.
-                </p>
+                {hasPortalAddress ? (
+                  <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                    {portalContext?.addressLine1 && <p>{portalContext.addressLine1}</p>}
+                    {portalContext?.addressLine2 && <p>{portalContext.addressLine2}</p>}
+                    {(portalContext?.postalCode || portalContext?.city) && (
+                      <p>{[portalContext?.postalCode, portalContext?.city].filter(Boolean).join(" ")}</p>
+                    )}
+                    {portalContext?.phone && <p>Tél. : {portalContext.phone}</p>}
+                    {portalContext?.email && <p>{portalContext.email}</p>}
+                    {portalContext?.hours && <p>{portalContext.hours}</p>}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Les coordonnées et permanences de votre commune seront affichées ici dès qu’elles seront renseignées dans la fiche de commune.
+                  </p>
+                )}
               </div>
             </div>
           </div>

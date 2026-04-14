@@ -7702,7 +7702,9 @@ router.post("/settings/:commune", async (req: AuthRequest, res) => {
       taRateCommunal, taRateDept, taxeFonciereRate, teomRate, rapRate, 
       valeurForfaitaireTA, valeurForfaitairePiscine, valeurForfaitaireStationnement,
       prixM2Maison, prixM2Collectif, yieldMaison, yieldCollectif,
-      abattementRP, surfaceAbattement, formulas
+      abattementRP, surfaceAbattement, formulas,
+      citizenPortalTownHallName, citizenPortalAddressLine1, citizenPortalAddressLine2,
+      citizenPortalPostalCode, citizenPortalCity, citizenPortalPhone, citizenPortalEmail, citizenPortalHours
     } = req.body;
     
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
@@ -7723,6 +7725,14 @@ router.post("/settings/:commune", async (req: AuthRequest, res) => {
       valeurForfaitaireTA, valeurForfaitairePiscine, valeurForfaitaireStationnement,
       prixM2Maison, prixM2Collectif, yieldMaison, yieldCollectif,
       abattementRP, surfaceAbattement,
+      citizenPortalTownHallName,
+      citizenPortalAddressLine1,
+      citizenPortalAddressLine2,
+      citizenPortalPostalCode,
+      citizenPortalCity,
+      citizenPortalPhone,
+      citizenPortalEmail,
+      citizenPortalHours,
       formulas: formulas || {},
       updatedAt: new Date()
     };

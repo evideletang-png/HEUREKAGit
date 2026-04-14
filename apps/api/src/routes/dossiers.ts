@@ -1,11 +1,47 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { dossiersTable, documentReviewsTable, dossierMessagesTable } from "@workspace/db";
+import { dossiersTable, documentReviewsTable, dossierMessagesTable, usersTable, municipalitySettingsTable, communesTable } from "@workspace/db";
 import { eq, desc, and, sql, asc } from "drizzle-orm";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import { NotificationService } from "../services/notificationService.js";
 
 const router: IRouter = Router();
+
+function parseCommunes(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String).map((value) => value.trim()).filter(Boolean);
+    if (typeof parsed === "string") return [parsed.trim()].filter(Boolean);
+    return [];
+  } catch {
+    return raw.split(",").map((value) => value.trim()).filter(Boolean);
+  }
+}
+
+function pickCitizenPortalCommune(args: {
+  assignedCommunes: string[];
+  latestDossierCommune?: string | null;
+  latestDocumentCommune?: string | null;
+}) {
+  const normalizedAssigned = args.assignedCommunes.filter(Boolean);
+  const dossierCommune = String(args.latestDossierCommune || "").trim();
+  const documentCommune = String(args.latestDocumentCommune || "").trim();
+
+  if (normalizedAssigned.length === 1) {
+    return { commune: normalizedAssigned[0], source: "user_commune" as const };
+  }
+  if (dossierCommune) {
+    return { commune: dossierCommune, source: "latest_dossier" as const };
+  }
+  if (documentCommune) {
+    return { commune: documentCommune, source: "latest_document" as const };
+  }
+  if (normalizedAssigned.length > 1) {
+    return { commune: normalizedAssigned[0], source: "first_user_commune" as const };
+  }
+  return { commune: null, source: "unresolved" as const };
+}
 
 // GET /api/dossiers
 router.get("/", authenticate, async (req: AuthRequest, res) => {
@@ -15,6 +51,83 @@ router.get("/", authenticate, async (req: AuthRequest, res) => {
     .where(eq(dossiersTable.userId, userId))
     .orderBy(desc(dossiersTable.createdAt));
   return res.json({ dossiers });
+});
+
+// GET /api/dossiers/portal-context
+router.get("/portal-context", authenticate, async (req: AuthRequest, res) => {
+  if (!req.user) return res.status(401).json({ error: "UNAUTHORIZED" });
+
+  const { userId } = req.user;
+  const [user] = await db.select({
+    name: usersTable.name,
+    communes: usersTable.communes,
+  }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+
+  const [latestDossier] = await db.select({
+    commune: dossiersTable.commune,
+  }).from(dossiersTable)
+    .where(and(eq(dossiersTable.userId, userId), sql`${dossiersTable.commune} IS NOT NULL`))
+    .orderBy(desc(dossiersTable.updatedAt), desc(dossiersTable.createdAt))
+    .limit(1);
+
+  const [latestDocument] = await db.select({
+    commune: documentReviewsTable.commune,
+  }).from(documentReviewsTable)
+    .where(and(eq(documentReviewsTable.userId, userId), sql`${documentReviewsTable.commune} IS NOT NULL`))
+    .orderBy(desc(documentReviewsTable.createdAt))
+    .limit(1);
+
+  const resolution = pickCitizenPortalCommune({
+    assignedCommunes: parseCommunes(user?.communes),
+    latestDossierCommune: latestDossier?.commune,
+    latestDocumentCommune: latestDocument?.commune,
+  });
+
+  if (!resolution.commune) {
+    return res.json({
+      portalContext: {
+        commune: null,
+        townHallName: null,
+        addressLine1: null,
+        addressLine2: null,
+        postalCode: null,
+        city: null,
+        phone: null,
+        email: null,
+        hours: null,
+        source: resolution.source,
+      },
+    });
+  }
+
+  const [settings] = await db.select().from(municipalitySettingsTable)
+    .where(eq(sql`lower(${municipalitySettingsTable.commune})`, resolution.commune.toLowerCase()))
+    .limit(1);
+
+  const [communeRow] = await db.select({
+    name: communesTable.name,
+    zipCode: communesTable.zipCode,
+  }).from(communesTable)
+    .where(eq(sql`lower(${communesTable.name})`, resolution.commune.toLowerCase()))
+    .limit(1);
+
+  const resolvedCity = settings?.citizenPortalCity || communeRow?.name || resolution.commune;
+  const resolvedPostalCode = settings?.citizenPortalPostalCode || communeRow?.zipCode || null;
+
+  return res.json({
+    portalContext: {
+      commune: resolution.commune,
+      townHallName: settings?.citizenPortalTownHallName || `Mairie de ${resolvedCity}`,
+      addressLine1: settings?.citizenPortalAddressLine1 || null,
+      addressLine2: settings?.citizenPortalAddressLine2 || null,
+      postalCode: resolvedPostalCode,
+      city: resolvedCity,
+      phone: settings?.citizenPortalPhone || null,
+      email: settings?.citizenPortalEmail || null,
+      hours: settings?.citizenPortalHours || null,
+      source: resolution.source,
+    },
+  });
 });
 
 // GET /api/dossiers/:id
