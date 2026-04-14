@@ -82,7 +82,7 @@ function FitMapBounds({
   useEffect(() => {
     const allPoints = [...parcelPositions, ...buildingRings.flat()];
     if (allPoints.length >= 3) {
-      map.fitBounds(L.latLngBounds(allPoints), { padding: [28, 28], maxZoom: 20 });
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [28, 28], maxZoom: 19 });
       return;
     }
     map.setView(mapCenter, 19);

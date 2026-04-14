@@ -74,7 +74,7 @@ function FitParcelPreviewBounds({
   useEffect(() => {
     const allPoints = polygons.flatMap((polygon) => polygon.positions);
     if (allPoints.length >= 3) {
-      map.fitBounds(L.latLngBounds(allPoints), { padding: [24, 24], maxZoom: 20 });
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [24, 24], maxZoom: 19 });
       return;
     }
     map.setView(center, 19);

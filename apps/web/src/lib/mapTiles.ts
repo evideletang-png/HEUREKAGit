@@ -4,11 +4,11 @@ export const SHARED_MAP_CONTAINER_OPTIONS = {
   zoomSnap: 1,
   zoomDelta: 1,
   wheelPxPerZoomLevel: 80,
-  maxZoom: 20,
+  maxZoom: 19,
 } as const;
 
 export const SHARED_TILE_LAYER_OPTIONS = {
-  maxZoom: 20,
+  maxZoom: 19,
 } as const;
 
 export const SHARED_MAP_TILE_LAYERS: Record<
@@ -42,7 +42,7 @@ export const SHARED_MAP_TILE_LAYERS: Record<
     attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      maxNativeZoom: 20,
+      maxNativeZoom: 19,
     },
   },
 };
