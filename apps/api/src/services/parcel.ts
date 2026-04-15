@@ -80,6 +80,53 @@ export interface BuildingData {
 // ────────────────────────────────────────────────────────────────────────────
 // STEP 1 — Cadastral parcel
 // ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Decode a BAN IDU string (e.g. "75056000AB0042") into its cadastral components.
+ * IDU format: [insee:5][prefixe:3][section:2][numero:4]
+ */
+function parseIdu(idu: string): { codeInsee: string; section: string; numero: string } | null {
+  const s = idu.trim().toUpperCase();
+  if (s.length !== 14) return null;
+  return {
+    codeInsee: s.slice(0, 5),
+    section: s.slice(8, 10).replace(/^0+/, "") || s.slice(8, 10), // strip leading zeros but keep non-empty
+    numero: s.slice(10, 14),
+  };
+}
+
+/**
+ * Fetch cadastral features directly by IDU list (from BAN parcelles field).
+ * Falls back gracefully — returns only successfully resolved features.
+ */
+async function getCadastreFeaturesByIdu(idus: string[]): Promise<any[]> {
+  const results: any[] = [];
+  const seenIds = new Set<string>();
+
+  await Promise.all(idus.map(async (idu) => {
+    const parsed = parseIdu(idu);
+    if (!parsed) return;
+    const { codeInsee, section, numero } = parsed;
+    const url = `${IGN_APICARTO}/cadastre/parcelle?code_insee=${encodeURIComponent(codeInsee)}&section=${encodeURIComponent(section)}&numero=${encodeURIComponent(numero)}&format=geojson`;
+    try {
+      const res = await fetch(url, { signal: signal() });
+      if (!res.ok) return;
+      const data: any = await res.json();
+      for (const f of data.features ?? []) {
+        const id = f.properties?.idu || idu;
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          results.push(f);
+        }
+      }
+    } catch {
+      // silently skip failed IDU lookups
+    }
+  }));
+
+  return results;
+}
+
 async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
   const fetchGeom = async (plat: number, plng: number) => {
     const geom = JSON.stringify({ type: "Point", coordinates: [plng, plat] });
@@ -472,21 +519,49 @@ export async function getParcelSelectionPreview(
   lat: number,
   lng: number,
   banId = "",
-  geocodeLabel = ""
+  geocodeLabel = "",
+  banParcelles?: string[]
 ): Promise<{ primaryParcel: ParcelSelectionPreviewItem; adjacentParcels: ParcelSelectionPreviewItem[] }> {
-  const cadastreFeatures = await getCadastreFeatures(lat, lng);
+  // When BAN supplies parcel IDUs directly, use them as primary candidates (faster + precise)
+  let cadastreFeatures: any[] = [];
+  if (banParcelles && banParcelles.length > 0) {
+    console.log("[parcel] Using BAN parcelles for direct IDU lookup:", banParcelles);
+    cadastreFeatures = await getCadastreFeaturesByIdu(banParcelles);
+  }
+  // Fall back to coordinate-based search if IDU lookup returned nothing
+  if (!cadastreFeatures.length) {
+    cadastreFeatures = await getCadastreFeatures(lat, lng);
+  }
   if (!cadastreFeatures.length) {
     throw new Error("No cadastral data");
   }
 
-  const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
-  if (!selected.ok || !selected.selected_feature) {
-    throw new Error("select-parcel failed");
+  // If BAN gave us a single exact parcel, use it directly without the ML selector
+  let primaryFeature: any;
+  if (banParcelles && banParcelles.length === 1 && cadastreFeatures.length === 1) {
+    primaryFeature = cadastreFeatures[0];
+    console.log("[parcel] Single BAN parcel resolved directly, skipping ML selector");
+  } else {
+    const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
+    if (!selected.ok || !selected.selected_feature) {
+      throw new Error("select-parcel failed");
+    }
+    primaryFeature = selected.selected_feature;
   }
 
-  const primaryFeature = selected.selected_feature;
   const primaryId = getFeatureId(primaryFeature);
-  const adjacentParcels = cadastreFeatures
+
+  // Fetch neighbours for the adjacent parcels panel (coordinate search around primary centroid)
+  let allCandidates = cadastreFeatures;
+  if (banParcelles && banParcelles.length > 0) {
+    const neighbourFeatures = await getCadastreFeatures(lat, lng);
+    const seenIds = new Set(cadastreFeatures.map(getFeatureId));
+    for (const f of neighbourFeatures) {
+      if (!seenIds.has(getFeatureId(f))) allCandidates.push(f);
+    }
+  }
+
+  const adjacentParcels = allCandidates
     .filter((feature) => getFeatureId(feature) !== primaryId)
     .filter((feature) => areAdjacentParcels(primaryFeature, feature))
     .map((feature) => mapParcelPreviewItem(feature, { isPrimary: false, isAdjacent: true }))
@@ -594,22 +669,38 @@ export async function getParcelByCoords(
   lat: number,
   lng: number,
   banId = "",
-  geocodeLabel = ""
+  geocodeLabel = "",
+  banParcelles?: string[]
 ): Promise<ParcelData> {
   try {
     // 1 — Cadastre features
-    console.log("[parcel] Fetching cadastre features...");
-    const cadastreFeatures = await getCadastreFeatures(lat, lng);
+    // Prefer direct IDU lookup from BAN parcelles when available (exact match, no ML needed)
+    let cadastreFeatures: any[] = [];
+    if (banParcelles && banParcelles.length > 0) {
+      console.log("[parcel] Direct IDU lookup via BAN parcelles:", banParcelles);
+      cadastreFeatures = await getCadastreFeaturesByIdu(banParcelles);
+    }
+    if (!cadastreFeatures.length) {
+      console.log("[parcel] Fetching cadastre features by coordinates...");
+      cadastreFeatures = await getCadastreFeatures(lat, lng);
+    }
     console.log("[parcel] Found", cadastreFeatures.length, "cadastre features");
     if (!cadastreFeatures.length) throw new Error("No cadastral data");
 
     // 2 — Select parcel
-    console.log("[parcel] Selecting best parcel...");
-    const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
-    if (!selected.ok) throw new Error("select-parcel failed");
-    console.log("[parcel] Selected:", selected.selected_section, selected.selected_numero);
+    let selectedFeature: any;
+    if (banParcelles && banParcelles.length === 1 && cadastreFeatures.length === 1) {
+      // Single BAN parcel — no need to call the ML selector
+      selectedFeature = cadastreFeatures[0];
+      console.log("[parcel] Single BAN parcel used directly:", selectedFeature?.properties?.section, selectedFeature?.properties?.numero);
+    } else {
+      console.log("[parcel] Selecting best parcel via ML selector...");
+      const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
+      if (!selected.ok) throw new Error("select-parcel failed");
+      console.log("[parcel] Selected:", selected.selected_section, selected.selected_numero);
+      selectedFeature = selected.selected_feature;
+    }
 
-    const selectedFeature = selected.selected_feature;
     const centroid = computeCentroid(selectedFeature);
 
     // 3 — BBOX

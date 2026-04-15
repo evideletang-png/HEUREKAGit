@@ -185,13 +185,13 @@ router.get("/", authenticate, async (req: AuthRequest, res) => {
 
 router.post("/parcel-preview", authenticate, async (req: AuthRequest, res) => {
   try {
-    const { lat, lng, banId, label } = req.body as { lat?: number; lng?: number; banId?: string; label?: string };
+    const { lat, lng, banId, label, banParcelles } = req.body as { lat?: number; lng?: number; banId?: string; label?: string; banParcelles?: string[] };
     if (typeof lat !== "number" || typeof lng !== "number") {
       res.status(400).json({ error: "VALIDATION_ERROR", message: "Coordonnées requises." });
       return;
     }
 
-    const preview = await getParcelSelectionPreview(lat, lng, banId || "", label || "");
+    const preview = await getParcelSelectionPreview(lat, lng, banId || "", label || "", banParcelles);
     let zoningPreview: { zoneCode: string | null; zoningLabel: string | null } | null = null;
     try {
       const zoningInfo = await getZoningByCoords(lat, lng);
@@ -224,6 +224,7 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
       city,
       postcode,
       selectedParcels,
+      banParcelles,
     } = req.body as {
       address: string;
       parcelRef?: string;
@@ -235,6 +236,7 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
       city?: string;
       postcode?: string;
       selectedParcels?: SelectedParcelPayload[];
+      banParcelles?: string[];
     };
 
     if (!address) {
@@ -304,7 +306,7 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
           selectedParcels.map((parcel) => parcel.feature).filter(Boolean),
         );
       } else {
-        parcelData = await getParcelByCoords(geo.lat, geo.lng, geo.banId ?? "", geo.label);
+        parcelData = await getParcelByCoords(geo.lat, geo.lng, geo.banId ?? "", geo.label, banParcelles);
       }
     } catch (parcelErr) {
       await db.update(analysesTable).set({ status: "failed", updatedAt: new Date() }).where(eq(analysesTable.id, analysis.id));
