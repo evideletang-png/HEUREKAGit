@@ -1348,11 +1348,12 @@ export default function PortailMairiePage() {
     return [];
   }, [user]);
 
-  const { data: allCommunes = [] } = useQuery<string[]>({
+  const { data: allCommunesRaw = [] } = useQuery<any[]>({
     queryKey: ["admin-communes"],
     queryFn: () => apiFetch("/api/admin/communes"),
     enabled: !!isAuthenticated && (user?.role as string) === "admin",
   });
+  const allCommunes: string[] = allCommunesRaw.map((c: any) => (typeof c === "string" ? c : c.name));
 
   const communes = useMemo(() => {
     if ((user?.role as string) === "admin") {
