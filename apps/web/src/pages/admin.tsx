@@ -155,7 +155,7 @@ function CommunesEditor({ userId, initialCommunes, onSaved }: { userId: string; 
         {/* Suggestions Dropdown */}
         {geoData?.results && geoData.results.length > 0 && search.length >= 2 && (
           <div className="absolute top-full left-0 w-full mt-1 bg-popover rounded-md shadow-lg border border-border overflow-hidden z-50 max-h-48 overflow-y-auto">
-            {geoData.results.map((item, idx) => (
+            {geoData.results.map((item: any, idx) => (
               <button
                 key={idx}
                 type="button"
@@ -1124,4 +1124,3 @@ export default function AdminPage() {
     </ProtectedLayout>
   );
 }
-

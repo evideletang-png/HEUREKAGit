@@ -39,7 +39,7 @@ export function ProtectedLayout({ children, requireAdmin = false }: { children: 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
+      <main className="animate-in fade-in duration-500 flex-1 w-full max-w-7xl mx-auto px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8 min-w-0">
         {children}
       </main>
     </div>

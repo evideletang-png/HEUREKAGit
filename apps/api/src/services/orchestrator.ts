@@ -4,6 +4,7 @@ import {
   documentReviewsTable,
   rulesTable,
   baseIADocumentsTable,
+  townHallDocumentsTable,
   globalConfigsTable,
   municipalitySettingsTable,
   analysesTable,
@@ -17,9 +18,11 @@ import {
   constraintsTable,
   communesTable
 } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { createHash } from "crypto";
-import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis } from "./pluAnalysis.js";
+import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
+import { loadRegulatoryUnits, buildParsedRulesFromRegulatoryUnits, buildArticlesFromRegulatoryUnits, buildDigestFromRegulatoryUnits } from "./regulatoryUnitService.js";
+import { buildArticlesFromUrbanRules, buildParsedRulesFromUrbanRules, loadStructuredRulesForAnalysis, type StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -32,12 +35,67 @@ import { MetricsTracker, trackOpenAIUsage } from "../utils/metrics.js";
 import { withRetry } from "../utils/retry.js";
 import { evaluateRequiredPieces, PIECE_LABELS } from "./pieceRules.js";
 import { BusinessDecisionSchema, SYSTEM_PROMPTS, JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
+import { communesTable } from "@workspace/db";
+import { loadZoneSegmentsForCommuneZone } from "./expertZoneAnalysisService.js";
 
 import { geocodeAddress } from "./geocoding.js";
 import { getZoningByCoords } from "./planning.js";
 import { getParcelByCoords, getBuildingsByParcel } from "./parcel.js";
-import { fetchGeoConstraints } from "./geoConstraintsService.js";
+import type { ParcelData } from "./parcel.js";
 import { DVFService } from "./dvfService.js";
+import {
+  resolveNormalizedBuildabilitySelections,
+  selectRuleForBuildabilityField,
+} from "./buildabilitySelection.js";
+
+type BuildabilitySourceDetail = {
+  field: string;
+  zoneCode: string | null;
+  ruleFamily: string;
+  ruleTopic: string;
+  ruleLabel: string;
+  sourceDocumentId: string | null;
+  sourceDocumentKind: string | null;
+  sourceDocumentName: string | null;
+  sourcePage: number | null;
+  sourceArticle: string | null;
+  sourceExcerpt: string | null;
+  reviewStatus: string | null;
+  confidenceScore: number | null;
+  resolutionStatus: string | null;
+  linkedRuleCount: number;
+  requiresCrossDocumentResolution: boolean;
+  relationResolutionNote: string | null;
+  visualCapture: {
+    pageNumber: number;
+    previewDataUrl: string;
+    box?: { x: number; y: number; width: number; height: number };
+  } | null;
+  visualSupportNote: string | null;
+};
+
+type BuildabilitySourceMeta = {
+  structuredRuleSource: "published_calibration" | "structured_urban_rules" | "none";
+  totalStructuredRules: number;
+  publishedRuleCount: number;
+  coveredFieldCount: number;
+  publishedCoveredFieldCount: number;
+  explicitFieldCount: number;
+  relationalRuleCount: number;
+  unresolvedRelationalRuleCount: number;
+  partialRelationalRuleCount: number;
+};
+
+type BuildabilitySourceDetails = {
+  footprint: BuildabilitySourceDetail | null;
+  remainingFootprint: BuildabilitySourceDetail | null;
+  height: BuildabilitySourceDetail | null;
+  setbackRoad: BuildabilitySourceDetail | null;
+  setbackBoundary: BuildabilitySourceDetail | null;
+  parking: BuildabilitySourceDetail | null;
+  greenSpace: BuildabilitySourceDetail | null;
+  meta: BuildabilitySourceMeta;
+};
 
 // ─── Geocoding cache helpers ────────────────────────────────────────────────
 
@@ -45,6 +103,126 @@ const GEOCODING_CACHE_TTL_DAYS = 90;
 
 function normalizeAddressKey(address: string): string {
   return address.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function extractCommuneNameFromAddress(address: string | null | undefined): string {
+  if (!address) return "";
+  const normalized = address.replace(/\s+/g, " ").trim();
+  const postalMatch = normalized.match(/\b\d{5}\s+([^,]+)$/);
+  if (postalMatch?.[1]) return postalMatch[1].trim();
+  const commaParts = normalized.split(",").map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length > 1) {
+    const last = commaParts[commaParts.length - 1];
+    return last.replace(/^\d{5}\s+/, "").trim();
+  }
+  return "";
+}
+
+async function buildBuildabilitySourceDetails(
+  rules: StructuredUrbanRuleSource[],
+  source: "published_calibration" | "structured_urban_rules" | "none",
+): Promise<BuildabilitySourceDetails> {
+  const baseIds = Array.from(new Set(
+    rules
+      .filter((rule) => rule?.sourceDocumentKind === "base_ia_document" && typeof rule?.sourceDocumentId === "string")
+      .map((rule) => rule.sourceDocumentId as string),
+  ));
+  const townHallIds = Array.from(new Set(
+    rules
+      .filter((rule) => rule?.sourceDocumentKind === "town_hall_document" && typeof rule?.sourceDocumentId === "string")
+      .map((rule) => rule.sourceDocumentId as string),
+  ));
+
+  const [baseDocs, townHallDocs] = await Promise.all([
+    baseIds.length > 0
+      ? db.select({
+          id: baseIADocumentsTable.id,
+          fileName: baseIADocumentsTable.fileName,
+        }).from(baseIADocumentsTable).where(inArray(baseIADocumentsTable.id, baseIds))
+      : Promise.resolve([]),
+    townHallIds.length > 0
+      ? db.select({
+          id: townHallDocumentsTable.id,
+          title: townHallDocumentsTable.title,
+          fileName: townHallDocumentsTable.fileName,
+        }).from(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, townHallIds))
+      : Promise.resolve([]),
+  ]);
+
+  const baseDocMap = new Map(baseDocs.map((doc) => [doc.id, doc.fileName]));
+  const townHallDocMap = new Map(townHallDocs.map((doc) => [doc.id, doc.title || doc.fileName]));
+
+  const toDetail = (field: string, rule: any | null): BuildabilitySourceDetail | null => {
+    if (!rule) return null;
+    const sourceDocumentName = rule.sourceDocumentKind === "town_hall_document"
+      ? townHallDocMap.get(rule.sourceDocumentId || "") || null
+      : rule.sourceDocumentKind === "base_ia_document"
+        ? baseDocMap.get(rule.sourceDocumentId || "") || null
+        : null;
+
+    return {
+      field,
+      zoneCode: rule.zoneCode || null,
+      ruleFamily: rule.ruleFamily,
+      ruleTopic: rule.ruleTopic,
+      ruleLabel: rule.ruleLabel,
+      sourceDocumentId: rule.sourceDocumentId || null,
+      sourceDocumentKind: rule.sourceDocumentKind || null,
+      sourceDocumentName,
+      sourcePage: rule.sourcePage ?? null,
+      sourceArticle: rule.sourceArticle ?? null,
+      sourceExcerpt: rule.sourceExcerpt ?? null,
+      reviewStatus: rule.reviewStatus ?? null,
+      confidenceScore: typeof rule.confidenceScore === "number" ? rule.confidenceScore : null,
+      resolutionStatus: "resolutionStatus" in rule ? rule.resolutionStatus ?? null : null,
+      linkedRuleCount: "linkedRuleCount" in rule ? Number(rule.linkedRuleCount || 0) : 0,
+      requiresCrossDocumentResolution: "requiresCrossDocumentResolution" in rule ? !!rule.requiresCrossDocumentResolution : false,
+      relationResolutionNote: "relationResolutionNote" in rule ? rule.relationResolutionNote ?? null : null,
+      visualCapture: "visualCapture" in rule ? rule.visualCapture ?? null : null,
+      visualSupportNote: "visualSupportNote" in rule ? rule.visualSupportNote ?? null : null,
+    };
+  };
+
+  const footprintRule = selectRuleForBuildabilityField(rules, "footprint")
+    ?? selectRuleForBuildabilityField(rules, "greenSpace");
+  const boundaryRule = selectRuleForBuildabilityField(rules, "setbackBoundary");
+  const details = {
+    footprint: toDetail("footprint", footprintRule),
+    remainingFootprint: toDetail("remainingFootprint", footprintRule),
+    height: toDetail("height", selectRuleForBuildabilityField(rules, "height")),
+    setbackRoad: toDetail("setbackRoad", selectRuleForBuildabilityField(rules, "setbackRoad")),
+    setbackBoundary: toDetail("setbackBoundary", boundaryRule),
+    parking: toDetail("parking", selectRuleForBuildabilityField(rules, "parking")),
+    greenSpace: toDetail("greenSpace", selectRuleForBuildabilityField(rules, "greenSpace")),
+  };
+  const explicitFields = [
+    details.footprint,
+    details.height,
+    details.setbackRoad,
+    details.setbackBoundary,
+    details.parking,
+    details.greenSpace,
+  ];
+  const coveredFieldCount = explicitFields.filter(Boolean).length;
+  const publishedCoveredFieldCount = explicitFields.filter((detail) => detail?.reviewStatus === "published").length;
+  const relationalRuleCount = rules.filter((rule) => "isRelationalRule" in rule && !!rule.isRelationalRule).length;
+  const unresolvedRelationalRuleCount = rules.filter((rule) => "resolutionStatus" in rule && rule.resolutionStatus === "unresolved").length;
+  const partialRelationalRuleCount = rules.filter((rule) => "resolutionStatus" in rule && rule.resolutionStatus === "partial").length;
+
+  return {
+    ...details,
+    meta: {
+      structuredRuleSource: source,
+      totalStructuredRules: rules.length,
+      publishedRuleCount: rules.filter((rule) => rule.reviewStatus === "published").length,
+      coveredFieldCount,
+      publishedCoveredFieldCount,
+      explicitFieldCount: explicitFields.length,
+      relationalRuleCount,
+      unresolvedRelationalRuleCount,
+      partialRelationalRuleCount,
+    },
+  };
 }
 
 async function getCachedGeocode(address: string) {
@@ -86,11 +264,184 @@ async function cacheGeocode(address: string, result: { lat: number; lng: number;
       set: { lat: result.lat, lng: result.lng, label: result.label, banId: result.banId, inseeCode: result.inseeCode, cityName: result.cityName, score: result.score, expiresAt },
     });
   } catch (e) {
-    logger.warn("[GeocodeCache] Write failed:", e);
+    logger.warn("[GeocodeCache] Write failed", { error: e instanceof Error ? e.message : String(e) });
   }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+
+function parseJsonSafely<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function buildPersistedParcelMetadata(parcelData: ParcelData) {
+  return {
+    ...(parcelData.metadata || {}),
+    parcelRefs: Array.isArray((parcelData.metadata as any)?.parcelRefs) ? (parcelData.metadata as any).parcelRefs : undefined,
+    parcelCount: (parcelData.metadata as any)?.parcelCount || 1,
+    perimeterM: parcelData._perimeterM ?? null,
+    depthM: parcelData._depthM ?? null,
+    isCornerPlot: parcelData._isCornerPlot ?? false,
+    topography: parcelData._topography ?? null,
+    frontRoadName: parcelData._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,
+  };
+}
+
+function hasReusableParcelContext(parcelRow: typeof parcelsTable.$inferSelect, metadata: Record<string, any> | null) {
+  if (!parcelRow.geometryJson || parcelRow.centroidLat == null || parcelRow.centroidLng == null) {
+    return false;
+  }
+  if (!metadata) return false;
+  return metadata.perimeterM != null && metadata.depthM != null && metadata.topography != null;
+}
+
+function buildFallbackZoneArticlesFromParsedRules(parsedRules: any[]) {
+  return parsedRules
+    .map((rule: any, index: number) => {
+      const rawArticle = rule?.article ?? rule?.articleNumber ?? rule?.article_id ?? null;
+      const articleDigits = rawArticle == null ? "" : String(rawArticle).replace(/[^0-9]/g, "");
+      const articleNumber = articleDigits ? parseInt(articleDigits, 10) : index + 1;
+      const sourceText = String(
+        rule?.sourceText
+        ?? rule?.source_text
+        ?? rule?.operational_rule
+        ?? rule?.rule
+        ?? rule?.content
+        ?? ""
+      ).trim();
+      const summary = String(
+        rule?.summary
+        ?? rule?.operational_rule
+        ?? rule?.rule
+        ?? rule?.interpretation
+        ?? sourceText
+      ).trim();
+      const title = String(
+        rule?.title
+        ?? rule?.section
+        ?? (rawArticle ? `Article ${rawArticle}` : `Règle ${index + 1}`)
+      ).trim();
+
+      if (sourceText.length < 25 && summary.length < 25) return null;
+
+      return {
+        articleNumber,
+        title,
+        sourceText,
+        summary,
+        interpretation: summary,
+        impactText: "",
+        vigilanceText: Array.isArray(rule?.exceptions) ? rule.exceptions.join("; ") : "",
+        confidence: "medium",
+        structuredData: rule,
+        relevanceScore: 60,
+        relevanceReason: "Règle extraite directement du contexte réglementaire utilisé pour l'analyse.",
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildRuleArticlesFromExpertBlocks(blocks: Array<{
+  articleCode: string | null;
+  themeCode: string;
+  themeLabel: string;
+  anchorType: string;
+  anchorLabel: string | null;
+  ruleResumee: string;
+  detailUtile: string;
+  exceptionsConditions: string | null;
+  effetConcretConstructibilite: string;
+  niveauVigilance: "faible" | "moyen" | "fort";
+  qualification: string;
+  sources: Array<{
+    documentTitle: string | null;
+    pageStart: number | null;
+    pageEnd: number | null;
+    anchorType: string | null;
+    anchorLabel: string | null;
+    sourceType: "published_rule" | "segment";
+  }>;
+  supportingRuleIds: string[];
+  segmentIds: string[];
+}>) {
+  return blocks.map((block, index) => {
+    const articleNumber = Number.parseInt(String(block.articleCode || "").replace(/\D+/g, ""), 10);
+    const primarySource = block.sources[0] || null;
+    const title = block.articleCode
+      ? `Article ${block.articleCode} — ${block.themeLabel}`
+      : `${block.themeLabel}${block.anchorLabel ? ` — ${block.anchorLabel}` : ""}`;
+
+    return {
+      articleNumber: Number.isFinite(articleNumber) ? articleNumber : 1000 + index,
+      title,
+      sourceText: block.detailUtile || block.ruleResumee || "",
+      summary: block.ruleResumee || "",
+      impactText: block.effetConcretConstructibilite || "",
+      vigilanceText: [
+        `Vigilance ${block.niveauVigilance}`,
+        block.qualification,
+        block.exceptionsConditions || "",
+      ].filter(Boolean).join(" · "),
+      confidence: block.niveauVigilance === "fort" ? "medium" : "high",
+      structuredJson: JSON.stringify({
+        themeCode: block.themeCode,
+        themeLabel: block.themeLabel,
+        anchorType: block.anchorType,
+        anchorLabel: block.anchorLabel,
+        qualification: block.qualification,
+        exceptionsConditions: block.exceptionsConditions,
+        supportingRuleIds: block.supportingRuleIds,
+        segmentIds: block.segmentIds,
+        primarySource,
+        sources: block.sources,
+        expertBlock: block,
+      }),
+    };
+  });
+}
+
+function buildRuleArticlesFromArticleSummaries(summaries: Array<{
+  article: string;
+  title: string;
+  status: string;
+  rule_type: string;
+  summary: string;
+  key_values: string[];
+  conditions: string[];
+  exceptions: string[];
+  secondary_sources: string[];
+  warnings: string[];
+  confidence: string;
+}>) {
+  return summaries.map((summary, index) => {
+    const articleNumber = Number.parseInt(String(summary.article || "").replace(/\D+/g, ""), 10);
+    return {
+      articleNumber: Number.isFinite(articleNumber) ? articleNumber : 1000 + index,
+      title: summary.title || `Article ${summary.article || index + 1}`,
+      sourceText: summary.summary || "",
+      summary: summary.summary || "",
+      impactText: summary.key_values.length > 0
+        ? `Valeurs clés : ${summary.key_values.join(" · ")}`
+        : "",
+      vigilanceText: [
+        `Statut ${summary.status}`,
+        summary.rule_type ? `Type ${summary.rule_type}` : "",
+        ...summary.conditions.map((condition) => `Condition : ${condition}`),
+        ...summary.exceptions.map((exception) => `Exception : ${exception}`),
+        ...summary.warnings.map((warning) => `Alerte : ${warning}`),
+      ].filter(Boolean).join(" · "),
+      confidence: summary.confidence || "unknown",
+      structuredJson: JSON.stringify({
+        articleSummary: summary,
+      }),
+    };
+  });
+}
 
 /**
  * Knowledge Routing Rules: Mapping piece codes to search priorities
@@ -149,15 +500,59 @@ import { MessagingService } from "./messagingService.js";
 /**
  * Resolves the full legal context for a given commune.
  */
-export async function resolveJurisdictionContext(communeInsee: string): Promise<JurisdictionContext> {
-  const [communeRecord] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, communeInsee)).limit(1);
+export async function resolveJurisdictionContext(communeInsee: string, communeNameHint?: string): Promise<JurisdictionContext> {
+  let communeRecord = (await db.select().from(communesTable).where(eq(communesTable.inseeCode, communeInsee)).limit(1))[0];
+
+  if (!communeRecord && communeInsee) {
+    const [settingsByInsee] = await db
+      .select({ inseeCode: municipalitySettingsTable.inseeCode, commune: municipalitySettingsTable.commune })
+      .from(municipalitySettingsTable)
+      .where(eq(municipalitySettingsTable.inseeCode, communeInsee))
+      .limit(1);
+
+    if (settingsByInsee?.commune) {
+      communeRecord = {
+        inseeCode: settingsByInsee.inseeCode || communeInsee,
+        name: settingsByInsee.commune,
+        jurisdictionId: settingsByInsee.inseeCode || communeInsee,
+      } as any;
+    }
+  }
+
+  if (!communeRecord && communeNameHint) {
+    communeRecord = (await db.select().from(communesTable)
+      .where(sql`lower(${communesTable.name}) = lower(${communeNameHint})`)
+      .limit(1))[0];
+  }
+
+  if (!communeRecord && communeNameHint) {
+    const [settingsByName] = await db
+      .select({ inseeCode: municipalitySettingsTable.inseeCode, commune: municipalitySettingsTable.commune })
+      .from(municipalitySettingsTable)
+      .where(sql`lower(${municipalitySettingsTable.commune}) = lower(${communeNameHint})`)
+      .limit(1);
+
+    if (settingsByName?.commune) {
+      communeRecord = {
+        inseeCode: settingsByName.inseeCode || communeInsee,
+        name: settingsByName.commune,
+        jurisdictionId: settingsByName.inseeCode || communeInsee,
+      } as any;
+    }
+  }
+
+  if (!communeRecord && communeInsee && !/^\d{5}$/.test(communeInsee)) {
+    communeRecord = (await db.select().from(communesTable)
+      .where(sql`lower(${communesTable.name}) = lower(${communeInsee})`)
+      .limit(1))[0];
+  }
   
   if (!communeRecord) {
-    logger.warn(`[Jurisdiction] Unknown commune ${communeInsee}. Falling back to Global ONLY.`);
+    logger.warn(`[Jurisdiction] Unknown commune ${communeInsee}${communeNameHint ? ` (${communeNameHint})` : ""}. Falling back to Global ONLY.`);
     return {
       commune_insee: communeInsee,
       jurisdiction_id: "GLOBAL",
-      name: "Unknown",
+      name: communeNameHint || "Unknown",
       plan_scope: "national",
       active_pool_ids: [GLOBAL_POOL_ID]
     };
@@ -186,10 +581,17 @@ export async function resolveJurisdictionContext(communeInsee: string): Promise<
  */
 export async function orchestrateDossierAnalysis(
   dossierId: string | null, 
-  docs: any[], 
-  userInfo: { userId: string; email?: string },
-  analysisId: string | null = null
+  docsOrUser: any[] | string | { userId: string; email?: string },
+  userInfoOrCommune?: { userId: string; email?: string } | string,
+  analysisIdOrLegacy: string | null | boolean = null
 ): Promise<OrchestrationResult> {
+  const docs = Array.isArray(docsOrUser) ? docsOrUser : [];
+  const userInfo = Array.isArray(docsOrUser)
+    ? ((typeof userInfoOrCommune === "object" && userInfoOrCommune) ? userInfoOrCommune : { userId: "SYSTEM" })
+    : (typeof docsOrUser === "string" ? { userId: docsOrUser } : docsOrUser);
+  const forcedCommune = !Array.isArray(docsOrUser) && typeof userInfoOrCommune === "string" ? userInfoOrCommune : null;
+  const analysisId = Array.isArray(docsOrUser) && typeof analysisIdOrLegacy === "string" ? analysisIdOrLegacy : null;
+
   logger.info(`>>> [8-Step Tunnel] Starting Orchestration. Dossier: ${dossierId || "N/A"}, Analysis: ${analysisId || "N/A"}`);
 
   // Helper: update analyses.status for progress tracking
@@ -199,7 +601,7 @@ export async function orchestrateDossierAnalysis(
       await db.update(analysesTable).set({ status: s, updatedAt: new Date() }).where(eq(analysesTable.id, analysisId));
       logger.info(`[Orchestrator] Analysis ${analysisId} status → ${s}`);
     } catch (e) {
-      logger.warn("[Orchestrator] Could not update analysis status:", e);
+      logger.warn("[Orchestrator] Could not update analysis status", { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -216,10 +618,12 @@ export async function orchestrateDossierAnalysis(
   let ruleResults: any[] = [];
   let detailedResolvedFields: any[] = [];
   let abfDiagnostic: { isConcerned: boolean; reasons: string[] } = { isConcerned: false, reasons: [] };
+  let sourceLock: any = null;
 
   // 0. Fetch initial info
   let initialAddress = "";
   let initialCommune = "00000";
+  let initialCityName = "";
   let typeProcedure = "PCMI";
   let isCUa = false;
   let status = "BROUILLON";
@@ -228,7 +632,8 @@ export async function orchestrateDossierAnalysis(
     const [dossier] = await db.select().from(dossiersTable).where(eq(dossiersTable.id, dossierId)).limit(1);
     if (!dossier) throw new Error(`Dossier ${dossierId} not found.`);
     initialAddress = dossier.address || "";
-    initialCommune = dossier.commune || "00000";
+    initialCommune = forcedCommune || dossier.commune || "00000";
+    initialCityName = typeof dossier.commune === "string" ? dossier.commune : "";
     typeProcedure = dossier.typeProcedure;
     isCUa = typeProcedure === "CUa";
     status = dossier.status;
@@ -239,26 +644,52 @@ export async function orchestrateDossierAnalysis(
   } else if (analysisId) {
     const [analysis] = await db.select().from(analysesTable).where(eq(analysesTable.id, analysisId)).limit(1);
     if (!analysis) throw new Error(`Analysis ${analysisId} not found.`);
-    initialAddress = analysis.address;
-    initialCommune = analysis.postalCode || "00000"; // Fallback to postal code if city hidden
+    const existingGeoContext = analysis.geoContextJson
+      ? (() => { try { return JSON.parse(analysis.geoContextJson); } catch { return null; } })()
+      : null;
+    sourceLock = existingGeoContext?.source_lock ?? null;
+    initialAddress = sourceLock?.address || analysis.address;
+    initialCityName = analysis.city || "";
+    const [existingParcel] = await db.select({ metadataJson: parcelsTable.metadataJson })
+      .from(parcelsTable)
+      .where(eq(parcelsTable.analysisId, analysisId))
+      .limit(1);
+    const parcelMetadata = existingParcel?.metadataJson
+      ? (() => { try { return JSON.parse(existingParcel.metadataJson); } catch { return null; } })()
+      : null;
+    initialCommune = forcedCommune || sourceLock?.inseeCode || parcelMetadata?.commune || analysis.city || "00000";
+  }
+
+  if (docs.length === 0) {
+    if (dossierId) {
+      docs.push(...await db.select().from(documentReviewsTable).where(eq(documentReviewsTable.dossierId, dossierId)));
+    } else if (analysisId) {
+      docs.push(...await db.select().from(documentReviewsTable).where(eq(documentReviewsTable.analysisId, analysisId)));
+    }
   }
 
   try {
   await setAnalysisStatus("collecting_data");
 
   // 1. IDENTIFY THE ANALYSIS CONTEXT (Step 1)
-  const contextIdentification = await identifyAnalysisContext(initialCommune, initialAddress || undefined);
+  const contextIdentification = await identifyAnalysisContext(initialCommune, initialAddress || undefined, sourceLock);
   const currentCommune = contextIdentification.commune;
   finalZone = contextIdentification.zone;
+  const addressCityName = extractCommuneNameFromAddress(initialAddress);
+  const communeNameHint = initialCityName || addressCityName;
   
   // 1.1 Resolve Jurisdiction
-  const jurisdictionContext = await resolveJurisdictionContext(currentCommune);
+  const jurisdictionContext = await resolveJurisdictionContext(currentCommune, communeNameHint);
+  const regulatoryCommune = jurisdictionContext.commune_insee || currentCommune;
+  const regulatoryCommuneName = (jurisdictionContext.name && jurisdictionContext.name !== "Unknown")
+    ? jurisdictionContext.name
+    : (communeNameHint || currentCommune);
 
   // 2. REBUILD DOCUMENT TARGETING LOGIC (Step 2)
   const targetedDocs = await rebuildDocumentTargeting(docs, finalZone);
 
   // 3. Build Regulatory Context (RAG)
-  const context = await buildAnalysisContext(currentCommune, finalZone, jurisdictionContext);
+  const context = await buildAnalysisContext(regulatoryCommune, finalZone, jurisdictionContext);
 
   await setAnalysisStatus("parsing_documents");
 
@@ -280,7 +711,7 @@ export async function orchestrateDossierAnalysis(
         {
           dossierDocs: processedDocsMetadata,
           regulatoryRules: context.relevantRules,
-          commune: currentCommune,
+          commune: regulatoryCommuneName,
           zoneCode: finalZone
         } as any
       ));
@@ -319,22 +750,65 @@ export async function orchestrateDossierAnalysis(
         .where(eq(parcelsTable.analysisId, analysisId)).limit(1);
       const [existingAnalysis] = await db.select({ zoneCode: analysesTable.zoneCode })
         .from(analysesTable).where(eq(analysesTable.id, analysisId)).limit(1);
-      if (existingParcel && existingAnalysis?.zoneCode) {
+      const metadata = parseJsonSafely<Record<string, any>>(existingParcel?.metadataJson ?? null);
+      const canReuseStoredParcel = !!existingParcel && !!existingAnalysis?.zoneCode && hasReusableParcelContext(existingParcel, metadata);
+      if (canReuseStoredParcel && existingParcel) {
         skipGeocoding = true;
-        parcelData = existingParcel;
-        finalZone = existingAnalysis.zoneCode;
+        parcelData = {
+          cadastralSection: existingParcel.cadastralSection,
+          parcelNumber: existingParcel.parcelNumber,
+          parcelSurfaceM2: existingParcel.parcelSurfaceM2,
+          geometryJson: existingParcel.geometryJson ? JSON.parse(existingParcel.geometryJson) : null,
+          centroidLat: existingParcel.centroidLat,
+          centroidLng: existingParcel.centroidLng,
+          roadFrontageLengthM: existingParcel.roadFrontageLengthM,
+          sideBoundaryLengthM: existingParcel.sideBoundaryLengthM,
+          metadata: metadata || {},
+          _perimeterM: metadata?.perimeterM ?? null,
+          _depthM: metadata?.depthM ?? null,
+          _isCornerPlot: metadata?.isCornerPlot ?? false,
+          _topography: metadata?.topography ?? null,
+          _classifyBoundariesResult: metadata?.frontRoadName
+            ? { road_boundary_segments: [{ properties: { closest_road_name: metadata.frontRoadName } }] }
+            : null,
+        };
+        const existingBuildings = await db.select().from(buildingsTable)
+          .where(eq(buildingsTable.analysisId, analysisId));
+        buildingData = {
+          buildings: existingBuildings.map((building) => ({
+            footprintM2: building.footprintM2 ?? 0,
+            estimatedFloorAreaM2: building.estimatedFloorAreaM2 ?? 0,
+            avgHeightM: building.avgHeightM ?? 0,
+            avgFloors: building.avgFloors ?? 0,
+            geometryJson: building.geometryJson ? JSON.parse(building.geometryJson) : null,
+          })),
+          rawFeatures: [],
+          analyseParcelleResult: null,
+        };
+        parcelData.buildings = buildingData.buildings;
+        finalZone = existingAnalysis.zoneCode ?? finalZone;
         logger.info(`[Orchestrator] Skipping geocoding — analysis ${analysisId} already has zone ${finalZone} and parcel data.`);
+      } else if (existingParcel && existingAnalysis?.zoneCode) {
+        logger.info(`[Orchestrator] Stored parcel context incomplete for analysis ${analysisId}; recomputing geodata to restore missing metrics.`);
       }
     } catch (e) {
-      logger.warn("[Orchestrator] Could not check existing parcel:", e);
+      logger.warn("[Orchestrator] Could not check existing parcel", { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
   if (!skipGeocoding && initialAddress) {
     try {
       // Check cache first
-      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string } | null =
-        await getCachedGeocode(initialAddress);
+      const cachedGeocode = await getCachedGeocode(initialAddress);
+      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string } | null = cachedGeocode
+        ? {
+            lat: cachedGeocode.lat,
+            lng: cachedGeocode.lng,
+            label: cachedGeocode.label,
+            banId: cachedGeocode.banId ?? undefined,
+            inseeCode: cachedGeocode.inseeCode ?? undefined,
+          }
+        : null;
       if (bestMatch) {
         logger.info(`[Orchestrator] Geocoding cache hit for "${initialAddress}"`);
       } else {
@@ -370,6 +844,7 @@ export async function orchestrateDossierAnalysis(
                 centroidLng: parcelData.centroidLng ?? null,
                 roadFrontageLengthM: parcelData.roadFrontageLengthM ?? null,
                 sideBoundaryLengthM: parcelData.sideBoundaryLengthM ?? null,
+                metadataJson: JSON.stringify(buildPersistedParcelMetadata(parcelData)),
               });
 
               if (buildingData?.buildings?.length > 0) {
@@ -387,7 +862,7 @@ export async function orchestrateDossierAnalysis(
               }
               logger.info(`[Orchestrator] Parcel + buildings persisted for analysis ${analysisId}`);
             } catch (persistErr) {
-              logger.warn("[Orchestrator] Could not persist parcel/buildings:", persistErr);
+              logger.warn("[Orchestrator] Could not persist parcel/buildings", { error: persistErr instanceof Error ? persistErr.message : String(persistErr) });
             }
           }
         }
@@ -395,8 +870,7 @@ export async function orchestrateDossierAnalysis(
         const zoningInfo = await getZoningByCoords(bestMatch.lat, bestMatch.lng, currentCommune);
         if (zoningInfo && zoningInfo.zoneCode !== finalZone) {
           finalZone = zoningInfo.zoneCode;
-          zoneFromGPU = zoningInfo.gpuConfirmed === true;  // GPU API confirmation → high confidence
-          const newContext = await buildAnalysisContext(currentCommune, finalZone, jurisdictionContext);
+          const newContext = await buildAnalysisContext(regulatoryCommune, finalZone, jurisdictionContext);
           context.relevantRules = newContext.relevantRules;
           context.relevantDocs = newContext.relevantDocs;
         }
@@ -453,57 +927,297 @@ export async function orchestrateDossierAnalysis(
 
   // 7. RULE EXTRACTION & NORMALIZATION (Step 3, 4, 5)
   // Resolve commune name for AI extraction (mismatch fix for 37203 vs Rochecorbon)
-  let communeName = currentCommune;
+  let communeName = regulatoryCommuneName;
   try {
-    const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, currentCommune)).limit(1);
+    const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, regulatoryCommune)).limit(1);
     if (c) communeName = c.name;
-    logger.info(`[Orchestrator] Resolved ${currentCommune} to ${communeName} for extraction`);
+    logger.info(`[Orchestrator] Resolved ${regulatoryCommune} to ${communeName} for extraction`);
   } catch (e) {}
 
-  const regulatoryContext = context.relevantDocs.map(d => d.rawText || "").join("\n\n");
-  const rawRules = await extractRelevantRules(regulatoryContext, { 
-    zoneCode: finalZone, 
-    cityName: communeName,
-    jurisdictionContext 
+  const isStrictRegulatoryDoc = (doc: any) => {
+    const hint = [
+      doc?.documentType,
+      doc?.type,
+      doc?.category,
+      doc?.subCategory,
+      doc?.title,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+
+    if (doc?.isOpposable === true) return true;
+    if (hint.includes("padd")) return false;
+    if (hint.includes("oap") || hint.includes("orientation")) return false;
+    if (hint.includes("reglement") || hint.includes("règlement") || hint.includes("regulation") || hint.includes("written regulation") || hint.includes("plu_reglement")) return true;
+    if (hint.includes("plu_annexe") || hint.includes("zonage") || hint.includes("zoning map") || hint.includes("graphique") || hint.includes("carte") || hint.includes("map")) return true;
+    if (String(doc?.type || "").toLowerCase() === "plu") return true;
+    return false;
+  };
+
+  const isWrittenRegulationDoc = (doc: any) => {
+    const hint = [
+      doc?.documentType,
+      doc?.type,
+      doc?.category,
+      doc?.subCategory,
+      doc?.title,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+
+    if (hint.includes("padd") || hint.includes("oap") || hint.includes("orientation")) return false;
+    return hint.includes("reglement")
+      || hint.includes("règlement")
+      || hint.includes("regulation")
+      || hint.includes("written regulation")
+      || hint.includes("plu_reglement");
+  };
+
+  const strictRegulatoryDocs = context.relevantDocs.filter((doc) => {
+    const rawText = String(doc?.rawText || "").trim();
+    return rawText.length >= 100 && isStrictRegulatoryDoc(doc);
   });
-  
+  const primaryWrittenRegulationDocs = strictRegulatoryDocs.filter(isWrittenRegulationDoc);
+  const annexRegulatoryDocs = strictRegulatoryDocs.filter((doc) => !primaryWrittenRegulationDocs.includes(doc));
+
+  const supplementaryPlanningDocs = context.relevantDocs.filter((doc) => {
+    if (strictRegulatoryDocs.includes(doc)) return false;
+    const rawText = String(doc?.rawText || "").trim();
+    if (rawText.length < 100) return false;
+    const hint = [
+      doc?.documentType,
+      doc?.type,
+      doc?.category,
+      doc?.subCategory,
+      doc?.title,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    return hint.includes("oap") || hint.includes("orientation") || hint.includes("padd");
+  });
+
+  const primaryRegulatoryContext = primaryWrittenRegulationDocs.map((d) => d.rawText || "").join("\n\n");
+  const annexRegulatoryContext = annexRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
+  const regulatoryContext = [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n--- ANNEXES OPPOSABLES ---\n\n");
+  const supplementaryPlanningContext = supplementaryPlanningDocs.map((d) => d.rawText || "").join("\n\n");
+  const structuredRuleLoad = await loadStructuredRulesForAnalysis({
+    municipalityId: regulatoryCommune,
+    communeName,
+    zoneCode: finalZone,
+    minAuthority: 7,
+  });
+  const structuredUrbanRules = structuredRuleLoad.rules;
+  const canonicalUnits = structuredUrbanRules.length === 0 ? await loadRegulatoryUnits({
+    municipalityId: regulatoryCommune,
+    communeName,
+    zoneCode: finalZone,
+    minAuthority: 7,
+    documentTypes: ["plu_reglement", "plu_annexe"],
+  }) : [];
+
   let parsedRules: any[] = [];
-  try {
-    const parsed = JSON.parse(rawRules);
-    if (Array.isArray(parsed)) {
-      parsedRules = parsed;
-    } else if (parsed && typeof parsed === 'object') {
-      parsedRules = parsed.articles || parsed.data || parsed.rules || [];
-      if (!Array.isArray(parsedRules)) parsedRules = [parsedRules]; // Wrap single object
+  const canonicalArticles = structuredUrbanRules.length > 0
+    ? buildArticlesFromUrbanRules(structuredUrbanRules)
+    : (canonicalUnits.length > 0 ? buildArticlesFromRegulatoryUnits(canonicalUnits) : []);
+  const canonicalDigest = canonicalUnits.length > 0 ? buildDigestFromRegulatoryUnits(canonicalUnits, finalZone) : null;
+
+  if (structuredUrbanRules.length > 0) {
+    parsedRules = buildParsedRulesFromUrbanRules(structuredUrbanRules);
+    logger.info(`[Orchestrator] Using ${structuredUrbanRules.length} ${structuredRuleLoad.source} rules for zone ${finalZone}.`);
+  } else if (canonicalUnits.length > 0) {
+    parsedRules = buildParsedRulesFromRegulatoryUnits(canonicalUnits);
+    logger.info(`[Orchestrator] Using ${canonicalUnits.length} canonical regulatory units for zone ${finalZone}.`);
+  } else {
+    const primaryRawRules = await extractRelevantRules(primaryRegulatoryContext || regulatoryContext, {
+      zoneCode: finalZone,
+      cityName: communeName,
+      jurisdictionContext
+    });
+
+    try {
+      const parsed = JSON.parse(primaryRawRules);
+      parsedRules = extractStructuredRuleCandidates(parsed);
+
+      if (parsedRules.length === 0 && parsed && typeof parsed === "object") {
+        const nestedCandidates = [
+          parsed?.data,
+          parsed?.content,
+          parsed?.result,
+          parsed?.payload,
+        ];
+
+        for (const candidate of nestedCandidates) {
+          const extracted = extractStructuredRuleCandidates(candidate);
+          if (extracted.length > 0) {
+            parsedRules = extracted;
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      logger.error("[Orchestrator] Failed to parse rules JSON.");
     }
-  } catch (e) {
-    logger.error("[Orchestrator] Failed to parse rules JSON.");
+
+    const parsedRulesHavePrimarySubstance = parsedRules.some((rule: any) => {
+      const text = String(
+        rule?.sourceText
+        ?? rule?.source_text
+        ?? rule?.operational_rule
+        ?? rule?.rule
+        ?? rule?.summary
+        ?? rule?.content
+        ?? ""
+      ).trim();
+      return text.length >= 40;
+    });
+
+    if (!parsedRulesHavePrimarySubstance && (annexRegulatoryContext || supplementaryPlanningContext)) {
+      const enrichedRawRules = await extractRelevantRules(
+        [primaryRegulatoryContext, annexRegulatoryContext, supplementaryPlanningContext]
+          .filter(Boolean)
+          .join("\n\n--- DOCUMENTS COMPLEMENTAIRES ---\n\n"),
+        {
+          zoneCode: finalZone,
+          cityName: communeName,
+          jurisdictionContext
+        }
+      );
+
+      try {
+        const parsed = JSON.parse(enrichedRawRules);
+        const enrichedRules = extractStructuredRuleCandidates(parsed);
+        if (enrichedRules.length > 0) {
+          parsedRules = enrichedRules;
+        }
+      } catch (e) {
+        logger.error("[Orchestrator] Failed to parse enriched rules JSON.");
+      }
+    }
+  }
+
+  const parsedRulesHaveSubstance = parsedRules.some((rule: any) => {
+    const text = String(
+      rule?.sourceText
+      ?? rule?.source_text
+      ?? rule?.operational_rule
+      ?? rule?.rule
+      ?? rule?.summary
+      ?? rule?.content
+      ?? ""
+    ).trim();
+    return text.length >= 40;
+  });
+
+  if (!parsedRulesHaveSubstance) {
+    const deterministicRules = extractDeterministicRegulatoryRules(
+      [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n"),
+      finalZone
+    ).map((rule) => ({
+      article: rule.articleNumber,
+      articleNumber: rule.articleNumber,
+      title: rule.title,
+      rule: rule.sourceText,
+      sourceText: rule.sourceText,
+      summary: rule.summary,
+      interpretation: rule.interpretation,
+      impactText: rule.impactText,
+      vigilanceText: rule.vigilanceText,
+      confidence: rule.confidence,
+      structuredData: rule.structuredData,
+    }));
+
+    if (deterministicRules.length > 0) {
+      parsedRules = deterministicRules;
+      logger.info(`[Orchestrator] Using ${deterministicRules.length} deterministic regulatory rules for zone ${finalZone}.`);
+    }
   }
 
   const { NormalizationService } = await import("./normalizationService.js");
-  const normalizedParams = await NormalizationService.normalizeRules(parsedRules);
+  const normalizedParams = structuredUrbanRules.length > 0
+    ? NormalizationService.mergeCalculationParameters(
+        await NormalizationService.normalizeUrbanRules(structuredUrbanRules),
+        await NormalizationService.normalizeRules(parsedRules),
+      )
+    : await NormalizationService.normalizeRules(parsedRules);
+
+  const hasPluSourceData = (primaryRegulatoryContext || "").trim().length >= 200
+    || (annexRegulatoryContext || "").trim().length >= 200
+    || parsedRules.length > 0;
+  const missingPluSourceMessage = hasPluSourceData
+    ? null
+    : `Aucun document PLU opposable indexe pour la zone ${finalZone} sur la commune ${communeName}.`;
 
   await setAnalysisStatus("calculating");
 
   // 8. CALCULATION TUNNEL (Step 6)
-  const { CalculationTunnel } = await import("./calculationTunnel.js");
-  calculations = await CalculationTunnel.runTunnel(parcelData || {}, resolvedProjectData, normalizedParams);
+  if (hasPluSourceData) {
+    const { CalculationTunnel } = await import("./calculationTunnel.js");
+    calculations = await CalculationTunnel.runTunnel(parcelData || {}, resolvedProjectData, normalizedParams);
+  } else {
+    calculations = null;
+    logger.warn(`[Orchestrator] Skipping buildability tunnel for analysis ${analysisId || dossierId || "N/A"} — no opposable PLU source available for zone ${finalZone}.`);
+  }
 
   // 8b. PERSIST BUILDABILITY RESULTS
   if (analysisId && calculations) {
     try {
       // TunnelResult uses snake_case keys; normalizedParams has numeric arrays
+      const selections = resolveNormalizedBuildabilitySelections(normalizedParams);
       const maxFootprint = calculations.max_authorized_footprint_m2 ?? null;
       const remainingFootprint = calculations.remaining_footprint_m2 ?? null;
-      const maxHeight = normalizedParams.max_height?.[0] ?? null;
-      const roadSetback = normalizedParams.road_setback?.[0] ?? null;
-      const boundarySetback = normalizedParams.boundary_setback?.[0] ?? null;
-      const parkingReq = normalizedParams.parking_requirements?.[0] ?? null;
-      const greenSpaceReq = normalizedParams.landscaping_requirements?.[0] ?? null;
+      const maxHeight = selections.maxHeight;
+      const roadSetback = selections.roadSetback;
+      const boundarySetback = selections.boundarySetback;
+      const parkingReq = selections.parkingRequirement;
+      const greenSpaceRatio = selections.greenSpaceRatio;
+      const greenSpaceReq = selections.landscapingRequirement
+        ?? (greenSpaceRatio != null
+          ? `${Math.round(greenSpaceRatio * 100)}% de pleine terre minimum`
+          : null);
       const assumptions = [
         ...(calculations.blocking_constraints ?? []),
         ...(calculations.uncertainties ?? []),
       ];
+      const relationAppliedNotes = Array.from(new Set(
+        structuredUrbanRules
+          .map((rule) => ("relationResolutionNote" in rule ? rule.relationResolutionNote : null))
+          .filter((note): note is string => !!note && note.trim().length > 0),
+      )).slice(0, 4);
+      const sourceDetails = await buildBuildabilitySourceDetails(structuredUrbanRules, structuredRuleLoad.source);
+      const explicitSignals = [
+        maxFootprint != null || greenSpaceRatio != null,
+        maxHeight != null,
+        roadSetback != null,
+        boundarySetback != null,
+        parkingReq != null,
+        greenSpaceReq != null,
+      ];
+      const coverageScore = explicitSignals.filter(Boolean).length / explicitSignals.length;
+      const provenanceScore = structuredRuleLoad.source === "published_calibration"
+        ? 1
+        : structuredRuleLoad.source === "structured_urban_rules"
+          ? 0.55
+          : 0.25;
+      const publishedCoverageScore = sourceDetails.meta.explicitFieldCount > 0
+        ? sourceDetails.meta.publishedCoveredFieldCount / sourceDetails.meta.explicitFieldCount
+        : 0;
+      const baseConfidenceScore = structuredRuleLoad.source === "published_calibration"
+        ? Math.round(((coverageScore * 0.7) + (publishedCoverageScore * 0.3)) * 100) / 100
+        : Math.round(((coverageScore * 0.7) + (provenanceScore * 0.3)) * 100) / 100;
+      const relationPenaltyFactor = sourceDetails.meta.unresolvedRelationalRuleCount > 0
+        ? 0.65
+        : sourceDetails.meta.partialRelationalRuleCount > 0
+          ? 0.85
+          : 1;
+      const computedConfidenceScore = Math.round(baseConfidenceScore * relationPenaltyFactor * 100) / 100;
+      if (sourceDetails.meta.unresolvedRelationalRuleCount > 0) {
+        assumptions.push(`${sourceDetails.meta.unresolvedRelationalRuleCount} regle(s) relationnelle(s) restent non resolue(s) dans des documents lies.`);
+      } else if (sourceDetails.meta.partialRelationalRuleCount > 0) {
+        assumptions.push(`${sourceDetails.meta.partialRelationalRuleCount} regle(s) relationnelle(s) restent partiellement resolue(s) et demandent une verification.`);
+      }
+      assumptions.push(...relationAppliedNotes);
+
+      const relationSummarySuffix = sourceDetails.meta.unresolvedRelationalRuleCount > 0
+        ? ` Sous réserve de ${sourceDetails.meta.unresolvedRelationalRuleCount} dépendance(s) documentaire(s) non résolue(s).`
+        : sourceDetails.meta.partialRelationalRuleCount > 0
+          ? ` Certaines dépendances documentaires restent partielles et demandent une lecture complémentaire.`
+          : sourceDetails.meta.relationalRuleCount > 0
+            ? ` Les relations documentaires calibrées ont été prises en compte dans cette conclusion.`
+            : "";
 
       // Confidence boost if zone was confirmed by GPU API (high confidence source)
       const baseConfidence = (maxFootprint != null && maxFootprint > 0) ? 0.75 : 0.4;
@@ -519,9 +1233,11 @@ export async function orchestrateDossierAnalysis(
         parkingRequirement: parkingReq ? String(parkingReq) : null,
         greenSpaceRequirement: greenSpaceReq ? String(greenSpaceReq) : null,
         assumptionsJson: JSON.stringify(assumptions),
-        confidenceScore: confidenceScore,
+        sourceDetailsJson: JSON.stringify(sourceDetails),
+        confidenceScore: computedConfidenceScore,
         resultSummary: calculations.theoretical_potential_synthesis
-          ?? `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m`,
+          ? `${calculations.theoretical_potential_synthesis}${relationSummarySuffix}`.trim()
+          : `Zone ${finalZone}: emprise max ${maxFootprint ?? "?"}m², hauteur max ${maxHeight ?? "?"}m.${relationSummarySuffix}`.trim(),
       };
       const [existingBuildability] = await db.select({ id: buildabilityResultsTable.id })
         .from(buildabilityResultsTable).where(eq(buildabilityResultsTable.analysisId, analysisId)).limit(1);
@@ -532,14 +1248,14 @@ export async function orchestrateDossierAnalysis(
       }
       logger.info(`[Orchestrator] Buildability results persisted for analysis ${analysisId}`);
     } catch (bErr) {
-      logger.warn("[Orchestrator] Could not persist buildability results:", bErr);
+      logger.warn("[Orchestrator] Could not persist buildability results", { error: bErr instanceof Error ? bErr.message : String(bErr) });
     }
   }
 
   // 9. MCP ENRICHMENT
   try {
     const { fetchMarketData, fetchAdminGuide } = await import("./mcpIntegration.js");
-    marketData = await fetchMarketData(currentCommune);
+    marketData = await fetchMarketData(regulatoryCommune);
     adminGuide = await fetchAdminGuide(typeProcedure);
   } catch (mcpErr) {}
 
@@ -640,20 +1356,37 @@ export async function orchestrateDossierAnalysis(
     globalScore: score,
     zoneCode: finalZone,
     geoContextJson: JSON.stringify({
+      source_lock: sourceLock ?? null,
       municipality: currentCommune,
       zone: finalZone,
       financial_analysis: financialAnalysis,
       plu_trace: strictPluAnalysis,
+      data_quality: {
+        address_and_parcel: sourceLock?.lat && sourceLock?.lng ? "validated" : parcelData ? "calculated" : "to_confirm",
+        zoning: finalZone && (sourceLock?.zoneCode || currentCommune) ? "validated" : "to_confirm",
+        buildability: calculations ? "calculated" : "to_confirm",
+        neighbour_context: buildingData?.buildings?.length ? "estimated" : "to_confirm",
+        topography: parcelData?._topography ? "estimated" : "to_confirm",
+        roads: parcelData?._classifyBoundariesResult ? "calculated" : "to_confirm",
+      },
+      missing_requirements: {
+        plu_source: missingPluSourceMessage,
+      },
+      parcel: {
+        id: parcelData?.metadata?.idu ?? null,
+        refs: (parcelData?.metadata as any)?.parcelRefs ?? null,
+        parcel_count: (parcelData?.metadata as any)?.parcelCount ?? 1,
+      },
       // Keys the frontend reads directly
       parcel_metrics: {
-        perimeter_m: parcelSurface > 0 ? Math.round(4 * Math.sqrt(parcelSurface)) : null,
-        depth_m: roadFrontage > 0 && parcelSurface > 0 ? Math.round(parcelSurface / roadFrontage) : null,
-        is_corner_plot: sideLength > 0 && roadFrontage > 0 && sideLength / roadFrontage > 0.6,
+        perimeter_m: parcelData?._perimeterM ?? null,
+        depth_m: parcelData?._depthM ?? null,
+        is_corner_plot: parcelData?._isCornerPlot ?? false,
       },
       parcel_boundaries: {
         road_length_m: roadFrontage || null,
         side_length_m: sideLength || null,
-        front_road_name: null,
+        front_road_name: parcelData?._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,
       },
       buildings_on_parcel: {
         count: buildingData?.buildings?.length ?? 0,
@@ -669,20 +1402,25 @@ export async function orchestrateDossierAnalysis(
           ? buildingData.buildings.reduce((s: number, b: any) => s + (b.avgHeightM || 0), 0) / buildingData.buildings.length
           : null,
         urban_typology: parcelSurface > 2000 ? "pavillonnaire_diffus" : parcelSurface > 500 ? "urbain_dense" : "centre_bourg",
-        dominant_alignment: normalizedParams.road_setback?.[0] === 0 ? "alignement_obligatoire" : "retrait",
+        dominant_alignment: normalizedParams.road_setback?.[0] === 0
+          ? "alignement_obligatoire"
+          : normalizedParams.road_setback?.length
+            ? "retrait"
+            : null,
       },
       roads: {
-        nearest_road_name: parcelData?.metadata?.section ? `Voie cadastrale ${parcelData.metadata.section}` : null,
+        nearest_road_name: parcelData?._classifyBoundariesResult?.road_boundary_segments?.[0]?.properties?.closest_road_name ?? null,
         distance_to_road_m: roadFrontage > 0 ? 0 : null,
         road_width_m: null,
         access_possible: roadFrontage > 0,
       },
       topography: {
-        elevation_min: null,
-        elevation_max: null,
-        slope_percent: null,
+        elevation_min: parcelData?._topography?.elevationMin ?? null,
+        elevation_max: parcelData?._topography?.elevationMax ?? null,
+        slope_percent: parcelData?._topography?.slopePercent ?? null,
+        is_flat: parcelData?._topography?.isFlat ?? null,
       },
-      plu: strictPluAnalysis?.zoneRules ?? {},
+      plu: strictPluAnalysis,
       market_data: marketData ?? null,
       admin_guide: adminGuide ?? null,
     }),
@@ -714,25 +1452,95 @@ export async function orchestrateDossierAnalysis(
         logger.info(`[Orchestrator] Loaded custom prompt for commune ${communeName}`);
       }
     } catch (e) {
-      logger.warn("[Orchestrator] Could not load commune custom prompt:", e);
+      logger.warn("[Orchestrator] Could not load commune custom prompt", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // Call the new analyzePLUZone with Triage & Scoring
     let fullZoneAnalysis: any = { zoneLabel: `Zone ${finalZone}`, digest: {}, issues: [], articles: [] };
-    try {
-      const { analyzePLUZone } = await import("./pluAnalysis.js");
-      fullZoneAnalysis = await analyzePLUZone(
-        regulatoryContext,
-        finalZone,
-        `${finalZone} : Zone identifiée`,
-        communeName,
-        communeCustomPrompt,
-        projectDescription,
-        parcelData
-      );
-    } catch (pluErr) {
-      logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data:", pluErr);
+    if (canonicalArticles.length > 0) {
+      fullZoneAnalysis = {
+        zoneCode: finalZone,
+        zoneLabel: `${finalZone} : Zone identifiée`,
+        digest: canonicalDigest || buildDeterministicZoneDigest(canonicalArticles, finalZone),
+        issues: [],
+        articles: canonicalArticles,
+        calculationVariables: {},
+        globalConstraints: [],
+      };
+    } else {
+      try {
+        const { analyzePLUZone } = await import("./pluAnalysis.js");
+        fullZoneAnalysis = await analyzePLUZone(
+          regulatoryContext,
+          finalZone,
+          `${finalZone} : Zone identifiée`,
+          communeName,
+          communeCustomPrompt,
+          projectDescription,
+          parcelData,
+          jurisdictionContext
+        );
+      } catch (pluErr) {
+        logger.warn("[Orchestrator] analyzePLUZone failed, zone record will be created with empty data", { error: pluErr instanceof Error ? pluErr.message : String(pluErr) });
+      }
     }
+
+    if (!Array.isArray(fullZoneAnalysis.articles) || fullZoneAnalysis.articles.length === 0) {
+      const fallbackArticles = buildFallbackZoneArticlesFromParsedRules(parsedRules);
+      if (fallbackArticles.length > 0) {
+        fullZoneAnalysis.articles = fallbackArticles;
+        logger.info(`[Orchestrator] Using ${fallbackArticles.length} fallback regulatory evidence entries for zone ${finalZone}.`);
+      }
+    }
+
+    if ((!fullZoneAnalysis.digest || typeof fullZoneAnalysis.digest !== "object") && Array.isArray(fullZoneAnalysis.articles) && fullZoneAnalysis.articles.length > 0) {
+      fullZoneAnalysis.digest = buildDeterministicZoneDigest(fullZoneAnalysis.articles, finalZone);
+    }
+
+    const communeAliases = Array.from(new Set([
+      regulatoryCommune,
+      currentCommune,
+      communeName,
+      regulatoryCommuneName,
+      String(jurisdictionContext.commune_insee || ""),
+      String(jurisdictionContext.name || ""),
+    ].map((value) => String(value || "").trim()).filter(Boolean)));
+
+    const zoneWorkspaceGraph = await loadZoneSegmentsForCommuneZone({
+      communeAliases,
+      commune: communeName,
+      zoneCode: finalZone,
+      structuredRules: structuredUrbanRules,
+    });
+    const persistedExpertAnalysis = zoneWorkspaceGraph.expertAnalysis
+      ? {
+          ...zoneWorkspaceGraph.expertAnalysis,
+          digest: fullZoneAnalysis.digest || null,
+          issues: fullZoneAnalysis.issues || [],
+        }
+      : (fullZoneAnalysis.digest || {});
+    const articlesToPersist = zoneWorkspaceGraph.expertAnalysis?.articleSummaries?.length
+      ? buildRuleArticlesFromArticleSummaries(zoneWorkspaceGraph.expertAnalysis.articleSummaries)
+      : zoneWorkspaceGraph.expertAnalysis?.articleOrThemeBlocks?.length
+      ? buildRuleArticlesFromExpertBlocks(zoneWorkspaceGraph.expertAnalysis.articleOrThemeBlocks)
+      : (fullZoneAnalysis.articles || []).map((r: any) => {
+          const rawArt = String(r.article || r.articleNumber || 0);
+          const artNum = parseInt(rawArt.replace(/[^0-9]/g, ""));
+          return {
+            articleNumber: isNaN(artNum) ? 0 : artNum,
+            title: r.title || `Article ${rawArt}`,
+            sourceText: r.sourceText || r.operational_rule || "",
+            summary: r.summary || r.interpretation || "",
+            impactText: r.impactText || r.impact || "",
+            vigilanceText: r.vigilanceText || r.vigilance || "",
+            confidence: r.confidence || "unknown",
+            structuredJson: JSON.stringify({
+              relevanceScore: r.relevanceScore,
+              relevanceReason: r.relevanceReason,
+              ...r.structuredData,
+            }),
+          };
+        });
 
     const [existingZone] = await db.select().from(zoneAnalysesTable)
       .where(eq(zoneAnalysesTable.analysisId, analysisId)).limit(1);
@@ -744,7 +1552,7 @@ export async function orchestrateDossierAnalysis(
         zoneCode: finalZone,
         zoneLabel: fullZoneAnalysis.zoneLabel || `${finalZone} : Zone identifiée`,
         sourceExcerpt: regulatoryContext.substring(0, 50000),
-        structuredJson: JSON.stringify(fullZoneAnalysis.digest || {}), // Store Digest here
+        structuredJson: JSON.stringify(persistedExpertAnalysis),
         issuesJson: JSON.stringify(fullZoneAnalysis.issues || []),
       }).returning();
       zoneAnalysisId = newZone.id;
@@ -752,7 +1560,7 @@ export async function orchestrateDossierAnalysis(
        await db.update(zoneAnalysesTable).set({ 
          zoneCode: finalZone, 
          zoneLabel: fullZoneAnalysis.zoneLabel || `${finalZone} : Zone identifiée`,
-         structuredJson: JSON.stringify(fullZoneAnalysis.digest || {}),
+         structuredJson: JSON.stringify(persistedExpertAnalysis),
          issuesJson: JSON.stringify(fullZoneAnalysis.issues || []),
          updatedAt: new Date() 
        }).where(eq(zoneAnalysesTable.id, zoneAnalysisId));
@@ -760,29 +1568,14 @@ export async function orchestrateDossierAnalysis(
 
     // Persist Ranked Articles
     await db.delete(ruleArticlesTable).where(eq(ruleArticlesTable.zoneAnalysisId, zoneAnalysisId));
-    
-    const articlesToSave = fullZoneAnalysis.articles || [];
-    if (articlesToSave.length > 0) {
-      await db.insert(ruleArticlesTable).values(articlesToSave.map((r: any) => {
-        const rawArt = String(r.article || r.articleNumber || 0);
-        const artNum = parseInt(rawArt.replace(/[^0-9]/g, ''));
-        
-        return {
+
+    if (articlesToPersist.length > 0) {
+      await db.insert(ruleArticlesTable).values(
+        articlesToPersist.map((article: (typeof articlesToPersist)[number]) => ({
           zoneAnalysisId,
-          articleNumber: isNaN(artNum) ? 0 : artNum,
-          title: r.title || `Article ${rawArt}`,
-          sourceText: r.sourceText || r.operational_rule || "",
-          summary: r.summary || r.interpretation || "",
-          impactText: r.impactText || r.impact || "",
-          vigilanceText: r.vigilanceText || r.vigilance || "",
-          confidence: r.confidence || "unknown",
-          structuredJson: JSON.stringify({
-            relevanceScore: r.relevanceScore,
-            relevanceReason: r.relevanceReason,
-            ...r.structuredData
-          })
-        };
-      }));
+          ...article,
+        })),
+      );
     }
   }
 
@@ -815,46 +1608,52 @@ export async function orchestrateDossierAnalysis(
 /**
  * Step 1: Identify Analysis Context (MCP-First)
  */
-async function identifyAnalysisContext(communeInsee: string, address?: string) {
+async function identifyAnalysisContext(communeInsee: string, address?: string, sourceLock?: { lat?: number; lng?: number; inseeCode?: string; zoneCode?: string }) {
   logger.info(`[Step 1] Identification context for INSE ${communeInsee}, Address: ${address}`);
   
-  let detectedCommune = communeInsee;
-  let detectedZone = "UA";
-  let lat = 0;
-  let lng = 0;
+  let detectedCommune = sourceLock?.inseeCode || communeInsee;
+  let detectedZone = sourceLock?.zoneCode || "UA";
+  let lat = typeof sourceLock?.lat === "number" ? sourceLock.lat : 0;
+  let lng = typeof sourceLock?.lng === "number" ? sourceLock.lng : 0;
+
+  if (lat && lng) {
+    logger.info("[Step 1] Using locked analysis context from validated selection.");
+  }
 
   // 1. MCP Geocoding First (with DB cache)
-  const cachedStep1 = address ? await getCachedGeocode(address) : null;
-  if (cachedStep1) {
-    lat = cachedStep1.lat;
-    lng = cachedStep1.lng;
-    detectedCommune = cachedStep1.inseeCode || communeInsee;
-    logger.info(`[Step 1] Geocoding cache hit for "${address}"`);
-  } else {
-    try {
-      const { callMcpTool } = await import("./mcpClient.js");
-      const geocodeResult = await callMcpTool("https://mcp.data.gouv.fr/mcp", "geocode", { q: address });
-      if (geocodeResult && geocodeResult.lat) {
-        lat = geocodeResult.lat;
-        lng = geocodeResult.lng;
-        detectedCommune = geocodeResult.citycode || communeInsee;
-        logger.info(`[MCP Step 1] Geocoding successful: ${lat}, ${lng} (INSEE: ${detectedCommune})`);
-        if (address) await cacheGeocode(address, { lat, lng, label: address, inseeCode: detectedCommune });
-      }
-    } catch (err) {
-      logger.warn("[MCP Step 1] Geocoding MCP failed, falling back to legacy fetch.");
-      const gResults = await geocodeAddress(address || "");
-      if (gResults.length > 0) {
-        lat = gResults[0].lat;
-        lng = gResults[0].lng;
-        detectedCommune = gResults[0].inseeCode || communeInsee;
-        if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score });
+  if (!lat || !lng) {
+    const cachedStep1 = address ? await getCachedGeocode(address) : null;
+    if (cachedStep1) {
+      lat = cachedStep1.lat;
+      lng = cachedStep1.lng;
+      detectedCommune = cachedStep1.inseeCode || communeInsee;
+      logger.info(`[Step 1] Geocoding cache hit for "${address}"`);
+    } else {
+      try {
+        const { callMcpTool } = await import("./mcpClient.js");
+        const geocodeResult = await callMcpTool("https://mcp.data.gouv.fr/mcp", "geocode", { q: address });
+        if (geocodeResult && geocodeResult.lat) {
+          lat = geocodeResult.lat;
+          lng = geocodeResult.lng;
+          detectedCommune = geocodeResult.citycode || communeInsee;
+          logger.info(`[MCP Step 1] Geocoding successful: ${lat}, ${lng} (INSEE: ${detectedCommune})`);
+          if (address) await cacheGeocode(address, { lat, lng, label: address, inseeCode: detectedCommune });
+        }
+      } catch (err) {
+        logger.warn("[MCP Step 1] Geocoding MCP failed, falling back to legacy fetch.");
+        const gResults = await geocodeAddress(address || "");
+        if (gResults.length > 0) {
+          lat = gResults[0].lat;
+          lng = gResults[0].lng;
+          detectedCommune = gResults[0].inseeCode || communeInsee;
+          if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score });
+        }
       }
     }
   }
 
   // 2. Planning (Zone Identification)
-  if (lat && lng) {
+  if (lat && lng && !sourceLock?.zoneCode) {
      const zoneInfo = await getZoningByCoords(lat, lng, detectedCommune);
      detectedZone = zoneInfo?.zoneCode || "UA";
   }

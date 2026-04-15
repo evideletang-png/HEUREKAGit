@@ -6,6 +6,16 @@ export const municipalitySettingsTable = pgTable("municipality_settings", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   commune: text("commune").notNull().unique(), // Matching analysis.city or user.communes
   inseeCode: text("insee_code"), // Added for DVF/Stat APIs
+
+  // Portail citoyen / identité de la mairie
+  citizenPortalTownHallName: text("citizen_portal_town_hall_name"),
+  citizenPortalAddressLine1: text("citizen_portal_address_line1"),
+  citizenPortalAddressLine2: text("citizen_portal_address_line2"),
+  citizenPortalPostalCode: text("citizen_portal_postal_code"),
+  citizenPortalCity: text("citizen_portal_city"),
+  citizenPortalPhone: text("citizen_portal_phone"),
+  citizenPortalEmail: text("citizen_portal_email"),
+  citizenPortalHours: text("citizen_portal_hours"),
   
   // Fiscalité locale
   taRateCommunal: doublePrecision("ta_rate_communal").default(0.05),

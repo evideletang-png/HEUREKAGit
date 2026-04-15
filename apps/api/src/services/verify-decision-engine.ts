@@ -36,16 +36,16 @@ async function verifyDecisionEngine() {
 
   // 3. Run Orchestrator
   console.log("\n--- RUNNING ORCHESTRATOR ---");
-  const result = await orchestrateDossierAnalysis(testDossierId, testUserId, testCommune);
+  const result = await orchestrateDossierAnalysis(testDossierId, [], { userId: testUserId });
 
   // 4. Verification
   console.log("\n--- RESULTS ANALYSIS ---");
   console.log("Consolidated Data:", JSON.stringify(result.results.find(r => r.task === "formal_rules")?.consolidatedData));
   console.log("Formal Rules Found:", result.results.find(r => r.task === "formal_rules")?.rulesCount);
-  console.log(`Formal Decision Status: ${result.formalDecision.status}`);
+  console.log(`Formal Decision Status: ${result.businessDecision?.decision}`);
   console.log(`Global Score: ${result.globalScore}`);
   
-  if (result.formalDecision.status === "unfavorable") {
+  if (result.businessDecision?.decision === "defavorable") {
     console.log("SUCCESS: Formal decision correctly identified non-compliance.");
   } else {
     throw new Error("FAILURE: Formal decision failed to catch over-height.");

@@ -108,6 +108,60 @@ export class VisionService {
         }
     }
 
+    static async analyzeRegulatoryDocument(filePath: string, contextHint?: string): Promise<string> {
+        try {
+            const ext = path.extname(filePath).toLowerCase();
+            let base64Images: string[] = [];
+
+            if (ext === ".pdf") {
+                base64Images = pdfToBase64Images(filePath, 5);
+                if (base64Images.length === 0) {
+                    throw new Error("pdftoppm n'est pas disponible sur ce serveur ou n'a produit aucune image.");
+                }
+            } else if ([".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
+                const buffer = fs.readFileSync(filePath);
+                base64Images = [buffer.toString("base64")];
+            } else {
+                throw new Error("Format de fichier non supporté pour l'analyse visuelle réglementaire: " + ext);
+            }
+
+            const response = await openai.chat.completions.create({
+                model: "gpt-4o",
+                messages: [
+                    {
+                        role: "system",
+                        content: `Tu es un expert en urbanisme et en lecture de documents réglementaires.
+Tu analyses des règlements écrits, plans de zonage, cartes, schémas, croquis et annexes du PLU/PLUi.
+
+Objectif :
+1. Extraire les intitulés de zones, légendes, articles et sous-sections visibles.
+2. Repérer les valeurs réglementaires utiles si elles apparaissent visuellement : hauteurs, emprise, recul, stationnement, espaces verts.
+3. Décrire les éléments graphiques utiles à l'interprétation : zonage, servitudes, légendes, hachures, périmètres, tableaux.
+4. Signaler clairement les limites si le document est trop graphique ou ambigu.
+
+Réponds en français, de façon structurée, factuelle et exploitable pour une base de connaissance réglementaire.`,
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            { type: "text", text: `Analyse ce document réglementaire et fournis une synthèse exploitable.${contextHint ? ` Contexte: ${contextHint}` : ""}` },
+                            ...base64Images.map(b64 => ({
+                                type: "image_url" as const,
+                                image_url: { url: `data:image/png;base64,${b64}`, detail: "high" as const },
+                            })),
+                        ],
+                    },
+                ],
+                max_tokens: 2000,
+            });
+
+            return response.choices[0]?.message?.content || "";
+        } catch (err) {
+            console.error("[VisionService] Regulatory visual analysis failed:", err);
+            return "";
+        }
+    }
+
     /**
      * Extract raw text from a PDF using GPT-4o Vision (for scanned/image-only PDFs).
      * Falls back to empty string if pdftoppm is unavailable.

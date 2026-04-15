@@ -11,5 +11,17 @@ export interface CreateAnalysisRequest {
   parcelRef?: string;
   lat?: number;
   lng?: number;
+  banId?: string;
+  inseeCode?: string;
+  city?: string;
+  postcode?: string;
+  selectedParcels?: {
+    idu?: string;
+    section?: string;
+    numero?: string;
+    parcelRef?: string;
+    contenanceM2?: number;
+    feature?: { [key: string]: unknown };
+  }[];
   title?: string;
 }

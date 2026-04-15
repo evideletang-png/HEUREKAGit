@@ -21,6 +21,8 @@ import CitoyenPage from "@/pages/citoyen";
 import CitoyenDossierDetailPage from "@/pages/citoyen-dossier-detail";
 import CitoyenNewDossierPage from "@/pages/citoyen-new-dossier";
 import TasksPage from "@/pages/tasks";
+import AppealsPage from "@/pages/appeals";
+import AppealDetailPage from "@/pages/appeal-detail";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,6 +47,7 @@ function Router() {
       <Route path="/admin" component={AdminPage} />
       <Route path="/account" component={AccountPage} />
       <Route path="/conformite" component={MairiePage} />
+      <Route path="/portail-mairie/base-ia/zones/:zoneId" component={PortailMairiePage} />
       <Route path="/portail-mairie/:id?" component={PortailMairiePage} />
       <Route path="/portail-metropole/:id?" component={PortailMetropolePage} />
       <Route path="/portail-abf/:id?" component={PortailABFPage} />
@@ -54,6 +57,8 @@ function Router() {
       <Route path="/citoyen/nouveau" component={CitoyenNewDossierPage} />
       <Route path="/citoyen/dossier/:id" component={CitoyenDossierDetailPage} />
       <Route path="/tasks" component={TasksPage} />
+      <Route path="/recours" component={AppealsPage} />
+      <Route path="/recours/:id" component={AppealDetailPage} />
 
       <Route component={NotFound} />
     </Switch>

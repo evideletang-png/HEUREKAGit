@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { repairExtractedText } from "./textQualityService.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { loadPrompt } from "./promptLoader.js";
@@ -6,6 +7,103 @@ import { SYSTEM_PROMPTS, CerfaExtractionSchema, EvidenceBundle, EvidenceChunk, J
 import { queryRelevantChunks } from "./embeddingService.js";
 import { logger } from "../utils/logger.js";
 import fs from "fs";
+import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.js";
+
+function uniqueMunicipalityAliases(cityName?: string, jurisdictionContext?: JurisdictionContext): string[] {
+  return Array.from(new Set([
+    jurisdictionContext?.commune_insee,
+    cityName,
+    jurisdictionContext?.name,
+  ].filter((value): value is string => !!value && value.trim().length > 0)));
+}
+
+async function queryChunksWithMunicipalityAliases(
+  query: string,
+  options: {
+    cityName?: string;
+    zoneCode?: string;
+    articleId?: string;
+    docTypes?: string[];
+    jurisdictionContext?: JurisdictionContext;
+    includeTrace?: boolean;
+    limit?: number;
+    minAuthority?: number;
+    strictZone?: boolean;
+  }
+) {
+  const aliases = uniqueMunicipalityAliases(options.cityName, options.jurisdictionContext);
+  const limit = options.limit || 15;
+  const resultsById = new Map<string, any>();
+
+  for (const municipalityId of aliases) {
+    const chunks = await queryRelevantChunks(query, {
+      municipalityId,
+      zoneCode: options.zoneCode,
+      articleId: options.articleId,
+      docTypes: options.docTypes,
+      jurisdictionContext: options.jurisdictionContext,
+      includeTrace: options.includeTrace,
+      limit,
+      minAuthority: options.minAuthority,
+      strictZone: options.strictZone,
+    });
+
+    for (const chunk of chunks) {
+      if (!resultsById.has(chunk.id)) {
+        resultsById.set(chunk.id, chunk);
+      }
+    }
+
+    if (resultsById.size >= limit) break;
+  }
+
+  return Array.from(resultsById.values()).slice(0, limit);
+}
+
+async function collectPrioritizedRegulatoryChunks(
+  queryStr: string,
+  options: {
+    cityName?: string;
+    zoneCode?: string;
+    jurisdictionContext?: JurisdictionContext;
+    limit?: number;
+  }
+) {
+  const limit = options.limit || 25;
+  const zoneAliases = buildZoneCodeAliases(options.zoneCode);
+  const plans = [
+    { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 15) },
+    { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 22) },
+    { docTypes: ["plu_reglement"], strictZone: false, target: Math.min(limit, 25) },
+    { docTypes: ["plu_annexe"], strictZone: false, target: Math.min(limit, 25) },
+  ];
+
+  const seen = new Set<string>();
+  const chunks: any[] = [];
+
+  for (const plan of plans) {
+    for (const zoneAlias of zoneAliases) {
+      const hits = await queryChunksWithMunicipalityAliases(queryStr, {
+        cityName: options.cityName,
+        zoneCode: zoneAlias,
+        docTypes: plan.docTypes,
+        minAuthority: 7,
+        strictZone: plan.strictZone,
+        limit: plan.target,
+        jurisdictionContext: options.jurisdictionContext,
+      });
+
+      for (const hit of hits) {
+        if (seen.has(hit.id)) continue;
+        seen.add(hit.id);
+        chunks.push(hit);
+        if (chunks.length >= limit) return chunks;
+      }
+    }
+  }
+
+  return chunks;
+}
 
 /**
  * Estimation rapide du nombre de tokens (1 token ~ 4 caractères pour du français/anglais).
@@ -17,16 +115,33 @@ function safeTruncate(text: string, maxTokens: number = 150000): string {
   return text.substring(0, maxChars) + "\n\n[TRONQUÉ - LIMITE EXTREME ATTEINTE (TOKEN QUOTA SAFE)]";
 }
 
+export function deriveZoneHierarchy(zoneCode: string) {
+  const zoneCodeUpper = zoneCode.toUpperCase();
+  const baseZoneMatch = zoneCode.match(/^([A-Z]+)/);
+  const baseZone = baseZoneMatch && baseZoneMatch[1] ? baseZoneMatch[1].toUpperCase() : zoneCodeUpper;
+  const suffix = zoneCodeUpper.startsWith(baseZone) ? zoneCodeUpper.slice(baseZone.length) : "";
+  return {
+    zoneCodeUpper,
+    baseZone,
+    suffix,
+    hasSubZone: suffix.length > 0 && zoneCodeUpper !== baseZone,
+  };
+}
+
+export function buildZoneCodeAliases(zoneCode?: string | null): string[] {
+  if (!zoneCode || zoneCode.trim().length === 0) return [];
+  const { zoneCodeUpper, baseZone, hasSubZone } = deriveZoneHierarchy(zoneCode.trim());
+  return hasSubZone ? [zoneCodeUpper, baseZone] : [zoneCodeUpper];
+}
+
 /**
  * Filtre le texte pour ne garder que les sections pertinentes autour des mots-clés.
  */
 export function extractRelevantPLUSections(text: string, zoneCode: string): string {
   const upperText = text.toUpperCase();
-  const zoneCodeUpper = zoneCode.toUpperCase();
-  const baseZoneMatch = zoneCode.match(/^([A-Z]+)/); // No case-insensitive flag here
-  const baseZone = baseZoneMatch && baseZoneMatch[1] ? baseZoneMatch[1].toUpperCase() : zoneCodeUpper;
+  const { zoneCodeUpper, baseZone, suffix, hasSubZone } = deriveZoneHierarchy(zoneCode);
   
-  console.log(`[pluAnalysis] extractRelevantPLUSections: zoneCode=${zoneCode}, zoneCodeUpper=${zoneCodeUpper}, baseZone=${baseZone}`);
+  console.log(`[pluAnalysis] extractRelevantPLUSections: zoneCode=${zoneCode}, zoneCodeUpper=${zoneCodeUpper}, baseZone=${baseZone}, suffix=${suffix}`);
 
   const segments: { start: number; end: number; priority: number }[] = [];
   const inclusionRanges: { start: number; end: number }[] = [];
@@ -45,8 +160,11 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
   const zoneHeaderPatterns = [
     new RegExp(`DISPOSITIONS\\s+APPLICABLES\\s+([ÀA]\\s+)?LA\\s+ZONE\\s+${zoneCodeUpper}`, "i"),
     new RegExp(`DISPOSITIONS\\s+APPLICABLES\\s+([ÀA]\\s+)?LA\\s+ZONE\\s+${baseZone}`, "i"),
+    new RegExp(`DISPOSITIONS\\s+APPLICABLES\\s+([ÀA]\\s+)?LA\\s+ZONE\\s+${baseZone}[^\\n]{0,80}${zoneCodeUpper}`, "i"),
     new RegExp(`ZONE\\s+${zoneCodeUpper}\\b`, "i"),
-    new RegExp(`ZONE\\s+${baseZone}\\b`, "i")
+    new RegExp(`ZONE\\s+${baseZone}\\b`, "i"),
+    new RegExp(`SECTEUR\\s+${zoneCodeUpper}\\b`, "i"),
+    new RegExp(`SOUS[- ]ZONE\\s+${zoneCodeUpper}\\b`, "i"),
   ];
   
   let zoneStartIndex = -1;
@@ -58,12 +176,32 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
     const m = rx.exec(searchableText);
     if (m) {
       zoneStartIndex = m.index + offset;
-      const start = Math.max(0, zoneStartIndex - 500);
-      const end = Math.min(text.length, zoneStartIndex + 120000);
+      const start = Math.max(0, zoneStartIndex - 800);
+      const end = Math.min(text.length, zoneStartIndex + 160000);
       segments.push({ start, end, priority: 2 });
       inclusionRanges.push({ start, end });
-      inclusionRanges.push({ start, end });
       break; 
+    }
+  }
+
+  // 2b. If the target is a sub-zone (e.g. UDa), capture the base zone block AND local sub-zone mentions.
+  if (hasSubZone) {
+    const subZoneMentionPatterns = [
+      new RegExp(`\\b${zoneCodeUpper}\\b`, "gi"),
+      new RegExp(`SECTEUR\\s+${zoneCodeUpper}\\b`, "gi"),
+      new RegExp(`${baseZone}[^\\n]{0,40}${suffix}`, "gi"),
+    ];
+
+    for (const rx of subZoneMentionPatterns) {
+      let match: RegExpExecArray | null;
+      let localCount = 0;
+      while ((match = rx.exec(text)) !== null && localCount < 8) {
+        const start = Math.max(0, match.index - 2500);
+        const end = Math.min(text.length, match.index + 12000);
+        segments.push({ start, end, priority: 0 });
+        inclusionRanges.push({ start, end });
+        localCount++;
+      }
     }
   }
 
@@ -75,7 +213,9 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
     "Art\\s+8", "Article\\s+8", "Art\\s+9", "Article\\s+9",
     "Art\\s+10", "Article\\s+10", "Art\\s+11", "Article\\s+11",
     "Art\\s+12", "Article\\s+12", "Stationnement",
-    "Art\\s+13", "Article\\s+13", "CES", "Emprise\\s+au\\s+sol", "Hauteur"
+    "Art\\s+13", "Article\\s+13", "CES", "Emprise\\s+au\\s+sol", "Hauteur",
+    "Aspect\\s+extérieur", "Destination", "Usages?", "Réseaux", "Servitudes?",
+    zoneCodeUpper, baseZone
   ];
   
   keywords.forEach(kw => {
@@ -96,8 +236,8 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
 
   // 3. Extract and combine
   if (segments.length === 0) {
-    console.warn(`[pluAnalysis] No matching sections found for ${zoneCode}. Falling back to first 30k chars.`);
-    return text.substring(0, 30000);
+    console.warn(`[pluAnalysis] No matching sections found for ${zoneCode}. Returning no zone excerpt instead of broad fallback.`);
+    return "";
   }
 
   // Sort and merge
@@ -117,10 +257,9 @@ export function extractRelevantPLUSections(text: string, zoneCode: string): stri
   }
 
   const resultText = merged.map(m => text.substring(m.start, m.end)).join("\n\n--- DISCONTINUITÉ ---\n\n");
-  
-  // If the document is small enough for the model, just return it all
-  if (text.length < 900000) return text; 
 
+  // Never return the full document here: doing so causes the later OpenAI call to truncate the
+  // beginning of the file instead of the relevant zone pages. We want targeted zone excerpts only.
   return safeTruncate(resultText, 300000); 
 }
 
@@ -141,9 +280,12 @@ export interface ZoneAnalysisResult {
   zoneLabel: string;
   articles: ArticleAnalysis[];
   issues?: {
-    article: string;
-    msg: string;
-    severity: "bloquante" | "majeure" | "mineure";
+    article?: string;
+    msg?: string;
+    severity?: "bloquante" | "majeure" | "mineure";
+    type?: string;
+    code?: string;
+    message?: string;
   }[];
   calculationVariables: {
     maxFootprintRatio?: number | null;
@@ -154,6 +296,39 @@ export interface ZoneAnalysisResult {
     greenSpaceRatio?: number | null;
   };
   globalConstraints: string[];
+}
+
+function buildPluAvailabilityIssue(params: {
+  zoneCode: string;
+  cityName?: string;
+  hasIndexedRegulatorySource: boolean;
+}) {
+  const target = params.cityName || params.zoneCode;
+  if (params.hasIndexedRegulatorySource) {
+    return {
+      zoneLabel: `Zone ${params.zoneCode} — documents PLU présents, lecture à confirmer`,
+      issue: {
+        article: "GLOBAL",
+        msg: `Des documents PLU sont bien indexés pour ${target}, mais la lecture réglementaire de la zone ${params.zoneCode} n'a pas encore pu être reconstituée assez fiablement.`,
+        severity: "majeure" as const,
+        type: "PLU_ZONE_READ_INSUFFICIENT",
+        code: "PLU_ZONE_READ_INSUFFICIENT",
+        message: `Des documents PLU sont indexés pour ${target}, mais les règles spécifiques à la zone ${params.zoneCode} n'ont pas encore pu être extraites de manière suffisamment fiable.`,
+      },
+    };
+  }
+
+  return {
+    zoneLabel: `Zone ${params.zoneCode} — aucun document PLU indexé`,
+    issue: {
+      article: "GLOBAL",
+      msg: `Aucun document PLU indexé pour ${target}. Importez les documents dans la Base IA mairie.`,
+      severity: "bloquante" as const,
+      type: "NO_PLU_DATA",
+      code: "NO_PLU_DATA",
+      message: `Aucun document PLU indexé pour ${target}. Importez les documents dans la Base IA mairie.`,
+    },
+  };
 }
 
 export interface ExtractedDocumentData {
@@ -206,6 +381,389 @@ export interface ZoneDigest {
   restrictions: string[];
   conditions: string[];
   summary: string;
+}
+
+type DeterministicRuleSeed = {
+  articleNumber: number;
+  title: string;
+  patterns: RegExp[];
+};
+
+const DETERMINISTIC_RULE_SEEDS: DeterministicRuleSeed[] = [
+  {
+    articleNumber: 1,
+    title: "Destination et usages",
+    patterns: [/destination/i, /occupations?\s+du\s+sol/i, /usages?\s+adm(?:is|ises)|interdit/i],
+  },
+  {
+    articleNumber: 6,
+    title: "Implantation par rapport à la voie",
+    patterns: [/implantation[^.\n]{0,140}(voie|alignement|emprise publique)/i, /recul[^.\n]{0,140}(voie|alignement)/i, /alignement/i],
+  },
+  {
+    articleNumber: 7,
+    title: "Implantation sur limites séparatives",
+    patterns: [/limites?\s+s[ée]paratives/i, /prospect/i, /recul[^.\n]{0,140}limites?/i],
+  },
+  {
+    articleNumber: 9,
+    title: "Emprise au sol",
+    patterns: [/emprise\s+au\s+sol/i, /\bCES\b/i, /coefficient\s+d['’]emprise/i],
+  },
+  {
+    articleNumber: 10,
+    title: "Hauteur",
+    patterns: [/hauteur\s+des\s+constructions/i, /hauteur\s+maximale/i, /\bhauteur\b/i],
+  },
+  {
+    articleNumber: 12,
+    title: "Stationnement",
+    patterns: [/stationnement/i, /places?\s+de\s+stationnement/i, /parking/i],
+  },
+  {
+    articleNumber: 13,
+    title: "Espaces verts et pleine terre",
+    patterns: [/espaces?\s+verts/i, /pleine\s+terre/i, /plantations/i, /perm[ée]abilit[ée]/i],
+  },
+];
+
+function extractRegulatorySnippet(text: string, index: number): string {
+  const lookBehindStart = Math.max(0, index - 700);
+  const lookAheadEnd = Math.min(text.length, index + 1000);
+  const before = text.slice(lookBehindStart, index);
+  const after = text.slice(index, lookAheadEnd);
+
+  const paragraphStartOffset = Math.max(
+    before.lastIndexOf("\n\n"),
+    before.lastIndexOf(". "),
+    before.lastIndexOf(" : ")
+  );
+  const paragraphEndCandidates = [
+    after.indexOf("\n\n"),
+    after.indexOf(". "),
+    after.indexOf(" ; "),
+  ].filter((value) => value >= 0);
+  const paragraphEndOffset = paragraphEndCandidates.length > 0 ? Math.min(...paragraphEndCandidates) : -1;
+
+  const start = paragraphStartOffset >= 0 ? lookBehindStart + paragraphStartOffset + 1 : lookBehindStart;
+  const end = paragraphEndOffset >= 0 ? index + paragraphEndOffset + 1 : lookAheadEnd;
+
+  return text
+    .slice(start, end)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function summariseDeterministicSnippet(snippet: string): string {
+  if (!snippet) return "";
+  const sentenceBreak = snippet.search(/[.;](\s|$)/);
+  const raw = sentenceBreak > 0 ? snippet.slice(0, sentenceBreak + 1) : snippet;
+  return raw.length > 220 ? `${raw.slice(0, 217).trim()}...` : raw;
+}
+
+function extractDimensionFromSnippet(snippet: string, unitPattern: RegExp): string | undefined {
+  const match = snippet.match(unitPattern);
+  return match ? match[0].replace(/\s+/g, " ").trim() : undefined;
+}
+
+function inferRegulatoryTitleFromSnippet(snippet: string): string {
+  const headingMatch = snippet.match(/(article\s+\d+[^\n.:;]{0,80}|art\.?\s*\d+[^\n.:;]{0,80})/i);
+  if (headingMatch?.[0]) {
+    return headingMatch[0].replace(/\s+/g, " ").trim();
+  }
+
+  const thematicTitle = (() => {
+    const lower = snippet.toLowerCase();
+    if (lower.includes("emprise") || lower.includes("ces")) return "Emprise & densité";
+    if (lower.includes("hauteur") || lower.includes("gabarit")) return "Hauteur & gabarit";
+    if (lower.includes("limite séparative") || lower.includes("limites séparatives") || lower.includes("recul") || lower.includes("prospect") || lower.includes("alignement") || lower.includes("voie")) {
+      return "Implantation & reculs";
+    }
+    if (lower.includes("stationnement") || lower.includes("parking") || lower.includes("accès")) return "Accès & stationnement";
+    if (lower.includes("pleine terre") || lower.includes("espace vert") || lower.includes("plantation") || lower.includes("perméabil")) return "Paysage & pleine terre";
+    if (lower.includes("destination") || lower.includes("usage") || lower.includes("occupation du sol")) return "Usages & destination";
+    if (lower.includes("aspect") || lower.includes("façade") || lower.includes("toiture") || lower.includes("matériau")) return "Aspect architectural";
+    if (lower.includes("servitude") || lower.includes("risque") || lower.includes("argile")) return "Contraintes & servitudes";
+    return null;
+  })();
+
+  if (thematicTitle) return thematicTitle;
+
+  const compact = snippet.replace(/\s+/g, " ").trim();
+  const firstSentence = compact.split(/[.;:]/)[0]?.trim() || compact;
+  return firstSentence.length > 72 ? `${firstSentence.slice(0, 69).trim()}...` : firstSentence;
+}
+
+function isMeaningfulRegulatoryBlock(block: string): boolean {
+  const compact = block.replace(/\s+/g, " ").trim();
+  if (compact.length < 90) return false;
+  if (/^\[base ia/i.test(compact)) return false;
+
+  const lower = compact.toLowerCase();
+  const keywords = [
+    "article",
+    "construction",
+    "implantation",
+    "recul",
+    "limite séparative",
+    "limites séparatives",
+    "alignement",
+    "voie",
+    "emprise",
+    "ces",
+    "hauteur",
+    "stationnement",
+    "parking",
+    "destination",
+    "usage",
+    "espace vert",
+    "pleine terre",
+    "plantation",
+    "façade",
+    "toiture",
+    "aspect",
+    "matériau",
+    "clôture",
+    "servitude",
+    "argile",
+    "risque",
+    "pente",
+    "réseau",
+    "assainissement",
+  ];
+
+  return keywords.some((keyword) => lower.includes(keyword)) || /\d/.test(compact);
+}
+
+export function extractComprehensiveRegulatoryRules(text: string, zoneCode?: string): ArticleAnalysis[] {
+  const repaired = repairExtractedText(text);
+  if (repaired.trim().length < 200) return [];
+
+  const blocks = repaired
+    .split(/\n\s*\n|---+\s*[A-ZÀ-ÿ0-9 ()-]*---+|===+\s*[A-ZÀ-ÿ0-9 ()-]*===+/g)
+    .map((block) => block.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const seen = new Set<string>();
+  const rules: ArticleAnalysis[] = [];
+
+  for (const block of blocks) {
+    if (!isMeaningfulRegulatoryBlock(block)) continue;
+
+    const normalized = block.replace(/\s+/g, " ").trim();
+    const dedupeKey = normalized.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    const title = inferRegulatoryTitleFromSnippet(normalized);
+    const headingMatch = title.match(/article\s+(\d+)/i);
+    const articleNumber = headingMatch?.[1] ? parseInt(headingMatch[1], 10) : rules.length + 1;
+    const summary = summariseDeterministicSnippet(normalized);
+    const confidence: ArticleAnalysis["confidence"] = /\d/.test(normalized) || /article\s+\d+/i.test(normalized)
+      ? "medium"
+      : "low";
+
+    rules.push({
+      articleNumber,
+      title,
+      sourceText: normalized,
+      interpretation: summary,
+      summary,
+      impactText: zoneCode ? `Extrait identifié dans la matière réglementaire de la zone ${zoneCode}.` : "Extrait identifié dans la matière réglementaire indexée.",
+      vigilanceText: "Extrait automatique à vérifier contre le règlement écrit intégral si le PDF est ancien ou mal structuré.",
+      confidence,
+      structuredData: {
+        source: "comprehensive_text_fallback",
+        zoneCode: zoneCode || null,
+      },
+    });
+  }
+
+  return rules;
+}
+
+export function extractDeterministicRegulatoryRules(text: string, zoneCode?: string): ArticleAnalysis[] {
+  const normalizedText = repairExtractedText(text).replace(/\s+/g, " ").trim();
+  if (normalizedText.length < 200) return [];
+
+  const articles = DETERMINISTIC_RULE_SEEDS.map((seed): ArticleAnalysis | null => {
+    const match = seed.patterns
+      .map((pattern) => pattern.exec(normalizedText))
+      .filter((candidate): candidate is RegExpExecArray => !!candidate)
+      .sort((a, b) => a.index - b.index)[0];
+
+    if (!match) return null;
+
+    const snippet = extractRegulatorySnippet(normalizedText, match.index);
+    if (snippet.length < 90) return null;
+
+    const summary = summariseDeterministicSnippet(snippet);
+    const confidence: ArticleAnalysis["confidence"] = /\d/.test(snippet) ? "medium" : "low";
+
+    return {
+      articleNumber: seed.articleNumber,
+      title: seed.title,
+      sourceText: snippet,
+      interpretation: summary,
+      summary,
+      impactText: zoneCode ? `Extrait récupéré automatiquement pour la zone ${zoneCode}.` : "Extrait récupéré automatiquement depuis le texte réglementaire indexé.",
+      vigilanceText: "Preuve reconstruite automatiquement à partir du texte indexé ; à confirmer si le document est très ancien ou mal structuré.",
+      confidence,
+      structuredData: {
+        source: "deterministic_text_fallback",
+        theme: seed.title,
+        zoneCode: zoneCode || null,
+      },
+    };
+  });
+
+  return articles.filter((article): article is ArticleAnalysis => article !== null);
+}
+
+export function buildDeterministicZoneDigest(articles: ArticleAnalysis[], zoneCode?: string): ZoneDigest | null {
+  if (!Array.isArray(articles) || articles.length === 0) return null;
+
+  const byArticle = new Map<number, ArticleAnalysis>();
+  for (const article of articles) {
+    if (!byArticle.has(article.articleNumber)) {
+      byArticle.set(article.articleNumber, article);
+    }
+  }
+
+  const findByTheme = (keywords: string[]): ArticleAnalysis | undefined =>
+    articles.find((article) => {
+      const haystack = `${article.title} ${article.summary} ${article.sourceText}`.toLowerCase();
+      return keywords.some((keyword) => haystack.includes(keyword));
+    });
+
+  const article6 = byArticle.get(6) || findByTheme(["voie", "alignement", "recul"]);
+  const article7 = byArticle.get(7) || findByTheme(["limite séparative", "limites séparatives", "prospect"]);
+  const article9 = byArticle.get(9) || findByTheme(["emprise", "ces", "coefficient d'emprise"]);
+  const article10 = byArticle.get(10) || findByTheme(["hauteur", "gabarit", "faîtage", "faitage"]);
+  const article13 = byArticle.get(13) || findByTheme(["pleine terre", "espace vert", "espaces verts", "plantation"]);
+
+  const maxFootprint = article9
+    ? extractDimensionFromSnippet(article9.sourceText, /\d+(?:[.,]\d+)?\s*(?:%|m²|m2)/i)
+    : undefined;
+  const maxHeight = article10
+    ? extractDimensionFromSnippet(article10.sourceText, /\d+(?:[.,]\d+)?\s*m\b/i)
+    : undefined;
+  const roadSetback = article6
+    ? extractDimensionFromSnippet(article6.sourceText, /\d+(?:[.,]\d+)?\s*m\b/i)
+    : undefined;
+  const boundarySetback = article7
+    ? extractDimensionFromSnippet(article7.sourceText, /\d+(?:[.,]\d+)?\s*m\b/i)
+    : undefined;
+  const greenSpace = article13
+    ? extractDimensionFromSnippet(article13.sourceText, /\d+(?:[.,]\d+)?\s*(?:%|m²|m2)/i) || article13.summary
+    : undefined;
+
+  const restrictions = [article6, article7, article9, article10]
+    .filter((article): article is ArticleAnalysis => !!article)
+    .map((article) => article.summary)
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const conditions = [byArticle.get(1) || findByTheme(["destination", "usage", "occupation du sol"]), byArticle.get(12) || findByTheme(["stationnement", "parking"]), article13]
+    .filter((article): article is ArticleAnalysis => !!article)
+    .map((article) => article.summary)
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const summary = `Lecture réglementaire partielle reconstituée automatiquement à partir des extraits indexés${zoneCode ? ` pour la zone ${zoneCode}` : ""}.`;
+
+  return {
+    dimensions: {
+      maxFootprint,
+      maxHeight,
+      minSetbacks: [roadSetback, boundarySetback].filter(Boolean).join(" / ") || undefined,
+      greenSpace,
+    },
+    restrictions,
+    conditions,
+    summary,
+  };
+}
+
+function coerceArticleConfidence(raw: unknown): "high" | "medium" | "low" | "unknown" {
+  if (typeof raw === "string") {
+    const normalized = raw.toLowerCase();
+    if (normalized === "high" || normalized === "medium" || normalized === "low" || normalized === "unknown") {
+      return normalized;
+    }
+  }
+  return "unknown";
+}
+
+function extractArticleCandidates(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.regulations)) return payload.regulations;
+  if (Array.isArray(payload?.data?.regulations)) return payload.data.regulations;
+  if (Array.isArray(payload?.content?.regulations)) return payload.content.regulations;
+  if (Array.isArray(payload?.articles)) return payload.articles;
+  if (Array.isArray(payload?.data?.articles)) return payload.data.articles;
+  if (Array.isArray(payload?.data?.rules)) return payload.data.rules;
+  if (Array.isArray(payload?.rules)) return payload.rules;
+  if (Array.isArray(payload?.content?.rules)) return payload.content.rules;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.content?.articles)) return payload.content.articles;
+  if (Array.isArray(payload?.content)) return payload.content;
+  return [];
+}
+
+export function extractStructuredRuleCandidates(payload: any): any[] {
+  return extractArticleCandidates(payload);
+}
+
+function coerceZoneArticles(payload: any): ArticleAnalysis[] {
+  return extractArticleCandidates(payload).map((raw: any, index: number) => {
+    const rawArticle = raw?.articleNumber ?? raw?.article ?? raw?.article_id ?? raw?.reference ?? raw?.title ?? raw?.theme ?? `${index + 1}`;
+    const numericArticle = parseInt(String(rawArticle).replace(/[^0-9]/g, ""), 10);
+    const articleNumber = Number.isFinite(numericArticle) && numericArticle > 0 ? numericArticle : index + 1;
+    const sourceText = String(
+      raw?.sourceText
+      ?? raw?.source_text
+      ?? raw?.texte_source
+      ?? raw?.source
+      ?? raw?.content
+      ?? raw?.regulation
+      ?? raw?.rule
+      ?? raw?.operational_rule
+      ?? ""
+    );
+    const summary = String(
+      raw?.summary
+      ?? raw?.description
+      ?? raw?.regulation
+      ?? raw?.rule
+      ?? raw?.operational_rule
+      ?? raw?.interpretation
+      ?? raw?.analysis
+      ?? sourceText
+    );
+    const interpretation = String(
+      raw?.interpretation
+      ?? raw?.operational_rule
+      ?? raw?.analysis
+      ?? summary
+    );
+
+    return {
+      articleNumber,
+      title: String(raw?.title ?? raw?.theme ?? raw?.section ?? `Article ${rawArticle}`),
+      sourceText,
+      interpretation,
+      summary,
+      impactText: String(raw?.impactText ?? raw?.impact ?? raw?.analysis ?? ""),
+      vigilanceText: String(
+        raw?.vigilanceText
+        ?? raw?.vigilance
+        ?? (Array.isArray(raw?.exceptions) ? raw.exceptions.join("; ") : "")
+      ),
+      confidence: coerceArticleConfidence(raw?.confidence),
+      structuredData: raw && typeof raw === "object" ? raw : undefined,
+    };
+  });
 }
 
 /**
@@ -291,8 +849,10 @@ export async function analyzePLUZone(
   cityName?: string, 
   customPrompt?: string, 
   projectDescription?: string, 
-  parcelData?: any
-): Promise<ZoneAnalysisResult & { digest?: ZoneDigest }> {
+  parcelData?: any,
+  jurisdictionContext?: JurisdictionContext
+): Promise<ZoneAnalysisResult & { digest?: ZoneDigest | null }> {
+  const hasIndexedRegulatorySource = rawText.replace(/\s+/g, " ").trim().length >= 250;
   const articleSchema = z.object({
     articleNumber: z.coerce.number(),
     title: z.string(),
@@ -325,20 +885,39 @@ export async function analyzePLUZone(
   });
 
   try {
+    const { baseZone, hasSubZone } = deriveZoneHierarchy(zoneCode);
     let relevantText = extractRelevantPLUSections(rawText, zoneCode);
 
     // Fallback: if rawText is absent or too short (<300 chars), query Base IA embeddings directly
     if (relevantText.length < 300 && cityName) {
       try {
-        const fallbackQuery = `Zone ${zoneCode} règlement emprise hauteur recul stationnement implantation`;
-        let fallbackChunks = await queryRelevantChunks(fallbackQuery, {
-          municipalityId: cityName,
+        const fallbackQuery = hasSubZone
+          ? `Zone ${baseZone} avec précisions ${zoneCode} règlement emprise hauteur recul stationnement implantation`
+          : `Zone ${zoneCode} règlement emprise hauteur recul stationnement implantation`;
+        let fallbackChunks = await queryChunksWithMunicipalityAliases(fallbackQuery, {
+          cityName,
           zoneCode,
+          jurisdictionContext,
+          docTypes: ["plu_reglement", "plu_annexe"],
+          minAuthority: 7,
+          strictZone: true,
           limit: 20,
         });
         if (fallbackChunks.length === 0) {
+          fallbackChunks = await queryChunksWithMunicipalityAliases(fallbackQuery, {
+            cityName,
+            zoneCode,
+            jurisdictionContext,
+            docTypes: ["plu_reglement", "plu_annexe"],
+            minAuthority: 7,
+            limit: 20,
+          });
+        }
+        if (fallbackChunks.length === 0) {
           fallbackChunks = await queryRelevantChunks(fallbackQuery, {
             municipalityId: GLOBAL_POOL_ID,
+            docTypes: ["plu_reglement", "plu_annexe"],
+            minAuthority: 7,
             limit: 10,
           });
         }
@@ -348,14 +927,15 @@ export async function analyzePLUZone(
           console.log(`[pluAnalysis/analyzePLUZone] ✅ ${fallbackChunks.length} Base IA chunks used for ${cityName} zone ${zoneCode}`);
         } else {
           console.warn(`[pluAnalysis/analyzePLUZone] No PLU content found for ${cityName} zone ${zoneCode} — skipping AI call`);
+          const availability = buildPluAvailabilityIssue({ zoneCode, cityName, hasIndexedRegulatorySource });
           return {
             zoneCode,
-            zoneLabel: `Zone ${zoneCode} — aucun document PLU indexé`,
+            zoneLabel: availability.zoneLabel,
             articles: [],
             digest: null,
             calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
             globalConstraints: [],
-            issues: [{ type: "NO_PLU_DATA", message: `Aucun document PLU indexé pour ${cityName}. Lancez une synchronisation GPU depuis le portail mairie.` }],
+            issues: [availability.issue],
           };
         }
       } catch (embErr) {
@@ -366,14 +946,15 @@ export async function analyzePLUZone(
     // Guard: if still no meaningful text after all fallbacks, skip AI entirely
     if (relevantText.trim().length < 200) {
       console.warn(`[pluAnalysis/analyzePLUZone] relevantText too short (${relevantText.length} chars) after all fallbacks — no AI call`);
+      const availability = buildPluAvailabilityIssue({ zoneCode, cityName, hasIndexedRegulatorySource });
       return {
         zoneCode,
-        zoneLabel: `Zone ${zoneCode} — aucun document PLU indexé`,
+        zoneLabel: availability.zoneLabel,
         articles: [],
         digest: null,
         calculationVariables: { maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null, minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null },
         globalConstraints: [],
-        issues: [{ type: "NO_PLU_DATA", message: `Aucun document PLU indexé pour ${cityName || zoneCode}. Lancez une synchronisation GPU depuis le portail mairie.` }],
+        issues: [availability.issue],
       };
     }
 
@@ -387,6 +968,10 @@ export async function analyzePLUZone(
     }
     systemContent += `\n\nIMPORTANT: Ta réponse doit être uniquement au format JSON valide.`;
 
+    const zoneScopingInstruction = hasSubZone
+      ? `La parcelle est en sous-zone ${zoneCode}. Lis d'abord les règles générales de la zone mère ${baseZone}, puis ajoute toutes les précisions spécifiques ${zoneCode}. Si une précision ${zoneCode} existe, elle prime sur la règle générale ${baseZone}.`
+      : `La parcelle est en zone ${zoneCode}. Extrais exhaustivement uniquement les règles applicables à la zone ${zoneCode}. Ignore les règles propres à d'autres sous-zones comme ${zoneCode}a, ${zoneCode}b, ${zoneCode}h, ${zoneCode}j, etc., sauf si le règlement dit explicitement qu'elles s'appliquent à toute la zone ${zoneCode}.`;
+
     console.log(`[pluAnalysis] Calling OpenAI for zone extraction: ${zoneCode} in ${cityName}...`);
     const truncatedText = (relevantText || "").substring(0, 40000);
     const completion = await openai.chat.completions.create({
@@ -396,7 +981,7 @@ export async function analyzePLUZone(
         { role: "system", content: systemContent },
         {
           role: "user",
-          content: `Texte du règlement (Extrait):\n\n${truncatedText}\n\nIMPORTANT: Réponds uniquement avec un objet JSON contenant la clé "articles" (tableau).`
+          content: `${zoneScopingInstruction}\n\nIMPORTANT: Si le texte contient des sous-secteurs ou sous-zones distinctes, n'extrais pas leurs règles sauf si la parcelle est explicitement dans cette sous-zone cible.\n\nTexte du règlement (Extrait):\n\n${truncatedText}\n\nIMPORTANT: Réponds uniquement avec un objet JSON contenant la clé "articles" (tableau).`
         }
       ],
       response_format: { type: "json_object" },
@@ -406,22 +991,60 @@ export async function analyzePLUZone(
 
     const parsedString = completion.choices[0]?.message?.content || "{}";
     const parsed = JSON.parse(parsedString);
-    
+
     // 2. Relevance Scoring & Ranking
-    let rawArticles = Array.isArray(parsed.articles) ? parsed.articles : [];
+    let rawArticles = coerceZoneArticles(parsed);
+    const hasSubstantiveArticles = rawArticles.some((article) =>
+      article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40
+    );
+
+    if (!hasSubstantiveArticles) {
+      const fallbackRulesJson = await extractRelevantRules(relevantText, {
+        zoneCode,
+        cityName,
+        docTypes: ["plu_reglement", "plu_annexe"],
+        jurisdictionContext,
+      });
+
+      try {
+        const fallbackParsed = JSON.parse(fallbackRulesJson);
+        const fallbackArticles = coerceZoneArticles(fallbackParsed);
+        if (fallbackArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
+          rawArticles = fallbackArticles;
+        }
+      } catch {
+        // Keep primary extraction output if fallback payload is not valid JSON.
+      }
+    }
+
+    if (!rawArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
+      const comprehensiveArticles = extractComprehensiveRegulatoryRules(relevantText, zoneCode);
+      if (comprehensiveArticles.length > 0) {
+        rawArticles = comprehensiveArticles;
+      }
+    }
+
+    if (!rawArticles.some((article) => article.sourceText.trim().length >= 40 || article.summary.trim().length >= 40)) {
+      const deterministicArticles = extractDeterministicRegulatoryRules(relevantText, zoneCode);
+      if (deterministicArticles.length > 0) {
+        rawArticles = deterministicArticles;
+      }
+    }
+
     const rankedArticles = rankRulesByRelevance(rawArticles, projectDescription || "", parcelData);
+    const effectiveDigest = digest || buildDeterministicZoneDigest(rankedArticles, zoneCode);
 
     const result: any = {
       zoneCode: String(parsed.zoneCode || zoneCode),
       zoneLabel: String(parsed.zoneLabel || zoneLabel),
       articles: rankedArticles,
-      digest,
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      calculationVariables: parsed.calculationVariables || { 
+      digest: effectiveDigest,
+      issues: Array.isArray(parsed.issues) ? parsed.issues : Array.isArray(parsed?.data?.issues) ? parsed.data.issues : [],
+      calculationVariables: parsed.calculationVariables || parsed?.data?.calculationVariables || {
         maxFootprintRatio: null, maxHeightM: null, minSetbackFromRoadM: null,
         minSetbackFromBoundariesM: null, parkingRules: null, greenSpaceRatio: null 
       },
-      globalConstraints: Array.isArray(parsed.globalConstraints) ? parsed.globalConstraints : [],
+      globalConstraints: Array.isArray(parsed.globalConstraints) ? parsed.globalConstraints : Array.isArray(parsed?.data?.globalConstraints) ? parsed.data.globalConstraints : [],
     };
 
     return result;
@@ -665,6 +1288,8 @@ export async function extractRelevantRules(
   }
 ): Promise<string> {
   const { zoneCode, cityName, topics = [], docTypes = [] } = context;
+  const regulatoryDocTypes = docTypes.length > 0 ? docTypes : ["plu_reglement", "plu_annexe"];
+  const zoneAliases = buildZoneCodeAliases(zoneCode);
   
   let combinedText = "";
   const { jurisdictionContext } = context;
@@ -673,29 +1298,97 @@ export async function extractRelevantRules(
   // This is the canonical PLU knowledge source; rawText is supplementary
   if (cityName) {
     try {
-      const queryStr = `Règles d'urbanisme zone ${zoneCode}${topics.length > 0 ? `. Thématiques: ${topics.join(", ")}` : ""}`;
+      const municipalityAliases = uniqueMunicipalityAliases(cityName, jurisdictionContext);
+      const zoneSearchKeywords = await loadZoneSearchKeywords({ municipalityAliases, zoneCode });
+      const queryStr = [
+        `Règles d'urbanisme zone ${zoneCode}`,
+        topics.length > 0 ? `Thématiques: ${topics.join(", ")}` : null,
+        zoneSearchKeywords.length > 0 ? `Mots-clés ciblés: ${zoneSearchKeywords.join(", ")}` : null,
+      ].filter(Boolean).join(". ");
       console.log(`[pluAnalysis] Base IA semantic search: "${queryStr}" (${cityName})`);
 
-      let chunks = await queryRelevantChunks(queryStr, {
-        municipalityId: cityName,
-        limit: 25,
-        docTypes: docTypes.length > 0 ? docTypes : undefined,
+      let chunks = await collectPrioritizedRegulatoryChunks(queryStr, {
+        cityName,
+        zoneCode,
         jurisdictionContext,
+        limit: 25,
       });
+
+      if (chunks.length > 0 && chunks.length < 5) {
+        const broaderChunks: any[] = [];
+        const seenBroader = new Set<string>();
+        for (const zoneAlias of zoneAliases.length > 0 ? zoneAliases : [zoneCode]) {
+          const aliasChunks = await queryChunksWithMunicipalityAliases(queryStr, {
+            cityName,
+            zoneCode: zoneAlias,
+            docTypes: regulatoryDocTypes,
+            limit: 25,
+            jurisdictionContext,
+          });
+          for (const chunk of aliasChunks) {
+            if (seenBroader.has(chunk.id)) continue;
+            seenBroader.add(chunk.id);
+            broaderChunks.push(chunk);
+          }
+        }
+        const seen = new Set(chunks.map((chunk) => chunk.id));
+        for (const chunk of broaderChunks) {
+          if (seen.has(chunk.id)) continue;
+          seen.add(chunk.id);
+          chunks.push(chunk);
+          if (chunks.length >= 12) break;
+        }
+      }
 
       // Fallback: GLOBAL_POOL_ID if the commune isn't yet indexed in Base IA
       if (chunks.length === 0) {
         console.warn(`[pluAnalysis] No Base IA chunks for ${cityName} zone ${zoneCode} — retrying with global pool`);
         chunks = await queryRelevantChunks(queryStr, {
           municipalityId: GLOBAL_POOL_ID,
+          docTypes: regulatoryDocTypes,
+          minAuthority: 7,
           limit: 15,
           jurisdictionContext,
         });
       }
 
+      if (chunks.length === 0) {
+        console.warn(`[pluAnalysis] Strict regulatory retrieval returned no chunks for ${cityName} zone ${zoneCode} — falling back to legacy metadata.`);
+        const legacyChunks: any[] = [];
+        const seenLegacy = new Set<string>();
+        for (const zoneAlias of zoneAliases.length > 0 ? zoneAliases : [zoneCode]) {
+          const aliasChunks = await queryChunksWithMunicipalityAliases(queryStr, {
+            cityName,
+            zoneCode: zoneAlias,
+            limit: 15,
+            jurisdictionContext,
+          });
+          for (const chunk of aliasChunks) {
+            if (seenLegacy.has(chunk.id)) continue;
+            seenLegacy.add(chunk.id);
+            legacyChunks.push(chunk);
+          }
+        }
+        chunks = legacyChunks;
+      }
+
       if (chunks.length > 0) {
-        combinedText = chunks
-          .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)
+        const writtenChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_reglement");
+        const annexChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_annexe");
+        const orderedChunks = [...writtenChunks, ...annexChunks, ...chunks.filter((chunk) => {
+          const docType = chunk.metadata?.document_type;
+          return docType !== "plu_reglement" && docType !== "plu_annexe";
+        })];
+
+        combinedText = orderedChunks
+          .map(c => {
+            const prefix = c.metadata?.document_type === "plu_reglement"
+              ? "Base IA — Règlement écrit"
+              : c.metadata?.document_type === "plu_annexe"
+                ? "Base IA — Annexe opposable"
+                : "Base IA";
+            return `[${prefix} — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`;
+          })
           .join("\n\n---\n\n");
         console.log(`[pluAnalysis] ✅ ${chunks.length} Base IA chunks retrieved for ${cityName} zone ${zoneCode}`);
       } else {
@@ -708,7 +1401,7 @@ export async function extractRelevantRules(
 
   // Supplement / fallback: regex windowing on full raw document text
   if (rawText.length > 0) {
-    const relevantWindows = findRelevantWindows(rawText, zoneCode, topics);
+    const relevantWindows = findRelevantWindows(repairExtractedText(rawText), zoneCode, topics);
     const windowText = relevantWindows.join("\n\n--- NOUVEAU SEGMENT ---\n\n");
     if (!combinedText) {
       // No embedding results — use raw text only
@@ -717,6 +1410,11 @@ export async function extractRelevantRules(
       // Enrich embedding results with raw sections (first 3 windows to avoid token bloat)
       combinedText += "\n\n--- DOCUMENTS BRUTS ---\n\n" + relevantWindows.slice(0, 3).join("\n\n---\n\n");
     }
+  }
+
+  if (combinedText.trim().length < 200) {
+    console.warn(`[pluAnalysis] No meaningful PLU source text for ${cityName || "commune inconnue"} zone ${zoneCode} — returning empty ruleset.`);
+    return "[]";
   }
 
   const systemContent = `Tu es l'Expert-Documentaliste en Urbanisme. Ton rôle est de LIRE des extraits d'un règlement PLU complet (potentiellement issu de recherche sémantique) et d'en EXTRAIRE les règles applicables d'articles de la zone **${zoneCode}**${cityName ? ` pour la commune de **${cityName}**` : ""}.
@@ -731,7 +1429,7 @@ CONSIGNES DE FILTRAGE :
   const input = {
     task: "extract",
     context: { zone: zoneCode, commune: cityName },
-    text: combinedText.substring(0, 400000), // Stay under TPM
+    text: repairExtractedText(combinedText).substring(0, 400000), // Stay under TPM
   };
 
   try {
@@ -753,7 +1451,17 @@ CONSIGNES DE FILTRAGE :
     const rawData = result?.data || result?.content || result?.articles || resultText || "[]";
     console.log(`[pluAnalysis] [${cityName}] Extraction Result (first 500 chars): ${JSON.stringify(rawData).substring(0, 500)}...`);
 
-    const finalData = result?.data || result?.content || result?.articles || resultText || "Aucune règle extraite.";
+    const finalData =
+      result?.data?.articles
+      || result?.data?.rules
+      || result?.articles
+      || result?.rules
+      || result?.content?.articles
+      || result?.content?.rules
+      || result?.content
+      || result?.data
+      || resultText
+      || "Aucune règle extraite.";
     return typeof finalData === "string" ? finalData : JSON.stringify(finalData);
   } catch (err) {
     console.error("[extractRelevantRules] IA Error:", err);
@@ -898,10 +1606,11 @@ Structure du champ "data" (ET NON "analysis") :
     };
     
     const targetArticle = articleIdMap[topic];
-    const chunks = await queryRelevantChunks(topic, {
-      municipalityId: cityName || "UNKNOWN",
+    const chunks = await queryChunksWithMunicipalityAliases(topic, {
+      cityName,
       zoneCode,
       articleId: targetArticle,
+      docTypes: undefined,
       jurisdictionContext,
       includeTrace, // PROPAGATE TRACE FLAG
       limit: 5

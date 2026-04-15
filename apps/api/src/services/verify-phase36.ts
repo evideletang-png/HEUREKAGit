@@ -29,13 +29,13 @@ async function runVerification() {
   
   const projectData = { hauteur: 11, recul: 3 };
   const evals = evaluateFormalRules(projectData, rules);
-  console.log("Rule Evaluations:", evals.map(e => `${e.ruleId}: ${e.status} (${e.reason})`));
+  console.log("Rule Evaluations:", evals.map(e => `${e.rule_id}: ${e.status} (${e.justification})`));
 
   // 3. Test Decision Layer
   const decision = generateBusinessDecision(evals, [resolvedEmprise], { missingCritical: [] });
-  console.log("Final Business Decision:", decision.decision, "Score:", decision.score);
-  console.log("Blocking Points:", decision.blockingPoints);
-  console.log("Required Actions:", decision.requiredActions);
+  console.log("Final Business Decision:", decision.decision, "Score:", decision.overall_score);
+  console.log("Blocking Points:", decision.blocking_points);
+  console.log("Required Actions:", decision.required_actions);
 
   console.log("=== PHASE 36 VERIFICATION COMPLETED ===");
 }

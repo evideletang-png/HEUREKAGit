@@ -106,3 +106,4 @@ export function evaluateFormalRules(
 
 // Keep backward compatibility for now if needed by other services
 export { evaluateFormalRules as evaluateRules };
+export type { RuleEvaluation };

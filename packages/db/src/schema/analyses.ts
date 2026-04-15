@@ -116,6 +116,7 @@ export const buildabilityResultsTable = pgTable("buildability_results", {
   parkingRequirement: text("parking_requirement"),
   greenSpaceRequirement: text("green_space_requirement"),
   assumptionsJson: text("assumptions_json"),
+  sourceDetailsJson: text("source_details_json"),
   confidenceScore: doublePrecision("confidence_score").notNull().default(0),
   resultSummary: text("result_summary"),
 });

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, boolean, integer } from "drizzle-orm/pg-core";
 import { createSelectSchema, createInsertSchema } from "drizzle-zod";
 import { sql } from "drizzle-orm";
 
@@ -8,6 +8,9 @@ export const townHallDocumentsTable = pgTable("town_hall_documents", {
   commune: text("commune"),
   title: text("title").notNull(),
   fileName: text("file_name").notNull(),
+  mimeType: text("mime_type"),
+  fileSize: integer("file_size"),
+  hasStoredBlob: boolean("has_stored_blob").notNull().default(false),
   rawText: text("raw_text").notNull(),
   category: text("category"), // REGULATORY, ANNEXES, INFRASTRUCTURE
   subCategory: text("sub_category"), // PLU, RISKS, HERITAGE, NETWORKS, etc.

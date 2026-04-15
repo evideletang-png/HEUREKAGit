@@ -17,6 +17,9 @@ export interface BuildabilityResult {
   parkingRequirement?: string | null;
   greenSpaceRequirement?: string | null;
   assumptionsJson?: string[];
+  sourceDetailsJson?: {
+    [key: string]: unknown;
+  } | string;
   confidenceScore: number;
   resultSummary?: string;
 }

@@ -20,6 +20,18 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (
+          warning.code === "SOURCEMAP_ERROR" ||
+          warning.message.includes("Error when using sourcemap for reporting an error")
+        ) {
+          return;
+        }
+
+        warn(warning);
+      },
+    },
   },
   server: {
     port: 5173,

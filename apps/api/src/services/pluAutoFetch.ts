@@ -14,12 +14,18 @@ import { execSync } from "child_process";
 import crypto from "crypto";
 import path from "path";
 import fs from "fs";
-import { db, townHallDocumentsTable, baseIADocumentsTable } from "@workspace/db";
+import { db, baseIADocumentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
 import { GPUProviderService } from "./gpuProviderService.js";
 import { processDocumentForRAG } from "./baseIAIngestion.js";
+import { persistDocumentKnowledgeProfile } from "./documentKnowledgeService.js";
+import { persistRegulatoryUnitsForDocument } from "./regulatoryUnitService.js";
+import { persistRegulatoryZoneSectionsForDocument } from "./regulatoryZoneSectionService.js";
+import { persistUrbanRulesForDocument } from "./urbanRuleExtractionService.js";
 import { VisionService } from "./visionService.js";
+import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
+import { townHallDocumentFilesTable } from "../../../../packages/db/src/schema/townHallDocumentFiles.js";
 
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 
@@ -178,7 +184,7 @@ async function fetchFromDataGouv(inseeCode: string, communeName: string): Promis
       }
     }
   } catch (err) {
-    logger.warn("[PLUAutoFetch] data.gouv.fr fetch failed:", err);
+    logger.warn("[PLUAutoFetch] data.gouv.fr fetch failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
   return results;
@@ -232,6 +238,7 @@ export async function autoFetchPLU(
           subCategory: "PLU",
           type: doc.docType === "oap" ? "oap" : "plu",
           fileName: doc.fileName,
+          fileHash: crypto.createHash("sha256").update(doc.rawText).digest("hex"),
           status: "parsing",
           rawText: doc.rawText,
         }).returning();
@@ -245,23 +252,79 @@ export async function autoFetchPLU(
           source_authority: authorityFor(doc.docType),
         } as any);
 
+        await persistRegulatoryUnitsForDocument({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceAuthority: authorityFor(doc.docType),
+          isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+          rawText: doc.rawText,
+        });
+
+        await persistRegulatoryZoneSectionsForDocument({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceAuthority: authorityFor(doc.docType),
+          isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+          rawText: doc.rawText,
+        });
+
+        await persistDocumentKnowledgeProfile({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceName: doc.fileName,
+          opposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+          sourceAuthority: authorityFor(doc.docType),
+          rawText: doc.rawText,
+          rawClassification: {
+            source: "plu_auto_fetch",
+            docType: doc.docType,
+          },
+        });
+
+        await persistUrbanRulesForDocument({
+          baseIADocumentId: baseIADoc.id,
+          municipalityId: inseeCode,
+          documentType: doc.docType,
+          sourceAuthority: authorityFor(doc.docType),
+          isOpposable: doc.docType === "plu_reglement" || doc.docType === "plu_annexe",
+        });
+
         await db.update(baseIADocumentsTable)
           .set({ status: "indexed" })
           .where(eq(baseIADocumentsTable.id, baseIADoc.id));
 
         // Also create a townHallDocuments record for backward compat
-        await db.insert(townHallDocumentsTable).values({
+        const fileBuffer = fs.existsSync(path.join(UPLOADS_DIR, doc.fileName))
+          ? fs.readFileSync(path.join(UPLOADS_DIR, doc.fileName))
+          : null;
+
+        const [townHallDoc] = await db.insert(townHallDocumentsTable).values({
           userId: "SYSTEM",
           commune: communeName,
           title: doc.fileName,
           fileName: doc.fileName,
+          mimeType: "application/pdf",
+          fileSize: fileBuffer?.length || null,
+          hasStoredBlob: !!fileBuffer,
           rawText: doc.rawText,
           category: "REGULATORY",
           subCategory: "PLU",
           documentType: doc.docType,
           isRegulatory: true,
           isOpposable: true,
-        }).onConflictDoNothing();
+        }).returning({ id: townHallDocumentsTable.id });
+
+        if (townHallDoc?.id && fileBuffer) {
+          await db.insert(townHallDocumentFilesTable).values({
+            documentId: townHallDoc.id,
+            mimeType: "application/pdf",
+            fileSize: fileBuffer.length,
+            fileBase64: fileBuffer.toString("base64"),
+          }).onConflictDoNothing();
+        }
 
         logger.info(`[PLUAutoFetch] ✅ Background indexed ${doc.fileName} into Base IA (${poolId})`);
       } catch (e) {

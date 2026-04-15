@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react";
-import { MapContainer, TileLayer, Polygon, Tooltip as LeafletTooltip, Rectangle, Marker } from "react-leaflet";
+import { useState, useCallback, useEffect } from "react";
+import { MapContainer, TileLayer, Polygon, Tooltip as LeafletTooltip, Rectangle, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
+import { SHARED_MAP_CONTAINER_OPTIONS, SHARED_MAP_TILE_LAYERS } from "@/lib/mapTiles";
 import * as turf from "@turf/turf";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, CheckCircle2, Ruler, Info, Pencil, RotateCcw } from "lucide-react";
+import { MapZoomButtons } from "@/components/map/MapZoomButtons";
 
 type GeoContextPlu = {
   zone?: string;
@@ -62,6 +64,16 @@ const ELEMENT_DESCRIPTIONS: Record<string, string> = {
   pergola: "La pergola non close est souvent traitée comme une terrasse dans le PLU.",
 };
 
+function MapInstanceBridge({ onMapReady }: { onMapReady: (map: L.Map) => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    onMapReady(map);
+  }, [map, onMapReady]);
+
+  return null;
+}
+
 function turfPolygonToLeafletPositions(poly: any): [number, number][] {
   if (!poly?.geometry?.coordinates?.[0]) return [];
   return poly.geometry.coordinates[0].map((c: any) => [c[1], c[0]] as [number, number]);
@@ -81,6 +93,7 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
   const [widthM, setWidthM] = useState("4");
   const [result, setResult] = useState<PlacedResult | null>(null);
   const [computed, setComputed] = useState(false);
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
 
   const parsedGeometry = parcelGeometryJson ? (() => { try { return JSON.parse(parcelGeometryJson); } catch { return null; } })() : null;
 
@@ -408,10 +421,26 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
             <CardContent className="p-0">
               <div className="h-[480px] rounded-b-xl overflow-hidden relative z-0">
                 {parcelPositions.length > 0 ? (
-                  <MapContainer center={mapCenter} zoom={19} style={{ height: "100%", width: "100%" }}>
+                  <>
+                    <MapZoomButtons map={mapInstance} />
+                    <MapContainer
+                      className="map-custom-zoom"
+                      center={mapCenter}
+                      zoom={20}
+                      maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}
+                      zoomSnap={SHARED_MAP_CONTAINER_OPTIONS.zoomSnap}
+                      zoomDelta={SHARED_MAP_CONTAINER_OPTIONS.zoomDelta}
+                      wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
+                      zoomAnimation={false}
+                      fadeAnimation={false}
+                      zoomControl={false}
+                      style={{ height: "100%", width: "100%" }}
+                    >
+                    <MapInstanceBridge onMapReady={setMapInstance} />
                     <TileLayer
-                      url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                      attribution='&copy; <a href="https://carto.com/">Carto</a>'
+                      url={SHARED_MAP_TILE_LAYERS.plan.url}
+                      attribution={SHARED_MAP_TILE_LAYERS.plan.attribution}
+                      {...SHARED_MAP_TILE_LAYERS.plan.tileOptions}
                     />
                     {/* Parcel boundary — red */}
                     <Polygon
@@ -453,7 +482,8 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
                         </LeafletTooltip>
                       </Rectangle>
                     )}
-                  </MapContainer>
+                    </MapContainer>
+                  </>
                 ) : (
                   <div className="w-full h-full bg-muted flex items-center justify-center">
                     <p className="text-muted-foreground">Géométrie cadastrale indisponible</p>

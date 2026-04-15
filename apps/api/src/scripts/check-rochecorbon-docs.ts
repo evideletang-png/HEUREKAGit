@@ -5,7 +5,7 @@ async function checkDocs() {
   const docs = await db.select().from(baseIADocumentsTable).where(eq(baseIADocumentsTable.municipalityId, "37203"));
   console.log(`Found ${docs.length} documents for Rochecorbon (37203)`);
   docs.forEach(d => {
-    console.log(`- ${d.title} (ID: ${d.id}, Status: ${d.status}, Text Length: ${d.rawText?.length || 0})`);
+    console.log(`- ${d.fileName} (ID: ${d.id}, Status: ${d.status}, Text Length: ${d.rawText?.length || 0})`);
   });
   process.exit(0);
 }

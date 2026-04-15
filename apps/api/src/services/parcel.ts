@@ -57,6 +57,18 @@ export interface ParcelData {
   buildings?: BuildingData[];
 }
 
+export interface ParcelSelectionPreviewItem {
+  idu: string;
+  section: string;
+  numero: string;
+  parcelRef: string;
+  contenanceM2: number;
+  isPrimary: boolean;
+  isAdjacent: boolean;
+  feature: any;
+  positions: [number, number][];
+}
+
 export interface BuildingData {
   footprintM2: number;
   estimatedFloorAreaM2: number;
@@ -110,6 +122,109 @@ async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
   }
 
   return allFeatures;
+}
+
+function getFeatureId(feature: any): string {
+  return String(
+    feature?.properties?.idu
+      || feature?.id
+      || `${feature?.properties?.section || "?"}-${feature?.properties?.numero || "?"}-${feature?.properties?.code_insee || "00000"}`
+  );
+}
+
+function getFeatureParcelRef(feature: any): string {
+  const section = String(feature?.properties?.section || "").trim();
+  const numero = String(feature?.properties?.numero || "").trim();
+  return [section, numero].filter(Boolean).join(" ");
+}
+
+function mapParcelPreviewItem(feature: any, flags: { isPrimary: boolean; isAdjacent: boolean }): ParcelSelectionPreviewItem {
+  const geometry = feature?.geometry;
+  let positions: [number, number][] = [];
+
+  if (geometry?.type === "Polygon" && Array.isArray(geometry.coordinates?.[0])) {
+    positions = geometry.coordinates[0]
+      .filter((coord: any) => Array.isArray(coord) && coord.length >= 2)
+      .map((coord: any) => [Number(coord[1]), Number(coord[0])] as [number, number]);
+  } else if (geometry?.type === "MultiPolygon" && Array.isArray(geometry.coordinates?.[0]?.[0])) {
+    positions = geometry.coordinates[0][0]
+      .filter((coord: any) => Array.isArray(coord) && coord.length >= 2)
+      .map((coord: any) => [Number(coord[1]), Number(coord[0])] as [number, number]);
+  }
+
+  return {
+    idu: String(feature?.properties?.idu || getFeatureId(feature)),
+    section: String(feature?.properties?.section || ""),
+    numero: String(feature?.properties?.numero || ""),
+    parcelRef: getFeatureParcelRef(feature),
+    contenanceM2: Number(feature?.properties?.contenance || 0),
+    isPrimary: flags.isPrimary,
+    isAdjacent: flags.isAdjacent,
+    feature,
+    positions,
+  };
+}
+
+function toTurfFeature(feature: any): any {
+  return turf.feature(feature.geometry, feature.properties || {});
+}
+
+function areAdjacentParcels(primaryFeature: any, candidateFeature: any): boolean {
+  try {
+    return turf.booleanIntersects(toTurfFeature(primaryFeature), toTurfFeature(candidateFeature));
+  } catch {
+    return false;
+  }
+}
+
+function buildCombinedParcelFeature(features: any[]): any {
+  if (features.length === 1) return features[0];
+
+  const collection = turf.featureCollection(features.map((feature) => toTurfFeature(feature)));
+  const combined = turf.combine(collection as any) as any;
+  const geometry = combined?.features?.[0]?.geometry || features[0]?.geometry;
+
+  return {
+    type: "Feature",
+    geometry,
+    properties: {
+      idu: features.map((feature) => String(feature?.properties?.idu || getFeatureId(feature))).join(","),
+      section: features.map((feature) => String(feature?.properties?.section || "")).filter(Boolean).join(","),
+      numero: features.map((feature) => String(feature?.properties?.numero || "")).filter(Boolean).join("+"),
+      code_insee: features[0]?.properties?.code_insee || "00000",
+      contenance: features.reduce((sum, feature) => sum + Number(feature?.properties?.contenance || 0), 0),
+    },
+  };
+}
+
+function dedupeFeatures(features: any[]): any[] {
+  const seen = new Set<string>();
+  return features.filter((feature) => {
+    const id = getFeatureId(feature);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function isConnectedParcelGroup(features: any[]): boolean {
+  if (features.length <= 1) return true;
+
+  const visited = new Set<number>([0]);
+  const queue = [0];
+
+  while (queue.length > 0) {
+    const currentIndex = queue.shift()!;
+    for (let i = 0; i < features.length; i++) {
+      if (visited.has(i)) continue;
+      if (areAdjacentParcels(features[currentIndex], features[i])) {
+        visited.add(i);
+        queue.push(i);
+      }
+    }
+  }
+
+  return visited.size === features.length;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -351,6 +466,125 @@ function computeCentroid(feature: any): { lat: number; lng: number } {
     for (const [lng, lat] of ring) { sumLng += lng; sumLat += lat; n++; }
   }
   return n ? { lat: sumLat / n, lng: sumLng / n } : { lat: 0, lng: 0 };
+}
+
+export async function getParcelSelectionPreview(
+  lat: number,
+  lng: number,
+  banId = "",
+  geocodeLabel = ""
+): Promise<{ primaryParcel: ParcelSelectionPreviewItem; adjacentParcels: ParcelSelectionPreviewItem[] }> {
+  const cadastreFeatures = await getCadastreFeatures(lat, lng);
+  if (!cadastreFeatures.length) {
+    throw new Error("No cadastral data");
+  }
+
+  const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
+  if (!selected.ok || !selected.selected_feature) {
+    throw new Error("select-parcel failed");
+  }
+
+  const primaryFeature = selected.selected_feature;
+  const primaryId = getFeatureId(primaryFeature);
+  const adjacentParcels = cadastreFeatures
+    .filter((feature) => getFeatureId(feature) !== primaryId)
+    .filter((feature) => areAdjacentParcels(primaryFeature, feature))
+    .map((feature) => mapParcelPreviewItem(feature, { isPrimary: false, isAdjacent: true }))
+    .sort((a, b) => a.parcelRef.localeCompare(b.parcelRef));
+
+  return {
+    primaryParcel: mapParcelPreviewItem(primaryFeature, { isPrimary: true, isAdjacent: false }),
+    adjacentParcels,
+  };
+}
+
+export async function buildParcelDataFromSelectedFeatures(
+  lat: number,
+  lng: number,
+  selectedFeatures: any[],
+): Promise<ParcelData> {
+  const validFeatures = dedupeFeatures(selectedFeatures.filter((feature) => feature?.geometry));
+  if (validFeatures.length === 0) {
+    throw new Error("No selected parcel features");
+  }
+  if (!isConnectedParcelGroup(validFeatures)) {
+    throw new Error("Selected parcels must form a contiguous land assembly");
+  }
+
+  const mergedFeature = buildCombinedParcelFeature(validFeatures);
+  const centroid = computeCentroid(mergedFeature);
+  const bboxString = await computeBbox(mergedFeature);
+  const roadFeatures = await getBdTopoRoads(bboxString);
+
+  let roadFrontageLengthM = 0;
+  let sideBoundaryLengthM = 0;
+  let classifyResult: any = null;
+  try {
+    classifyResult = await classifyBoundaries(mergedFeature, roadFeatures);
+    if (classifyResult.ok) {
+      roadFrontageLengthM = Math.round(classifyResult.road_boundary_length_m * 10) / 10;
+      sideBoundaryLengthM = Math.round(classifyResult.side_boundary_length_m * 10) / 10;
+    }
+  } catch (e) {
+    console.warn("[parcel] classify-boundaries failed for grouped parcel:", (e as Error).message);
+  }
+
+  const parcelSurfaceM2 = validFeatures.reduce((sum, feature) => sum + Number(feature?.properties?.contenance || 0), 0);
+  const perimeterM = computePerimeterM(mergedFeature.geometry);
+  const depthM = estimateDepthM(mergedFeature.geometry, centroid);
+  const topo = computeTopography(mergedFeature.geometry);
+  const roadSegRoads: Set<string> = new Set(
+    (classifyResult?.road_boundary_segments ?? [])
+      .map((segment: any) => segment.properties?.closest_road_name)
+      .filter(Boolean)
+  );
+  const neighbourBuildingFeatures = await (async () => {
+    try {
+      const [bMinLon, bMinLat, bMaxLon, bMaxLat] = bboxString.split(",").map(Number);
+      const expand = 0.002;
+      const widerBbox = `${bMinLon - expand},${bMinLat - expand},${bMaxLon + expand},${bMaxLat + expand}`;
+      return await getBdTopoBatiments(widerBbox, 40);
+    } catch {
+      return [];
+    }
+  })();
+
+  const uniqueSections = Array.from(new Set(validFeatures.map((feature) => String(feature?.properties?.section || "")).filter(Boolean)));
+  const parcelNumbers = validFeatures.map((feature) => String(feature?.properties?.numero || "")).filter(Boolean);
+  const parcelRefs = validFeatures.map((feature) => getFeatureParcelRef(feature)).filter(Boolean);
+  const idus = validFeatures.map((feature) => String(feature?.properties?.idu || getFeatureId(feature)));
+
+  return {
+    cadastralSection: uniqueSections.length === 1 ? uniqueSections[0] : "MULTI",
+    parcelNumber: parcelNumbers.join("+"),
+    parcelSurfaceM2,
+    geometryJson: mergedFeature,
+    centroidLat: centroid.lat || lat,
+    centroidLng: centroid.lng || lng,
+    roadFrontageLengthM,
+    sideBoundaryLengthM,
+    metadata: {
+      commune: String(validFeatures[0]?.properties?.code_insee || "00000"),
+      prefixe: "000",
+      section: uniqueSections.join(","),
+      numero: parcelNumbers.join("+"),
+      contenance: parcelSurfaceM2,
+      idu: idus.join(","),
+      parcelRefs,
+      parcelCount: validFeatures.length,
+    } as ParcelData["metadata"] & { parcelRefs: string[]; parcelCount: number },
+    _bboxString: bboxString,
+    _cadastreFeatures: validFeatures,
+    _selectedFeature: mergedFeature,
+    _classifyBoundariesResult: classifyResult,
+    _roadFeatures: roadFeatures,
+    _neighbourBuildingFeatures: neighbourBuildingFeatures,
+    _perimeterM: Math.round(perimeterM * 10) / 10,
+    _shapeRatio: perimeterM > 0 ? Math.round((4 * Math.PI * parcelSurfaceM2) / (perimeterM * perimeterM) * 100) / 100 : 0,
+    _isCornerPlot: roadSegRoads.size > 1,
+    _depthM: Math.round(depthM),
+    _topography: topo,
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

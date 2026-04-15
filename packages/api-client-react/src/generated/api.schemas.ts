@@ -76,6 +76,18 @@ export interface CreateAnalysisRequest {
   parcelRef?: string;
   lat?: number;
   lng?: number;
+  banId?: string;
+  inseeCode?: string;
+  city?: string;
+  postcode?: string;
+  selectedParcels?: {
+    idu?: string;
+    section?: string;
+    numero?: string;
+    parcelRef?: string;
+    contenanceM2?: number;
+    feature?: { [key: string]: unknown };
+  }[];
   title?: string;
 }
 
@@ -178,6 +190,7 @@ export interface BuildabilityResult {
   parkingRequirement?: string | null;
   greenSpaceRequirement?: string | null;
   assumptionsJson?: string[];
+  sourceDetailsJson?: { [key: string]: unknown } | string;
   confidenceScore: number;
   resultSummary?: string;
 }

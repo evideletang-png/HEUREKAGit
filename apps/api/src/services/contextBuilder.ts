@@ -1,8 +1,11 @@
-import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable } from "@workspace/db";
+import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable, municipalitySettingsTable, regulatoryZoneSectionsTable } from "@workspace/db";
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
 import { autoFetchPLU } from "./pluAutoFetch.js";
+import { hasUsableExtractedText } from "./textQualityService.js";
+import { buildZoneCodeAliases } from "./pluAnalysis.js";
+import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -10,6 +13,58 @@ export interface AnalysisContext {
   jurisdictionContext: JurisdictionContext;
   relevantDocs: any[];
   relevantRules: any[];
+}
+
+async function collectPrioritizedRegulatoryChunks(
+  commune: string,
+  communeName: string,
+  zoneCode: string,
+  jurisdictionContext: JurisdictionContext,
+  limit = 30
+) {
+  const aliases = Array.from(new Set([commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const zoneAliases = buildZoneCodeAliases(zoneCode);
+  const searchKeywords = await loadZoneSearchKeywords({ municipalityAliases: aliases, zoneCode });
+  const query = [
+    `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`,
+    searchKeywords.length > 0 ? `Mots-clés prioritaires : ${searchKeywords.join(", ")}` : null,
+  ].filter(Boolean).join(". ");
+  const plans = [
+    { docTypes: ["plu_reglement"], strictZone: true, target: Math.min(limit, 18) },
+    { docTypes: ["plu_annexe"], strictZone: true, target: Math.min(limit, 8) },
+    { docTypes: ["plu_reglement"], strictZone: false, target: Math.min(limit, 24) },
+    { docTypes: ["plu_annexe"], strictZone: false, target: Math.min(limit, 30) },
+  ];
+
+  const seen = new Set<string>();
+  const results: any[] = [];
+
+  for (const plan of plans) {
+    for (const municipalityId of aliases) {
+      for (const zoneAlias of zoneAliases) {
+        const chunks = await queryRelevantChunks(query, {
+          municipalityId,
+          zoneCode: zoneAlias,
+          docTypes: plan.docTypes,
+          minAuthority: 7,
+          strictZone: plan.strictZone,
+          jurisdictionContext,
+          limit: plan.target,
+        });
+
+        for (const chunk of chunks) {
+          if (seen.has(chunk.id)) continue;
+          seen.add(chunk.id);
+          results.push(chunk);
+          if (results.length >= limit) return results;
+        }
+      }
+
+      if (results.length >= plan.target) break;
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -22,12 +77,20 @@ export async function buildAnalysisContext(
   jurisdictionContext: JurisdictionContext
 ): Promise<AnalysisContext> {
   console.log(`[ContextBuilder] Building context for ${jurisdictionContext.name} (${zoneCode})...`);
+  const zoneAliases = buildZoneCodeAliases(zoneCode);
 
   // 1. Resolve Commune Name (Mismatch fix for town_hall_documents)
   let communeName = "";
   try {
     const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, commune)).limit(1);
     if (c) communeName = c.name;
+    if (!communeName) {
+      const [settings] = await db.select({ commune: municipalitySettingsTable.commune })
+        .from(municipalitySettingsTable)
+        .where(eq(municipalitySettingsTable.inseeCode, commune))
+        .limit(1);
+      if (settings?.commune) communeName = settings.commune;
+    }
     console.log(`[ContextBuilder] Resolved INSEE ${commune} to name: ${communeName}`);
   } catch (e) {
     console.warn(`[ContextBuilder] Failed to resolve commune name for ${commune}`);
@@ -41,12 +104,36 @@ export async function buildAnalysisContext(
       and(
         or(
           eq(baseIADocumentsTable.municipalityId, commune),
-          communeName ? eq(baseIADocumentsTable.municipalityId, communeName) : sql`FALSE`,
+          communeName ? sql`lower(${baseIADocumentsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`,
           inArray(baseIADocumentsTable.municipalityId, [GLOBAL_POOL_ID, "NATIONAL"])
         ),
         eq(baseIADocumentsTable.status, "indexed")
       )
     );
+
+  const municipalityAliases = [commune, communeName].filter((value): value is string => !!value && value.trim().length > 0);
+  let zoneSections: typeof regulatoryZoneSectionsTable.$inferSelect[] = [];
+  if (zoneAliases.length > 0 && municipalityAliases.length > 0) {
+    try {
+      zoneSections = await db.select().from(regulatoryZoneSectionsTable)
+        .where(
+          and(
+            or(
+              inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
+              communeName ? sql`lower(${regulatoryZoneSectionsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`
+            ),
+            inArray(regulatoryZoneSectionsTable.zoneCode, zoneAliases),
+            eq(regulatoryZoneSectionsTable.isOpposable, true)
+          )
+        );
+    } catch (error) {
+      console.warn(
+        `[ContextBuilder] Failed to load regulatory zone sections for ${commune}/${communeName || "unknown"} zone ${zoneCode}. Falling back to legacy document context.`,
+        error
+      );
+      zoneSections = [];
+    }
+  }
 
   // 3. Zone-level Collection from Town Hall (PLU PDFs, etc.)
   // We fetch ALL documents for the commune, then filter or triage them based on zone keywords in Step 4
@@ -55,53 +142,81 @@ export async function buildAnalysisContext(
       and(
         or(
           eq(townHallDocumentsTable.commune, commune),
-          communeName ? eq(townHallDocumentsTable.commune, communeName) : sql`FALSE`,
+          communeName ? sql`lower(${townHallDocumentsTable.commune}) = lower(${communeName})` : sql`FALSE`,
           // Zone-specific matches if pre-filtered in DB
-          eq(townHallDocumentsTable.zone, zoneCode)
+          zoneAliases.length > 0
+            ? inArray(townHallDocumentsTable.zone, zoneAliases)
+            : sql`FALSE`
         ),
-        eq(townHallDocumentsTable.isOpposable, true)
+        eq(townHallDocumentsTable.isRegulatory, true)
       )
     );
+  const usableTownHallDocs = townHallDocs.filter((doc) => hasUsableExtractedText(doc.rawText));
 
   // Combine static document sources
-  const relevantDocs = [...baseIADocs, ...townHallDocs];
+  const sectionDocs = zoneSections
+    .sort((left, right) => {
+      const leftPriority = left.zoneCode === zoneCode ? 0 : 1;
+      const rightPriority = right.zoneCode === zoneCode ? 0 : 1;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      return (right.sourceAuthority || 0) - (left.sourceAuthority || 0);
+    })
+    .map((section) => ({
+      id: `ZONE_SECTION_${section.id}`,
+      rawText: section.sourceText,
+      municipalityId: section.municipalityId,
+      status: "indexed",
+      documentType: section.documentType || "plu_reglement",
+      title: `${section.heading}${section.startPage ? ` (p. ${section.startPage}${section.endPage && section.endPage !== section.startPage ? `-${section.endPage}` : ""})` : ""}`,
+      isOpposable: section.isOpposable,
+      zoneCode: section.zoneCode,
+      parentZoneCode: section.parentZoneCode,
+      sourceAuthority: section.sourceAuthority,
+    }));
+
+  const relevantDocs: any[] = [...sectionDocs, ...baseIADocs, ...usableTownHallDocs];
 
   // 3b. ALWAYS run semantic search against base_ia_embeddings for zone-specific PLU chunks.
   // This is the primary knowledge source — it returns the most relevant indexed PLU text
   // even when no full-document record exists for the commune.
-  const embeddingQuery = `Règlement zone ${zoneCode} occupation sol hauteur emprise recul stationnement espaces verts`;
   try {
-    let chunks = await queryRelevantChunks(embeddingQuery, {
-      municipalityId: commune,
-      zoneCode,
-      jurisdictionContext,
-      limit: 30,
-    });
-
-    // Fallback: try with commune name (some documents are indexed by name, not INSEE)
-    if (chunks.length === 0 && communeName) {
-      chunks = await queryRelevantChunks(embeddingQuery, {
-        municipalityId: communeName,
-        zoneCode,
-        jurisdictionContext,
-        limit: 30,
-      });
-    }
+    const chunks = await collectPrioritizedRegulatoryChunks(commune, communeName, zoneCode, jurisdictionContext, 30);
 
     if (chunks.length > 0) {
-      const embeddingText = chunks
-        .map(c => `[Base IA — Score: ${typeof c.similarity === "number" ? c.similarity.toFixed(2) : c.similarity}]\n${c.content}`)
-        .join("\n\n---\n\n");
-      // Prepend as the highest-priority synthetic document
-      relevantDocs.unshift({
-        id: `BASE_IA_${commune}_${zoneCode}`,
-        rawText: embeddingText,
-        municipalityId: commune,
-        status: "indexed",
-        documentType: "plu",
-        title: `Base IA — Zone ${zoneCode} — ${jurisdictionContext.name || commune}`,
-      });
-      console.log(`[ContextBuilder] ✅ ${chunks.length} Base IA embedding chunks injected for zone ${zoneCode} in ${jurisdictionContext.name || commune}`);
+      const writtenChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_reglement");
+      const annexChunks = chunks.filter((chunk) => chunk.metadata?.document_type === "plu_annexe");
+
+      if (annexChunks.length > 0) {
+        relevantDocs.unshift({
+          id: `BASE_IA_ANNEX_${commune}_${zoneCode}`,
+          rawText: annexChunks
+            .map((chunk) => `[Base IA annexe — Score: ${typeof chunk.similarity === "number" ? chunk.similarity.toFixed(2) : chunk.similarity}]\n${chunk.content}`)
+            .join("\n\n---\n\n"),
+          municipalityId: commune,
+          status: "indexed",
+          documentType: "plu_annexe",
+          title: `Base IA — Annexes ${zoneCode} — ${jurisdictionContext.name || commune}`,
+          isOpposable: true,
+        });
+      }
+
+      if (writtenChunks.length > 0) {
+        relevantDocs.unshift({
+          id: `BASE_IA_REGULATION_${commune}_${zoneCode}`,
+          rawText: writtenChunks
+            .map((chunk) => `[Base IA règlement écrit — Score: ${typeof chunk.similarity === "number" ? chunk.similarity.toFixed(2) : chunk.similarity}]\n${chunk.content}`)
+            .join("\n\n---\n\n"),
+          municipalityId: commune,
+          status: "indexed",
+          documentType: "plu_reglement",
+          title: `Base IA — Règlement écrit ${zoneCode} — ${jurisdictionContext.name || commune}`,
+          isOpposable: true,
+        });
+      }
+
+      console.log(
+        `[ContextBuilder] ✅ ${chunks.length} Base IA embedding chunks injected for zone ${zoneCode} in ${jurisdictionContext.name || commune} (${writtenChunks.length} règlement, ${annexChunks.length} annexes)`
+      );
     } else {
       console.warn(`[ContextBuilder] ⚠️  No Base IA chunks for zone ${zoneCode} in ${commune} — triggering auto-fetch from GPU / data.gouv.fr`);
 
@@ -139,7 +254,9 @@ export async function buildAnalysisContext(
           eq(rulesTable.commune, commune),
           communeName ? eq(rulesTable.commune, communeName) : sql`FALSE`
         ),
-        eq(rulesTable.zoneCode, zoneCode)
+        zoneAliases.length > 0
+          ? inArray(rulesTable.zoneCode, zoneAliases)
+          : eq(rulesTable.zoneCode, zoneCode)
       )
     );
 

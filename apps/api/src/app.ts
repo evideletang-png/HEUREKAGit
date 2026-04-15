@@ -7,6 +7,7 @@ import router from "./routes/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const requestBodyLimit = process.env.API_REQUEST_BODY_LIMIT || "25mb";
 
 const app: Express = express();
 
@@ -17,8 +18,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
 // Request logger
 app.use((req, res, next) => {
@@ -75,6 +76,11 @@ app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
   if (err.code === "LIMIT_FILE_SIZE") {
     status = 413;
     message = "Le fichier est trop volumineux. La limite est de 100 Mo.";
+  }
+
+  if (err.type === "entity.too.large" || status === 413) {
+    status = 413;
+    message = `La requête est trop volumineuse pour être traitée. Réduis la taille de la capture ou du texte, ou augmente API_REQUEST_BODY_LIMIT (actuel : ${requestBodyLimit}).`;
   }
 
   if (!res.headersSent) {

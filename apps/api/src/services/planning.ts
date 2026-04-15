@@ -2,7 +2,8 @@
  * Planning Document Service
  * Retrieves PLU/PLUi zone data from the Géoportail de l'Urbanisme (GPU)
  * via the IGN apicarto API, then fetches the associated document details.
- * Falls back to realistic mock data if any API call fails.
+ * If the regulation text cannot be fetched, the zone metadata is returned
+ * without inventing regulatory text.
  */
 
 const IGN_APICARTO = "https://apicarto.ign.fr/api";
@@ -136,7 +137,7 @@ export async function getZoningByCoords(lat: number, lng: number, commune?: stri
     let sourceUrl   = docDetails?.regulationUrl
       || `https://www.geoportail-urbanisme.gouv.fr/document/${zone.gpu_doc_id}`;
 
-    let rawText = getMockPLURulesText(zoneCode);
+    let rawText = "";
 
     // Attempt to download and parse the actual PLU document if it's a PDF
     if (!sourceUrl || !sourceUrl.toLowerCase().endsWith(".pdf")) {
@@ -177,7 +178,7 @@ export async function getZoningByCoords(lat: number, lng: number, commune?: stri
           console.warn(`[planning] PDF Fetch failed with status: ${pdfRes.status}`);
         }
       } catch (pdfErr) {
-        console.warn("[planning] Failed to parse actual PLU PDF, using fallback mock.", (pdfErr as Error).message);
+        console.warn("[planning] Failed to parse actual PLU PDF.", (pdfErr as Error).message);
       }
     }
 
@@ -193,92 +194,4 @@ export async function getZoningByCoords(lat: number, lng: number, commune?: stri
     console.warn("[planning] GPU API error:", (err as Error).message);
     return null;
   }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Mock fallback
-// ────────────────────────────────────────────────────────────────────────────
-function getMockZoningData(): ZoningInfo {
-  return {
-    zoneCode: "UB",
-    zoningLabel: "Zone urbaine mixte UB – Tissu résidentiel collectif et activités compatibles",
-    documentTitle: "PLU – Règlement de zone UB (version approuvée 2023)",
-    sourceUrl: "https://www.geoportail-urbanisme.gouv.fr",
-    rawText: getMockPLURulesText("UB"),
-  };
-}
-
-function getMockPLURulesText(zoneCode: string): string {
-  return `
-SECTION II - ZONE ${zoneCode}
-
-Article ${zoneCode} 1 – Occupations et utilisations du sol interdites
-
-Sont interdits :
-- Les constructions à usage industriel
-- Les entrepôts
-- Les installations classées pour la protection de l'environnement soumises à autorisation
-- Les habitations légères de loisirs et les résidences mobiles
-- L'ouverture et l'exploitation de carrières et de mines
-- Les dépôts de véhicules hors d'usage
-
-Article ${zoneCode} 2 – Occupations et utilisations du sol soumises à des conditions particulières
-
-Sont admis sous conditions :
-- Les constructions à usage d'habitation collective à condition de respecter les règles du présent règlement
-- Les commerces de proximité d'une surface de plancher inférieure à 300 m²
-- Les équipements d'intérêt collectif
-- Les installations classées soumises à déclaration compatibles avec l'habitat
-
-Article ${zoneCode} 3 – Conditions de desserte des terrains par les voies
-
-Tout terrain à construire doit être desservi par une voie publique ou privée ouverte à la circulation présentant des caractéristiques suffisantes. Les voies nouvelles doivent avoir une largeur minimale de 8 mètres. L'accès sur voie doit présenter une largeur minimale de 3,50 mètres.
-
-Article ${zoneCode} 4 – Conditions de desserte par les réseaux
-
-Toute construction doit être raccordée au réseau public d'eau potable, au réseau d'assainissement collectif, au réseau d'électricité. Les eaux pluviales doivent être gérées à la parcelle dans la mesure du possible.
-
-Article ${zoneCode} 5 – Superficie minimale des terrains constructibles
-
-Sans objet.
-
-Article ${zoneCode} 6 – Implantation des constructions par rapport aux voies et emprises publiques
-
-Les constructions doivent être implantées avec un recul minimum de 5 mètres par rapport à l'alignement des voies publiques. Cette règle peut être portée à 10 mètres pour les voies départementales.
-
-Article ${zoneCode} 7 – Implantation des constructions par rapport aux limites séparatives
-
-Les constructions doivent respecter un recul minimum de 3 mètres par rapport aux limites séparatives latérales et de fond de parcelle. En cas de construction en limite séparative, la hauteur de la façade jouxtant la limite ne peut excéder 3,50 mètres.
-
-Article ${zoneCode} 8 – Implantation des constructions les unes par rapport aux autres sur une même propriété
-
-La distance entre deux bâtiments non contigus sur une même unité foncière doit être au moins égale à la hauteur du bâtiment le plus élevé, sans pouvoir être inférieure à 4 mètres.
-
-Article ${zoneCode} 9 – Emprise au sol
-
-L'emprise au sol des constructions ne doit pas excéder 40% de la superficie du terrain.
-
-Article ${zoneCode} 10 – Hauteur maximale des constructions
-
-La hauteur maximale des constructions est fixée à 15 mètres à l'égout du toit, soit R+4+combles. Pour les constructions annexes, la hauteur est limitée à 3,50 mètres.
-
-Article ${zoneCode} 11 – Aspect extérieur
-
-Les constructions doivent s'intégrer harmonieusement dans l'environnement bâti existant. Les matériaux apparents en façade doivent être de bonne qualité. Les toitures-terrasses sont autorisées. Les couleurs vives et les revêtements brillants sont interdits en façade.
-
-Article ${zoneCode} 12 – Stationnement
-
-Il est exigé : 
-- Pour les constructions à usage d'habitation : 1 place par logement de moins de 50 m², 2 places au-delà
-- Pour les commerces : 1 place pour 40 m² de surface de vente
-- Pour les bureaux : 1 place pour 40 m² de surface de plancher
-
-Article ${zoneCode} 13 – Espaces libres et plantations
-
-Les surfaces libres de toute construction doivent représenter au minimum 20% de la superficie du terrain. Ces espaces libres doivent être plantés à raison d'un arbre de haute tige pour 100 m² d'espace libre.
-
-Article ${zoneCode} 14 – Possibilités maximales d'occupation du sol
-
-Sans objet (le COS a été supprimé par la loi ALUR du 24 mars 2014).
-`;
 }

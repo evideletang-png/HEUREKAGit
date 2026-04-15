@@ -8,6 +8,8 @@ import chatRouter from "./chat.js";
 import documentsRouter from "./documents.js";
 import mairieRouter from "./mairie.js";
 import dossiersRouter from "./dossiers.js";
+import appealsRouter from "./appeals.js";
+import tilesRouter from "./tiles.js";
 
 import notificationsRouter from "./notifications.js";
 
@@ -21,7 +23,9 @@ router.use("/analyses", chatRouter);
 router.use("/admin", adminRouter);
 router.use("/geocode", geocodeRouter);
 router.use("/documents", documentsRouter);
+router.use(tilesRouter);
 router.use("/mairie", mairieRouter);
 router.use("/dossiers", dossiersRouter);
+router.use("/appeals", appealsRouter);
 
 export default router;

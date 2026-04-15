@@ -12,6 +12,8 @@ export interface SearchFilter {
   articleId?: string; // Optional exact article target
   jurisdictionContext?: JurisdictionContext; // Mandatory for strict scoping
   includeTrace?: boolean; // Flag to enable detailed debug tracing
+  minAuthority?: number;
+  strictZone?: boolean;
 }
 
 export type ChunkMetadata = KnowledgeMetadata;
@@ -70,14 +72,34 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
   // 3. Authority Score
   const authorityScoreJson = sql<number>`COALESCE((${baseIAEmbeddingsTable.metadata}->>'source_authority')::numeric, 1)`;
 
-  // 4. Combined Score (semantic 50% + authority 30% + lexical boost 20%)
+  // 4. Document type and zone boosts to prioritize written regulations over complementary planning docs.
+  const documentTypeScore = sql<number>`CASE
+    WHEN ${baseIAEmbeddingsTable.metadata}->>'document_type' = 'plu_reglement' THEN 1.0
+    WHEN ${baseIAEmbeddingsTable.metadata}->>'document_type' = 'plu_annexe' THEN 0.6
+    WHEN ${baseIAEmbeddingsTable.metadata}->>'document_type' = 'oap' THEN 0.15
+    ELSE 0.0
+  END`;
+
+  const zoneScore = filters.zoneCode
+    ? sql<number>`CASE
+        WHEN ${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode} THEN 1.0
+        WHEN ${baseIAEmbeddingsTable.metadata}->>'zone' IS NULL THEN 0.2
+        ELSE 0.0
+      END`
+    : sql<number>`0.0`;
+
+  // 5. Combined Score
+  // Written regulation and exact-zone chunks should outrank OAP/PADD-like material even when
+  // semantic similarity is close, because buildability must be grounded in opposable text first.
   const finalScore = sql<number>`
-    (${similarityScore} * 0.5) +
-    ((${authorityScoreJson} / 10.0) * 0.3) +
-    (${lexicalScore} * 0.2)
+    (${similarityScore} * 0.42) +
+    ((${authorityScoreJson} / 10.0) * 0.23) +
+    (${lexicalScore} * 0.15) +
+    (${documentTypeScore} * 0.15) +
+    (${zoneScore} * 0.05)
   `;
 
-  // 5. BOUNDARY FILTERING
+  // 6. BOUNDARY FILTERING
   const poolIds = jurisdictionContext 
     ? [...jurisdictionContext.active_pool_ids, GLOBAL_POOL_ID]
     : [GLOBAL_POOL_ID];
@@ -87,13 +109,26 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
     or(
       inArray(sql`${baseIAEmbeddingsTable.metadata}->>'pool_id'`, poolIds),
       eq(baseIAEmbeddingsTable.municipalityId, filters.municipalityId) // Legacy fallback
-    )
+    ),
+    filters.docTypes && filters.docTypes.length > 0
+      ? inArray(sql`${baseIAEmbeddingsTable.metadata}->>'document_type'`, filters.docTypes)
+      : undefined,
+    typeof filters.minAuthority === "number"
+      ? sql`COALESCE((${baseIAEmbeddingsTable.metadata}->>'source_authority')::numeric, 1) >= ${filters.minAuthority}`
+      : undefined,
   ];
 
-  // Zone filter is NULL-inclusive: docs without zone metadata match any zone query
-  const whereClause = and(...baseConditions, filters.zoneCode ? sql`(${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode} OR ${baseIAEmbeddingsTable.metadata}->>'zone' IS NULL)` : undefined);
+  const zoneCondition = filters.zoneCode
+    ? (
+      filters.strictZone
+        ? sql`${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode}`
+        : sql`(${baseIAEmbeddingsTable.metadata}->>'zone' = ${filters.zoneCode} OR ${baseIAEmbeddingsTable.metadata}->>'zone' IS NULL)`
+    )
+    : undefined;
 
-  // 6. EXECUTE SEARCH
+  const whereClause = and(...baseConditions, zoneCondition);
+
+  // 7. EXECUTE SEARCH
   const rawResults = await db
     .select({
       id: baseIAEmbeddingsTable.id,
@@ -102,6 +137,8 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
       metadata: baseIAEmbeddingsTable.metadata,
       similarity: similarityScore,
       authority: authorityScoreJson,
+      documentTypeScore: documentTypeScore,
+      zoneScore: zoneScore,
       lexical: lexicalScore,
       finalScore: finalScore
     })
@@ -110,7 +147,7 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
     .orderBy(desc(finalScore))
     .limit(limit);
 
-  // 7. NEAR MISS DETECTION (Only if trace requested)
+  // 8. NEAR MISS DETECTION (Only if trace requested)
   let nearMisses: any[] = [];
   if (includeTrace && jurisdictionContext) {
     // Find documents from WRONG pool or WRONG status in the same municipality
@@ -135,7 +172,7 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
       .limit(5);
   }
 
-  // 8. FORMAT OUTPUT WITH TRACE
+  // 9. FORMAT OUTPUT WITH TRACE
   const finalResults = rawResults.map(r => ({
      id: r.id,
      content: r.content,
@@ -146,6 +183,8 @@ export async function queryRelevantChunks(query: string, filters: SearchFilter) 
         lexical_score: r.lexical,
         semantic_score: r.similarity,
         authority_score: r.authority / 10.0,
+        document_type_score: r.documentTypeScore,
+        zone_score: r.zoneScore,
         final_rank_score: r.finalScore,
         was_boosted: r.lexical > 0,
         exclusion_reason: undefined

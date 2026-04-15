@@ -48,3 +48,6 @@ Thumbs.db
 .cache/
 .local/
 .env
+
+# Local-only service kept outside the main repository
+services/parcel-analysis/

@@ -1,5 +1,4 @@
-import { RuleEvaluation } from "./ruleEngine.js";
-// @ts-nocheck
+import type { RuleEvaluation } from "@workspace/ai-core";
 
 export type DecisionStatus = "favorable" | "unfavorable" | "favorable_avec_prescriptions" | "sursis_a_statuer";
 
@@ -18,9 +17,9 @@ export interface DecisionOutcome {
 export function generateFormalDecision(results: RuleEvaluation[]): DecisionOutcome {
   console.log(`[DecisionService] Generating formal decision...`);
 
-  const blockingRecs = results.filter(r => r.status === "non_compliant" && r.severity === "blocking");
-  const majorRecs = results.filter(r => r.status === "non_compliant" && r.severity === "major");
-  const minorRecs = results.filter(r => r.status === "non_compliant" && r.severity === "minor");
+  const blockingRecs = results.filter(r => r.status === "non_compliant" && r.impact_level === "blocking");
+  const majorRecs = results.filter(r => r.status === "non_compliant" && r.impact_level === "major");
+  const minorRecs = results.filter(r => r.status === "non_compliant" && r.impact_level === "minor");
 
   let status: DecisionStatus = "favorable";
   const prescriptions: string[] = [];
@@ -28,13 +27,13 @@ export function generateFormalDecision(results: RuleEvaluation[]): DecisionOutco
 
   if (blockingRecs.length > 0) {
     status = "unfavorable";
-    blockingIssues.push(...blockingRecs.map(r => `Erreur: ${r.reason}`));
+    blockingIssues.push(...blockingRecs.map(r => `Erreur: ${r.justification}`));
   } else if (majorRecs.length > 0) {
     status = "favorable_avec_prescriptions";
-    prescriptions.push(...majorRecs.map(r => `Ajustement requis pour l'article ${r.article} (${r.category}).`));
+    prescriptions.push(...majorRecs.map(r => `Ajustement requis pour la règle ${r.rule_id}.`));
   } else if (minorRecs.length > 0) {
     status = "favorable";
-    prescriptions.push(...minorRecs.map(r => `Note: ${r.reason}`));
+    prescriptions.push(...minorRecs.map(r => `Note: ${r.justification}`));
   }
 
   const summary = status === "favorable" 

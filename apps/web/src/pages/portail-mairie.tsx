@@ -14,9 +14,11 @@ import { Loader2, Building, FileText, CheckCircle2, AlertTriangle, XCircle, Eye,
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from "@/components/ui/sheet";
+import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+import { ZoneFirstCalibrationModule } from "@/components/mairie/ZoneFirstCalibrationModule";
 
 type Dossier = {
   id: string;
@@ -63,6 +65,220 @@ type Dossier = {
   } | null;
 };
 
+type PluZoneReviewSection = {
+  id: string;
+  zoneCode: string;
+  parentZoneCode: string | null;
+  heading: string;
+  startPage: number | null;
+  endPage: number | null;
+  sourceText: string | null;
+  isSubZone: boolean;
+  documentType: string | null;
+  sourceAuthority: number;
+  reviewStatus: "auto" | "validated" | "to_review" | "rejected";
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  document: {
+    id: string;
+    title: string;
+    documentType: string | null;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    isOpposable: boolean | null;
+  } | null;
+};
+
+type PluZoneReviewData = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    writtenRegulationCount: number;
+    opposableDocumentCount: number;
+    zoneSectionCount: number;
+    validatedZoneCount: number;
+    pendingZoneCount: number;
+    readyStatus: "missing" | "ready" | "partial" | "needs_review";
+  };
+  sections: PluZoneReviewSection[];
+};
+
+type PluRuleReview = {
+  id: string;
+  zoneCode: string | null;
+  themeKey: string;
+  themeLabel: string;
+  title: string;
+  articleNumber: number | null;
+  sourceText: string;
+  confidence: string;
+  reviewStatus: "auto" | "validated" | "to_review" | "rejected";
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  startPage: number | null;
+  endPage: number | null;
+  valueHint?: string | null;
+  requiresManualValidation?: boolean;
+  conflictFlag?: boolean;
+  sourceExcerpt?: string | null;
+  document: {
+    id: string;
+    title: string;
+    documentType: string | null;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    isOpposable: boolean | null;
+  } | null;
+};
+
+type PluRuleReviewData = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    ruleCount: number;
+    validatedRuleCount: number;
+    pendingRuleCount: number;
+    readyStatus: "missing" | "ready" | "partial" | "needs_review";
+  };
+  rules: PluRuleReview[];
+};
+
+type PluKnowledgeSummary = {
+  commune: string;
+  municipalityId: string;
+  summary: {
+    documentCount: number;
+    structuredDocumentCount: number;
+    zoneCount: number;
+    ruleCount: number;
+    conflictCount: number;
+    manualReviewCount: number;
+  };
+  documents: Array<{
+    id: string;
+    title: string;
+    fileName: string | null;
+    documentType: string | null;
+    opposable: boolean;
+    availabilityStatus: string;
+    availabilityMessage: string;
+    textQualityLabel: string | null;
+    textQualityScore: number | null;
+    profile: {
+      id: string;
+      status: string;
+      extractionMode: string;
+      extractionReliability: number | null;
+      manualReviewRequired: boolean;
+      detectedZonesCount: number;
+      structuredTopicsCount: number;
+    } | null;
+    extractedRuleCount: number;
+  }>;
+  conflicts: Array<{
+    id: string;
+    zoneCode: string | null;
+    ruleFamily: string;
+    ruleTopic: string;
+    conflictType: string;
+    conflictSummary: string;
+    status: string;
+    requiresManualValidation: boolean;
+  }>;
+};
+
+type CalibrationZoneHints = {
+  commune: string;
+  communeId: string;
+  zones: Array<{
+    id: string;
+    zoneCode: string;
+    zoneLabel: string | null;
+    guidanceNotes: string | null;
+    searchKeywords: string[];
+    referenceStartPage: number | null;
+    referenceEndPage: number | null;
+  }>;
+};
+
+function normalizeFilterText(raw: string) {
+  return raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function inferArticleFromExcerpt(raw: string) {
+  const match = raw.match(/\b(?:ARTICLE|ART\.?)\s*(\d{1,2})\b/i);
+  return match?.[1] || null;
+}
+
+function extractKeywordHits(sourceText: string | null | undefined, keywords: string[]) {
+  if (!sourceText || keywords.length === 0) return [];
+
+  const normalizedKeywords = keywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length > 0);
+  if (normalizedKeywords.length === 0) return [];
+
+  const lines = sourceText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return normalizedKeywords.flatMap((keyword) => {
+    const normalizedKeyword = normalizeFilterText(keyword);
+    return lines.flatMap((line, index) => {
+      if (!normalizeFilterText(line).includes(normalizedKeyword)) return [];
+      const window = lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 2));
+      const snippet = window.join(" ").replace(/\s+/g, " ").trim();
+      return [{
+        keyword,
+        snippet,
+        articleCode: inferArticleFromExcerpt(snippet),
+      }];
+    });
+  }).filter((hit, index, all) => all.findIndex((candidate) => candidate.keyword === hit.keyword && candidate.snippet === hit.snippet) === index);
+}
+
+function getTextQualityBadgeMeta(label?: string) {
+  switch (label) {
+    case "excellent":
+      return { text: "Texte excellent", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "usable":
+      return { text: "Texte exploitable", className: "bg-sky-50 text-sky-700 border-sky-200" };
+    case "partial":
+      return { text: "Texte partiel", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    case "poor":
+      return { text: "Texte faible", className: "bg-orange-50 text-orange-700 border-orange-200" };
+    default:
+      return { text: "Texte absent", className: "bg-muted text-muted-foreground border-border" };
+  }
+}
+
+function getZoneReviewStatusMeta(status?: string) {
+  switch (status) {
+    case "validated":
+      return { text: "Validé", className: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2 };
+    case "to_review":
+      return { text: "À revoir", className: "bg-amber-50 text-amber-700 border-amber-200", icon: AlertTriangle };
+    case "rejected":
+      return { text: "Écarté", className: "bg-rose-50 text-rose-700 border-rose-200", icon: XCircle };
+    default:
+      return { text: "Auto-détecté", className: "bg-sky-50 text-sky-700 border-sky-200", icon: BrainCircuit };
+  }
+}
+
+function getZoneReadyMeta(status?: string) {
+  switch (status) {
+    case "ready":
+      return { text: "PLU prêt", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "partial":
+      return { text: "Prêt partiellement", className: "bg-sky-50 text-sky-700 border-sky-200" };
+    case "needs_review":
+      return { text: "Revue ciblée utile", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    default:
+      return { text: "Corpus incomplet", className: "bg-muted text-muted-foreground border-border" };
+  }
+}
+
 type DossierDetail = Dossier & {
   dossierId: string | null;
   rawText: string | null;
@@ -89,6 +305,14 @@ type DossierDetail = Dossier & {
 };
 
 type MairieSettings = {
+  citizenPortalTownHallName?: string;
+  citizenPortalAddressLine1?: string;
+  citizenPortalAddressLine2?: string;
+  citizenPortalPostalCode?: string;
+  citizenPortalCity?: string;
+  citizenPortalPhone?: string;
+  citizenPortalEmail?: string;
+  citizenPortalHours?: string;
   taRateCommunal?: number;
   taRateDept?: number;
   taxeFonciereRate?: number;
@@ -838,6 +1062,11 @@ const KB_STRUCTURE = {
         label: "Patrimoine & Environnement",
         subLabel: "ABF, Monuments, Sites classés",
         types: ["ABF perimeter", "Monuments historiques", "Site classé", "ZPPAUP/AVAP"]
+      },
+      MISC: {
+        label: "Divers",
+        subLabel: "Documents non classes automatiquement",
+        types: ["Other"]
       }
     }
   },
@@ -855,178 +1084,522 @@ const KB_STRUCTURE = {
   }
 };
 
-function DocAnalysisPanel({ doc }: { doc: any }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["doc-analysis", doc.id],
-    queryFn: async () => {
-      const r = await fetch(`/api/mairie/documents/${doc.id}/analyze`, { method: "POST", credentials: "include" });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-    staleTime: Infinity, // cached forever once generated
-  });
+type ResumableTownHallUpload = {
+  sessionId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  commune: string;
+  category?: string;
+  subCategory?: string;
+  docType?: string;
+  title?: string;
+  zone?: string;
+  receivedBytes: number;
+  totalBytes: number;
+  chunkSize: number;
+  status: "uploading" | "uploaded" | "processing" | "completed" | "failed";
+  errorMessage?: string | null;
+  documentId?: string | null;
+  updatedAt: string;
+};
 
-  return (
-    <div className="mt-6 space-y-5 overflow-y-auto">
-      {isLoading && (
-        <div className="flex items-center gap-2 text-muted-foreground text-sm">
-          <Loader2 className="w-4 h-4 animate-spin" /> Analyse IA en cours…
-        </div>
-      )}
-      {error && (
-        <p className="text-sm text-destructive">Erreur lors de l'analyse. Réessayez.</p>
-      )}
-      {data && !isLoading && (
-        <>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Type de document</p>
-            <Badge variant="secondary">{data.documentType || "Non déterminé"}</Badge>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Résumé</p>
-            <p className="text-sm leading-relaxed">{data.summary}</p>
-          </div>
-          {data.keyPoints?.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Points clés</p>
-              <ul className="space-y-1.5">
-                {data.keyPoints.map((pt: string, i: number) => (
-                  <li key={i} className="flex gap-2 text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                    {pt}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {data.zones?.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Zones couvertes</p>
-              <div className="flex flex-wrap gap-1.5">
-                {data.zones.map((z: string) => (
-                  <Badge key={z} variant="outline" className="font-mono text-xs">{z}</Badge>
-                ))}
-              </div>
-            </div>
-          )}
-          {data.restrictions?.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Restrictions principales</p>
-              <ul className="space-y-1.5">
-                {data.restrictions.map((r: string, i: number) => (
-                  <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                    {r}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
+const TOWN_HALL_UPLOADS_STORAGE_KEY = "town-hall-base-ia-uploads-v1";
+const TOWN_HALL_UPLOADS_DB_NAME = "heureka-town-hall-uploads";
+const TOWN_HALL_UPLOADS_STORE = "files";
+const DEFAULT_TOWN_HALL_CHUNK_SIZE = 5 * 1024 * 1024;
+
+function readPersistedTownHallUploads(): ResumableTownHallUpload[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TOWN_HALL_UPLOADS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePersistedTownHallUploads(items: ResumableTownHallUpload[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TOWN_HALL_UPLOADS_STORAGE_KEY, JSON.stringify(items));
+}
+
+function upsertPersistedTownHallUpload(item: ResumableTownHallUpload) {
+  const next = readPersistedTownHallUploads();
+  const idx = next.findIndex((entry) => entry.sessionId === item.sessionId);
+  if (idx >= 0) next[idx] = item;
+  else next.push(item);
+  writePersistedTownHallUploads(next);
+}
+
+function removePersistedTownHallUpload(sessionId: string) {
+  writePersistedTownHallUploads(readPersistedTownHallUploads().filter((item) => item.sessionId !== sessionId));
+}
+
+function openTownHallUploadsDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(TOWN_HALL_UPLOADS_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(TOWN_HALL_UPLOADS_STORE)) {
+        db.createObjectStore(TOWN_HALL_UPLOADS_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB unavailable"));
+  });
+}
+
+async function saveTownHallUploadBlob(sessionId: string, file: Blob) {
+  const db = await openTownHallUploadsDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(TOWN_HALL_UPLOADS_STORE, "readwrite");
+    tx.objectStore(TOWN_HALL_UPLOADS_STORE).put(file, sessionId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Blob storage failed"));
+  });
+  db.close();
+}
+
+async function loadTownHallUploadBlob(sessionId: string): Promise<Blob | null> {
+  const db = await openTownHallUploadsDb();
+  const result = await new Promise<Blob | null>((resolve, reject) => {
+    const tx = db.transaction(TOWN_HALL_UPLOADS_STORE, "readonly");
+    const request = tx.objectStore(TOWN_HALL_UPLOADS_STORE).get(sessionId);
+    request.onsuccess = () => resolve((request.result as Blob | undefined) ?? null);
+    request.onerror = () => reject(request.error || new Error("Blob read failed"));
+  });
+  db.close();
+  return result;
+}
+
+async function removeTownHallUploadBlob(sessionId: string) {
+  const db = await openTownHallUploadsDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(TOWN_HALL_UPLOADS_STORE, "readwrite");
+    tx.objectStore(TOWN_HALL_UPLOADS_STORE).delete(sessionId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("Blob cleanup failed"));
+  });
+  db.close();
+}
+
+function formatUploadBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  return `${bytes} o`;
 }
 
 function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [uploadingSlots, setUploadingSlots] = useState<Record<string, boolean>>({});
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [openItems, setOpenItems] = useState<string[]>([]);
+  const [activeUploads, setActiveUploads] = useState<ResumableTownHallUpload[]>([]);
+  const runningUploadIdsRef = useRef<Set<string>>(new Set());
 
-  const { data: docsData, isLoading } = useQuery<{ documents: any[] }>({
+  const { data: pluDocsData, isLoading: loadingPluDocs } = useQuery<{ documents: any[] }>({
     queryKey: ["mairie-documents", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/documents${currentCommune !== "all" ? `?commune=${encodeURIComponent(currentCommune)}` : ""}`),
   });
 
-  const docs = docsData?.documents || [];
+  const { data: zoneReviewsData, isLoading: loadingZoneReviews } = useQuery<PluZoneReviewData>({
+    queryKey: ["mairie-plu-zone-reviews", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-zone-reviews?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
 
-  const uploadMutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      const formData = new FormData();
-      files.forEach(f => formData.append("files", f));
-    mutationFn: async ({ file, category, subCategory, docType }: { file: File, category?: string, subCategory?: string, docType?: string }) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      if (category && category !== "auto") formData.append("category", category);
-      if (subCategory && subCategory !== "auto") formData.append("subCategory", subCategory);
-      if (docType && docType !== "auto") formData.append("documentType", docType);
-      if (currentCommune !== "all") formData.append("commune", currentCommune);
-      const r = await fetch("/api/mairie/documents", { method: "POST", credentials: "include", body: formData });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.message || `HTTP ${r.status}`);
-      return data;
+  const { data: ruleReviewsData, isLoading: loadingRuleReviews } = useQuery<PluRuleReviewData>({
+    queryKey: ["mairie-plu-rule-reviews", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-rule-reviews?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
+  const { data: knowledgeSummaryData, isLoading: loadingKnowledgeSummary } = useQuery<PluKnowledgeSummary>({
+    queryKey: ["mairie-plu-knowledge-summary", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/plu-knowledge-summary?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
+  const { data: calibrationZonesData } = useQuery<CalibrationZoneHints>({
+    queryKey: ["mairie-calibration-zones-hints", currentCommune],
+    queryFn: () => apiFetch(`/api/mairie/regulatory-calibration/zones?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all",
+  });
+
+  const scheduleDocumentsRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+    queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary"] });
+    queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
+    queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews"] });
+    [1500, 4000, 9000].forEach((delayMs) => {
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+        queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary"] });
+        queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews"] });
+        queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews"] });
+      }, delayMs);
+    });
+  };
+
+  const syncUploadState = (item: ResumableTownHallUpload) => {
+    upsertPersistedTownHallUpload(item);
+    setActiveUploads(readPersistedTownHallUploads());
+  };
+
+  const clearUploadState = async (sessionId: string) => {
+    removePersistedTownHallUpload(sessionId);
+    runningUploadIdsRef.current.delete(sessionId);
+    setActiveUploads(readPersistedTownHallUploads());
+    await removeTownHallUploadBlob(sessionId).catch(() => undefined);
+  };
+
+  const fetchServerUploadState = async (sessionId: string): Promise<ResumableTownHallUpload | null> => {
+    const response = await fetch(`/api/mairie/documents/uploads/${sessionId}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+    return {
+      sessionId: data.sessionId,
+      fileName: data.fileName,
+      fileSize: data.totalBytes,
+      mimeType: data.mimeType || "application/pdf",
+      commune: data.commune,
+      category: data.category || undefined,
+      subCategory: data.subCategory || undefined,
+      docType: data.documentType || undefined,
+      title: data.title || data.fileName,
+      zone: data.zone || undefined,
+      receivedBytes: data.receivedBytes || 0,
+      totalBytes: data.totalBytes || 0,
+      chunkSize: DEFAULT_TOWN_HALL_CHUNK_SIZE,
+      status: data.status || "uploading",
+      errorMessage: data.errorMessage || null,
+      documentId: data.documentId || null,
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
+  const resumeUpload = async (session: ResumableTownHallUpload, sourceBlob?: Blob | null) => {
+    if (runningUploadIdsRef.current.has(session.sessionId)) return;
+    runningUploadIdsRef.current.add(session.sessionId);
+
+    try {
+      const serverSession = await fetchServerUploadState(session.sessionId);
+      let currentSession = serverSession || session;
+      syncUploadState(currentSession);
+
+      if (currentSession.status === "processing" || currentSession.status === "completed") {
+        await clearUploadState(currentSession.sessionId);
+        scheduleDocumentsRefresh();
+        return;
+      }
+
+      const fileBlob = sourceBlob || await loadTownHallUploadBlob(currentSession.sessionId);
+      if (!fileBlob) {
+        currentSession = {
+          ...currentSession,
+          status: "failed",
+          errorMessage: "Le navigateur n'a plus le fichier local. Reimportez-le pour reprendre l'upload.",
+          updatedAt: new Date().toISOString(),
+        };
+        syncUploadState(currentSession);
+        return;
+      }
+
+      while (currentSession.receivedBytes < currentSession.totalBytes) {
+        const nextChunk = fileBlob.slice(
+          currentSession.receivedBytes,
+          currentSession.receivedBytes + (currentSession.chunkSize || DEFAULT_TOWN_HALL_CHUNK_SIZE),
+        );
+        const formData = new FormData();
+        formData.append("chunk", new File([nextChunk], currentSession.fileName, { type: currentSession.mimeType }));
+        formData.append("start", String(currentSession.receivedBytes));
+
+        const response = await fetch(`/api/mairie/documents/uploads/${currentSession.sessionId}/chunk`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          if (data.error === "OFFSET_MISMATCH") {
+            const reconciledSession = await fetchServerUploadState(currentSession.sessionId);
+            if (!reconciledSession) throw new Error("Impossible de resynchroniser l'upload.");
+            currentSession = reconciledSession;
+            syncUploadState(currentSession);
+            continue;
+          }
+          throw new Error(data.message || "Erreur lors de l'envoi d'un fragment.");
+        }
+
+        currentSession = {
+          ...currentSession,
+          receivedBytes: data.receivedBytes || currentSession.receivedBytes,
+          totalBytes: data.totalBytes || currentSession.totalBytes,
+          status: data.status || currentSession.status,
+          updatedAt: new Date().toISOString(),
+        };
+        syncUploadState(currentSession);
+      }
+
+      const completeResponse = await fetch(`/api/mairie/documents/uploads/${currentSession.sessionId}/complete`, {
+        method: "POST",
+      });
+      const completeData = await completeResponse.json().catch(() => ({}));
+      if (!completeResponse.ok) {
+        throw new Error(completeData.message || "Erreur lors de la finalisation de l'upload.");
+      }
+
+      toast({
+        title: "Document recu",
+        description: `${currentSession.fileName} est maintenant cote serveur. L'indexation continue meme si vous quittez cette page.`,
+      });
+      await clearUploadState(currentSession.sessionId);
+      scheduleDocumentsRefresh();
+    } catch (err: any) {
+      const failedSession: ResumableTownHallUpload = {
+        ...session,
+        status: "failed",
+        errorMessage: err?.message || "Upload interrompu.",
+        updatedAt: new Date().toISOString(),
+      };
+      syncUploadState(failedSession);
+      toast({ title: "Upload interrompu", description: failedSession.errorMessage || "Une erreur est survenue.", variant: "destructive" });
+    } finally {
+      runningUploadIdsRef.current.delete(session.sessionId);
+    }
+  };
+
+  const startUpload = async ({ files, category, subCategory, docType }: { files: File[], category?: string, subCategory?: string, docType?: string }) => {
+    for (const file of files) {
+      const initResponse = await fetch("/api/mairie/documents/uploads/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type || "application/pdf",
+          category,
+          subCategory,
+          documentType: docType,
+          commune: currentCommune !== "all" ? currentCommune : undefined,
+        }),
+      });
+      const initData = await initResponse.json().catch(() => ({}));
+      if (!initResponse.ok) {
+        throw new Error(initData.message || "Impossible d'initialiser l'upload.");
+      }
+
+      const uploadSession: ResumableTownHallUpload = {
+        sessionId: initData.sessionId,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type || "application/pdf",
+        commune: initData.targetCommune || currentCommune,
+        category,
+        subCategory,
+        docType,
+        title: file.name,
+        receivedBytes: initData.receivedBytes || 0,
+        totalBytes: initData.totalBytes || file.size,
+        chunkSize: initData.chunkSize || DEFAULT_TOWN_HALL_CHUNK_SIZE,
+        status: initData.status || "uploading",
+        updatedAt: new Date().toISOString(),
+      };
+
+      await saveTownHallUploadBlob(uploadSession.sessionId, file);
+      syncUploadState(uploadSession);
+      await resumeUpload(uploadSession, file);
+    }
+  };
+
+  const updateNoteMutation = useMutation({
+    mutationFn: async ({ id, note }: { id: string, note: string }) => {
+      const r = await fetch(`/api/mairie/documents/${id}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ explanatoryNote: note })
+      });
+      if (!r.ok) throw new Error("Update failed");
+      return r.json();
     },
-    onSuccess: (data) => {
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      toast({ title: `${data.inserted} document(s) ajouté(s)`, description: "Indexation IA en arrière-plan." });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      toast({ title: "Note sauvegardée" });
+    }
+  });
+
+  const reviewZoneMutation = useMutation({
+    mutationFn: async ({
+      id,
+      reviewStatus,
+      reviewedZoneCode,
+      reviewedStartPage,
+      reviewedEndPage,
+    }: {
+      id: string;
+      reviewStatus: "validated" | "to_review" | "rejected";
+      reviewedZoneCode?: string;
+      reviewedStartPage?: number | null;
+      reviewedEndPage?: number | null;
+    }) => {
+      return apiFetch(`/api/mairie/plu-zone-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewStatus, reviewedZoneCode, reviewedStartPage, reviewedEndPage }),
+      });
     },
-    onError: (err: any) => toast({ title: "Erreur upload", description: err.message, variant: "destructive" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      toast({ title: "Revue mise à jour" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de mettre à jour la revue.", variant: "destructive" });
+    }
+  });
+
+  const deleteZoneMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiFetch(`/api/mairie/plu-zone-reviews/${id}?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: (_payload, deletedId) => {
+      queryClient.setQueryData<PluZoneReviewData | undefined>(["mairie-plu-zone-reviews", currentCommune], (current) => {
+        if (!current) return current;
+        const nextSections = current.sections.filter((section) => section.id !== deletedId);
+        const validatedZoneCount = nextSections.filter((section) => section.reviewStatus === "validated").length;
+        const pendingZoneCount = nextSections.filter((section) => section.reviewStatus === "to_review" || section.reviewStatus === "auto").length;
+        const readyStatus = (() => {
+          if (nextSections.length === 0) return "missing" as const;
+          const criticalZonesCount = new Set(nextSections.map((section) => section.zoneCode)).size;
+          if (validatedZoneCount >= Math.max(1, criticalZonesCount)) return "ready" as const;
+          if (validatedZoneCount > 0) return "partial" as const;
+          return "needs_review" as const;
+        })();
+
+        return {
+          ...current,
+          summary: {
+            ...current.summary,
+            zoneSectionCount: nextSections.length,
+            validatedZoneCount,
+            pendingZoneCount,
+            readyStatus,
+          },
+          sections: nextSections,
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      toast({ title: "Zone supprimée", description: "La zone détectée et ses règles dérivées ont été retirées de cette base." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de supprimer cette zone détectée.", variant: "destructive" });
+    }
+  });
+
+  const resegmentDocumentMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiFetch(`/api/mairie/documents/${id}/resegment?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "POST",
+      });
+    },
+    onSuccess: (result: any) => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      toast({
+        title: "Document re-segmenté",
+        description: `${result?.sectionCount ?? 0} zone(s) et ${result?.ruleCount ?? 0} règle(s) ont été recalculées.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de re-segmenter ce document.", variant: "destructive" });
+    }
+  });
+
+  const reviewRuleMutation = useMutation({
+    mutationFn: async ({
+      id,
+      reviewStatus,
+      reviewedZoneCode,
+    }: {
+      id: string;
+      reviewStatus: "validated" | "to_review" | "rejected";
+      reviewedZoneCode?: string;
+    }) => {
+      return apiFetch(`/api/mairie/plu-rule-reviews/${id}/review?commune=${encodeURIComponent(currentCommune)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewStatus, reviewedZoneCode }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      toast({ title: "Règle mise à jour" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err?.message || "Impossible de mettre à jour la règle.", variant: "destructive" });
+    }
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE", credentials: "include" });
-      if (!r.ok) throw new Error("Erreur suppression");
+      const r = await fetch(`/api/mairie/documents/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error("Delete failed");
       return r.json();
     },
     onSuccess: () => {
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      toast({ title: "Document supprimé" });
-    },
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      toast({ title: "Supprimé", description: "Document retiré de la base." });
+    }
   });
 
-  const syncGpuMutation = useMutation({
+  const clearAllMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/mairie/gpu/sync?commune=${encodeURIComponent(currentCommune)}`, { method: "POST", credentials: "include" });
-      if (!r.ok) throw new Error("Sync GPU failed");
-      return r.json();
-    },
-    onSuccess: (data) => {
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      if (data.count > 0) {
-        toast({ title: `GPU : ${data.count} document(s) synchronisé(s)` });
-      } else {
-        toast({ title: "GPU : aucun document trouvé", description: data.message, variant: "destructive" });
-      }
-    },
-    onError: (err: any) => toast({ title: "Erreur Sync GPU", description: err.message, variant: "destructive" }),
-  });
-
-  const resetMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/mairie/documents/commune?commune=${encodeURIComponent(currentCommune)}`, {
-        method: "DELETE", credentials: "include"
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.message || "Erreur");
+      const r = await fetch(`/api/mairie/documents?commune=${encodeURIComponent(currentCommune)}`, { method: "DELETE" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.message || "Suppression globale impossible");
       return data;
     },
     onSuccess: (data) => {
-      setShowResetConfirm(false);
-      queryClient.refetchQueries({ queryKey: ["mairie-documents", currentCommune] });
-      toast({ title: `Base réinitialisée — ${data.deleted} doc(s) supprimé(s)` });
+      queryClient.invalidateQueries({ queryKey: ["mairie-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["base-ia-coverage", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-knowledge-summary", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-zone-reviews", currentCommune] });
+      queryClient.invalidateQueries({ queryKey: ["mairie-plu-rule-reviews", currentCommune] });
+      toast({ title: "Base IA nettoyée", description: `${data.deletedDocuments || 0} document(s) supprimé(s).` });
     },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+    onError: (err: any) => {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, category: string, subCategory: string, docType: string) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
     
     setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: true }));
-    uploadMutation.mutate({ file, category, subCategory, docType });
+    void startUpload({ files: Array.from(files), category, subCategory, docType })
+      .catch((err) => {
+        toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      })
+      .finally(() => {
+        setUploadingSlots(prev => ({ ...prev, [`${category}-${subCategory}-${docType}`]: false }));
+      });
+    e.currentTarget.value = "";
   };
-
-  const validSlotKeys = useMemo(() => {
-    return new Set(
-      Object.entries(KB_STRUCTURE).flatMap(([catKey, cat]) =>
-        Object.entries(cat.subCategories).flatMap(([subKey, sub]) =>
-          sub.types.map((type) => `${catKey}-${subKey}-${type}`)
-        )
-      )
-    );
-  }, []);
 
   const groupedDocs = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -1038,116 +1611,891 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     return map;
   }, [pluDocsData]);
 
-  const unmatchedDocs = useMemo(() => {
-    return (pluDocsData?.documents || []).filter((doc) => {
-      const key = `${doc.category}-${doc.subCategory}-${doc.documentType}`;
-      return !validSlotKeys.has(key);
+  const totalDocuments = pluDocsData?.documents?.length ?? 0;
+  const allDocs = pluDocsData?.documents ?? [];
+  const knowledgeConflicts = knowledgeSummaryData?.conflicts ?? [];
+  const zoneReviewSections = zoneReviewsData?.sections ?? [];
+  const zoneCalibrationMap = useMemo(() => {
+    const map = new Map<string, CalibrationZoneHints["zones"][number]>();
+    for (const zone of calibrationZonesData?.zones ?? []) {
+      map.set(zone.zoneCode.trim().toUpperCase(), zone);
+    }
+    return map;
+  }, [calibrationZonesData?.zones]);
+  const zoneReadyMeta = getZoneReadyMeta(zoneReviewsData?.summary?.readyStatus);
+  const ruleReviewItems = ruleReviewsData?.rules ?? [];
+  const ruleReadyMeta = getZoneReadyMeta(ruleReviewsData?.summary?.readyStatus);
+
+  const categorySummaries = useMemo(() => {
+    return Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => {
+      const count = Object.entries(cat.subCategories).reduce((sum, [, sub]) => {
+        return sum + sub.types.reduce((typeSum, type) => {
+          return typeSum + (groupedDocs[`${catKey}-${Object.keys(cat.subCategories).find((key) => cat.subCategories[key as keyof typeof cat.subCategories] === sub)}-${type}`] || []).length;
+        }, 0);
+      }, 0);
+
+      return {
+        value: `item-${idx}`,
+        key: catKey,
+        label: cat.label,
+        count,
+      };
     });
-  }, [pluDocsData, validSlotKeys]);
+  }, [groupedDocs]);
+
+  useEffect(() => {
+    const withDocs = categorySummaries.filter((item) => item.count > 0).map((item) => item.value);
+    setOpenItems(withDocs.length > 0 ? withDocs : ["item-0", "item-1"]);
+  }, [categorySummaries]);
+
+  useEffect(() => {
+    setActiveUploads(readPersistedTownHallUploads());
+  }, []);
+
+  useEffect(() => {
+    setActiveUploads(readPersistedTownHallUploads());
+  }, [currentCommune]);
+
+  useEffect(() => {
+    const pendingUploads = readPersistedTownHallUploads().filter((item) => {
+      if (currentCommune === "all") return true;
+      return item.commune?.toLowerCase() === currentCommune.toLowerCase();
+    });
+
+    pendingUploads.forEach((item) => {
+      if (item.status === "uploading" || item.status === "uploaded") {
+        void resumeUpload(item);
+      }
+      if (item.status === "processing" || item.status === "completed") {
+        void clearUploadState(item.sessionId);
+      }
+    });
+  }, [currentCommune]);
+
+  const visibleUploads = activeUploads.filter((item) => currentCommune === "all" || item.commune?.toLowerCase() === currentCommune.toLowerCase());
+  const hasRunningUploads = visibleUploads.some((item) => ["uploading", "uploaded", "processing"].includes(item.status));
+  const useRegulatoryCalibrationModule = true;
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
+    <div className="w-full space-y-6">
+      <input
+        id="batch-upload"
+        type="file"
+        className="hidden"
+        multiple
+        accept=".pdf"
+        onChange={(e) => {
+          const files = e.target.files;
+          if (!files || files.length === 0) return;
+          void startUpload({ files: Array.from(files) }).catch((err) => {
+            toast({ title: "Erreur", description: err.message, variant: "destructive" });
+          });
+          e.currentTarget.value = "";
+        }}
+      />
+
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <HardDrive className="w-6 h-6 text-primary" />
-            Base de Connaissances IA
+            Base de Connaissances Urbanisme
           </h2>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            {currentCommune !== "all" ? `Commune de ${currentCommune}` : "Tous les territoires"}
-            {" · "}
-            <span className="font-medium text-foreground">{docs.length} document{docs.length !== 1 ? "s" : ""} indexé{docs.length !== 1 ? "s" : ""}</span>
+          <p className="text-muted-foreground">
+            Structurez les documents réglementaires pour {currentCommune === "all" ? "tous les territoires" : `la commune de ${currentCommune}`}.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => syncGpuMutation.mutate()}
-            disabled={syncGpuMutation.isPending || currentCommune === "all"}>
-            {syncGpuMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RefreshCw className="w-4 h-4 mr-1.5 text-emerald-600" />}
-            Sync GPU
+        
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            className="gap-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/5 h-10 px-4"
+            onClick={() => document.getElementById('batch-upload')?.click()}
+            disabled={hasRunningUploads || currentCommune === "all"}
+          >
+            <UploadCloud className="w-4 h-4 text-primary" />
+            Importer des documents
           </Button>
-          <Button size="sm" onClick={() => document.getElementById("doc-upload")?.click()}
-            disabled={uploadMutation.isPending}>
-            {uploadMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <UploadCloud className="w-4 h-4 mr-1.5" />}
-            {uploadMutation.isPending ? "Envoi…" : "Ajouter des documents"}
-            <input id="doc-upload" type="file" className="hidden" multiple accept=".pdf,.PDF"
-              onChange={(e) => {
-                if (e.target.files?.length) { uploadMutation.mutate(Array.from(e.target.files)); e.target.value = ""; }
-              }} />
-                const files = e.target.files;
-                if (!files || files.length === 0) return;
-                Array.from(files).forEach(file => {
-                  uploadMutation.mutate({ file });
-                });
-              }}
-            />
+
+          <Button
+            variant="outline"
+            className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/5 h-10 px-4"
+            disabled={clearAllMutation.isPending || currentCommune === "all"}
+            onClick={() => {
+              if (currentCommune === "all") return;
+              if (!confirm(`Supprimer tous les documents Base IA de ${currentCommune} ? Cette action est irréversible.`)) return;
+              clearAllMutation.mutate();
+            }}
+          >
+            {clearAllMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            Tout supprimer
           </Button>
-          {currentCommune !== "all" && (
-            <Button variant="outline" size="sm"
-              className="text-destructive border-destructive/30 hover:bg-destructive/5"
-              onClick={() => setShowResetConfirm(true)}>
-              <Trash2 className="w-4 h-4 mr-1.5" /> Réinitialiser
-            </Button>
-          )}
         </div>
       </div>
 
-      {/* ── Document list ── */}
-      {isLoading ? (
-        <div className="flex items-center gap-2 text-muted-foreground py-8">
-          <Loader2 className="w-5 h-5 animate-spin" /> Chargement…
-        </div>
-      ) : docs.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center py-16 text-center gap-3">
-          <HardDrive className="w-12 h-12 text-muted-foreground/30" />
-          <div>
-            <p className="font-medium text-muted-foreground">Aucun document chargé</p>
-            <p className="text-sm text-muted-foreground/70 mt-1">
-              Utilisez "Ajouter des documents" ou "Sync GPU" pour commencer.
-            </p>
+      <Card className="border-primary/20 bg-primary/5">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base flex items-center gap-2">
+            <UploadCloud className="w-4 h-4 text-primary" />
+            Onboarding Base IA
+          </CardTitle>
+          <CardDescription>
+            Le flux automatique GPU a ete retire. La source officielle de la base PLU est maintenant l'import manuel des documents souhaites pendant l'onboarding mairie.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="grid gap-2 text-sm text-muted-foreground">
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5">1</Badge>
+              <span>Selectionnez la commune puis importez les reglements, plans de zonage, annexes et servitudes utiles.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5">2</Badge>
+              <span>Chaque document importe est indexe automatiquement pour alimenter l'analyse et l'assistant IA.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <Badge variant="secondary" className="mt-0.5">3</Badge>
+              <span>{currentCommune === "all" ? "Choisissez d'abord une commune pour importer un corpus cible." : totalDocuments > 0 ? `${totalDocuments} document(s) deja presents dans cette base.` : "Aucun document indexe pour cette commune pour le moment."}</span>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="rounded-xl border bg-card divide-y overflow-hidden">
-          {docs.map(doc => (
-            <div key={doc.id}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 cursor-pointer group transition-colors"
-              onClick={() => setSelectedDoc(doc)}>
-              <div className="p-2 rounded-lg bg-primary/5 text-primary shrink-0">
-                <FileText className="w-4 h-4" />
+
+          <Button
+            className="gap-2 h-10 px-4"
+            onClick={() => document.getElementById("batch-upload")?.click()}
+            disabled={hasRunningUploads || currentCommune === "all"}
+          >
+            {hasRunningUploads ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+            Importer mes documents PLU
+          </Button>
+        </CardContent>
+      </Card>
+
+      {useRegulatoryCalibrationModule && currentCommune !== "all" && (
+        <ZoneFirstCalibrationModule
+          currentCommune={currentCommune}
+          documents={allDocs}
+        />
       )}
 
-      {unmatchedDocs.length > 0 && (
-        <Card className="border-amber-500/20 bg-amber-500/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-              Documents hors classification ({unmatchedDocs.length})
-            </CardTitle>
-            <CardDescription>
-              Ces documents existent bien mais ne correspondent à aucune case du tableau ci-dessous.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {unmatchedDocs.slice(0, 6).map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold truncate">{doc.title}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">
-                    {doc.category || "—"} / {doc.subCategory || "—"} / {doc.documentType || "—"}
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedDoc(doc)}>Voir</Button>
+      {!useRegulatoryCalibrationModule && currentCommune !== "all" && (
+        <Card className="border-primary/15 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-primary" />
+                  Santé documentaire réglementaire
+                </CardTitle>
+                <CardDescription>
+                  Cette vue montre ce que le moteur a réellement structuré : documents profilés, zones détectées, règles canoniques et conflits à arbitrer.
+                </CardDescription>
               </div>
-            ))}
-            {unmatchedDocs.length > 6 && (
-              <p className="text-[11px] text-muted-foreground">+ {unmatchedDocs.length - 6} autre(s) document(s).</p>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingKnowledgeSummary ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Lecture de la base réglementaire structurée...
+              </div>
+            ) : knowledgeSummaryData ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Documents</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.documentCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Profils structurés</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.structuredDocumentCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.zoneCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles canoniques</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.ruleCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Conflits</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.conflictCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Revue manuelle</div>
+                    <div className="mt-1 text-2xl font-bold">{knowledgeSummaryData.summary.manualReviewCount}</div>
+                  </div>
+                </div>
+
+                {knowledgeSummaryData.documents.length > 0 && (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {knowledgeSummaryData.documents.slice(0, 4).map((doc) => (
+                      <div key={doc.id} className="rounded-xl border bg-background p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                            {doc.documentType || "Document"}
+                          </Badge>
+                          {doc.textQualityLabel && (
+                            <Badge variant="outline" className={getTextQualityBadgeMeta(doc.textQualityLabel).className}>
+                              {getTextQualityBadgeMeta(doc.textQualityLabel).text}
+                            </Badge>
+                          )}
+                          {doc.profile?.manualReviewRequired && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                              Revue utile
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="mt-3 text-sm font-semibold">{doc.title}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{doc.availabilityMessage}</p>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                          <div className="rounded-lg bg-muted/20 p-2">
+                            <div className="uppercase tracking-wide text-muted-foreground">Zones</div>
+                            <div className="mt-1 font-semibold">{doc.profile?.detectedZonesCount ?? 0}</div>
+                          </div>
+                          <div className="rounded-lg bg-muted/20 p-2">
+                            <div className="uppercase tracking-wide text-muted-foreground">Thèmes</div>
+                            <div className="mt-1 font-semibold">{doc.profile?.structuredTopicsCount ?? 0}</div>
+                          </div>
+                          <div className="rounded-lg bg-muted/20 p-2">
+                            <div className="uppercase tracking-wide text-muted-foreground">Règles</div>
+                            <div className="mt-1 font-semibold">{doc.extractedRuleCount}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="rounded-xl border bg-muted/10 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Conflits documentaires détectés</p>
+                      <p className="text-xs text-muted-foreground">
+                        Le moteur ne tranche pas silencieusement : si deux règles se contredisent, elles remontent ici pour arbitrage.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={knowledgeConflicts.length > 0 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}>
+                      {knowledgeConflicts.length > 0 ? `${knowledgeConflicts.length} conflit(s)` : "Aucun conflit ouvert"}
+                    </Badge>
+                  </div>
+
+                  {knowledgeConflicts.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {knowledgeConflicts.map((conflict) => (
+                        <div key={conflict.id} className="rounded-lg border bg-background px-3 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {conflict.zoneCode && (
+                              <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                                Zone {conflict.zoneCode}
+                              </Badge>
+                            )}
+                            <Badge variant="secondary" className="text-[10px]">
+                              {conflict.ruleTopic}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-sm">{conflict.conflictSummary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                Sélectionne une commune pour lire la base documentaire structurée.
+              </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      <Accordion type="multiple" defaultValue={["item-0", "item-1"]} className="space-y-4">
+      {!useRegulatoryCalibrationModule && currentCommune !== "all" && (
+        <Card className="border-primary/15 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-primary" />
+                  Zones PLU détectées
+                </CardTitle>
+                <CardDescription>
+                  Le système propose les plages de pages et l’héritage des zones. L’idée est de confirmer vite les points sensibles, pas de reconfigurer tout le PLU.
+                </CardDescription>
+              </div>
+              <Badge variant="outline" className={zoneReadyMeta.className}>
+                {zoneReadyMeta.text}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingZoneReviews ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Lecture des zones détectées...
+              </div>
+            ) : zoneReviewsData ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règlements écrits</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.writtenRegulationCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Documents opposables</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.opposableDocumentCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones détectées</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.zoneSectionCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Zones validées</div>
+                    <div className="mt-1 text-2xl font-bold">{zoneReviewsData.summary.validatedZoneCount}</div>
+                  </div>
+                </div>
+
+                {zoneReviewSections.length > 0 ? (
+                  <div className="space-y-3">
+                    {zoneReviewSections.map((section) => {
+                      const statusMeta = getZoneReviewStatusMeta(section.reviewStatus);
+                      const StatusIcon = statusMeta.icon;
+                      const linkedDoc = section.document?.id ? allDocs.find((doc) => doc.id === section.document?.id) : null;
+                      const configuredZone = zoneCalibrationMap.get(section.zoneCode.trim().toUpperCase()) || null;
+                      const zoneKeywords = configuredZone?.searchKeywords || [];
+                      const keywordHits = extractKeywordHits(section.sourceText, zoneKeywords);
+                      return (
+                        <div key={section.id} className="rounded-xl border bg-background p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="space-y-2 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                                  Zone {section.zoneCode}
+                                </Badge>
+                                {section.parentZoneCode && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    Hérite de {section.parentZoneCode}
+                                  </Badge>
+                                )}
+                                {section.isSubZone && (
+                                  <Badge variant="secondary" className="text-[10px]">
+                                    Sous-zone
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className={statusMeta.className}>
+                                  <StatusIcon className="mr-1 h-3 w-3" />
+                                  {statusMeta.text}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">{section.heading}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Pages {section.startPage ?? "?"}{section.endPage && section.endPage !== section.startPage ? ` à ${section.endPage}` : ""}
+                                  {section.document?.title ? ` · ${section.document.title}` : ""}
+                                </p>
+                              </div>
+                              {section.document && (
+                                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                  {section.document.textQualityLabel && (
+                                    <Badge variant="outline" className={getTextQualityBadgeMeta(section.document.textQualityLabel).className}>
+                                      {getTextQualityBadgeMeta(section.document.textQualityLabel).text}
+                                      {typeof section.document.textQualityScore === "number" ? ` · ${section.document.textQualityScore}%` : ""}
+                                    </Badge>
+                                  )}
+                                  {section.document.isOpposable && (
+                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                      Opposable
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+                              {section.reviewNotes && (
+                                <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+                                  {section.reviewNotes}
+                                </p>
+                              )}
+                              {zoneKeywords.length > 0 && (
+                                <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">
+                                    Guidage actif
+                                  </p>
+                                  {(configuredZone?.referenceStartPage || configuredZone?.referenceEndPage) && (
+                                    <p className="mt-2 text-[11px] text-sky-800/90">
+                                      Pages de référence :
+                                      {" "}
+                                      {configuredZone?.referenceStartPage || "?"}
+                                      {configuredZone?.referenceEndPage && configuredZone.referenceEndPage !== configuredZone.referenceStartPage ? ` à ${configuredZone.referenceEndPage}` : ""}
+                                    </p>
+                                  )}
+                                  {configuredZone?.guidanceNotes && (
+                                    <p className="mt-2 text-[11px] text-sky-800/90">
+                                      {configuredZone.guidanceNotes}
+                                    </p>
+                                  )}
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {zoneKeywords.map((keyword) => (
+                                      <Badge key={`${section.id}-${keyword}`} variant="outline" className="border-sky-200 bg-sky-50 text-sky-800">
+                                        {keyword}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {configuredZone && keywordHits.length > 0 && (
+                                <div className="rounded-lg border border-primary/15 bg-primary/[0.03] px-3 py-3">
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                                    Textes retrouvés via les filtres
+                                  </p>
+                                  <div className="mt-3 space-y-2">
+                                    {keywordHits.slice(0, 6).map((hit, index) => (
+                                      <div key={`${section.id}-${hit.keyword}-${index}`} className="rounded-lg border bg-background px-3 py-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Badge variant="outline" className="text-[10px]">{hit.keyword}</Badge>
+                                          {hit.articleCode && (
+                                            <Badge variant="secondary" className="text-[10px]">
+                                              Art. {hit.articleCode}
+                                            </Badge>
+                                          )}
+                                        </div>
+                                        <p className="mt-2 text-xs text-foreground/85">{hit.snippet}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {configuredZone && zoneKeywords.length > 0 && keywordHits.length === 0 && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[11px] text-amber-800">
+                                  Aucun extrait n’a encore été retrouvé avec les mots-clés configurés dans cette zone. Ajuste les mots-clés ou les pages de référence si besoin.
+                                </div>
+                              )}
+                              {!configuredZone && (
+                                <div className="rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                                  Cette zone détectée n’est pas encore reliée à une zone calibrée dans l’onglet `Zones`. Configure-la pour voir les pages de référence, les mots-clés et les extraits filtrés ici.
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 lg:justify-end">
+                              {linkedDoc && (
+                                <>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setSelectedDoc(linkedDoc)}
+                                  >
+                                    <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                    Ouvrir
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="border-primary/20 text-primary hover:bg-primary/5"
+                                    disabled={resegmentDocumentMutation.isPending}
+                                    onClick={() => resegmentDocumentMutation.mutate(linkedDoc.id)}
+                                  >
+                                    {resegmentDocumentMutation.isPending ? (
+                                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                                    )}
+                                    Re-segmenter
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-primary/20 text-primary hover:bg-primary/5"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => {
+                                  const reviewedZoneCode = window.prompt("Zone correcte pour cette section", section.zoneCode || "");
+                                  if (reviewedZoneCode == null) return;
+                                  const reviewedStartPageInput = window.prompt(
+                                    "Page de début correcte",
+                                    section.startPage != null ? String(section.startPage) : "",
+                                  );
+                                  if (reviewedStartPageInput == null) return;
+                                  const reviewedEndPageInput = window.prompt(
+                                    "Page de fin correcte",
+                                    section.endPage != null ? String(section.endPage) : reviewedStartPageInput,
+                                  );
+                                  if (reviewedEndPageInput == null) return;
+                                  const reviewedStartPage = reviewedStartPageInput.trim().length > 0
+                                    ? Number.parseInt(reviewedStartPageInput, 10)
+                                    : null;
+                                  const reviewedEndPage = reviewedEndPageInput.trim().length > 0
+                                    ? Number.parseInt(reviewedEndPageInput, 10)
+                                    : null;
+                                  reviewZoneMutation.mutate({
+                                    id: section.id,
+                                    reviewStatus: "to_review",
+                                    reviewedZoneCode,
+                                    reviewedStartPage: Number.isFinite(reviewedStartPage) ? reviewedStartPage : null,
+                                    reviewedEndPage: Number.isFinite(reviewedEndPage) ? reviewedEndPage : null,
+                                  });
+                                }}
+                              >
+                                <MapPin className="mr-1.5 h-3.5 w-3.5" />
+                                Corriger zone
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "validated" })}
+                              >
+                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                                Valider
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "to_review" })}
+                              >
+                                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+                                À revoir
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={reviewZoneMutation.isPending}
+                                onClick={() => reviewZoneMutation.mutate({ id: section.id, reviewStatus: "rejected" })}
+                              >
+                                <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                Écarter
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-destructive/20 text-destructive hover:bg-destructive/5"
+                                disabled={deleteZoneMutation.isPending}
+                                onClick={() => {
+                                  const confirmed = window.confirm(`Supprimer définitivement la zone ${section.zoneCode} détectée dans ce document ?`);
+                                  if (!confirmed) return;
+                                  deleteZoneMutation.mutate(section.id);
+                                }}
+                              >
+                                {deleteZoneMutation.isPending ? (
+                                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                )}
+                                Supprimer
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Aucune zone PLU n’a encore été détectée dans ce corpus. Réimporte le règlement écrit ou laisse l’ingestion le resegmenter.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                Sélectionne une commune pour lire les zones PLU détectées.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!useRegulatoryCalibrationModule && currentCommune !== "all" && (
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Scale className="w-4 h-4 text-primary" />
+                  Règles critiques proposées
+                </CardTitle>
+                <CardDescription>
+                  Le système isole les règles utiles pour la constructibilité. Tu confirmes seulement les extraits vraiment décisifs.
+                </CardDescription>
+              </div>
+              <Badge variant="outline" className={ruleReadyMeta.className}>
+                {ruleReadyMeta.text}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loadingRuleReviews ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Lecture des règles critiques...
+              </div>
+            ) : ruleReviewsData ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles proposées</div>
+                    <div className="mt-1 text-2xl font-bold">{ruleReviewsData.summary.ruleCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles validées</div>
+                    <div className="mt-1 text-2xl font-bold">{ruleReviewsData.summary.validatedRuleCount}</div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Règles à confirmer</div>
+                    <div className="mt-1 text-2xl font-bold">{ruleReviewsData.summary.pendingRuleCount}</div>
+                  </div>
+                </div>
+
+                {ruleReviewItems.length > 0 ? (
+                  <div className="space-y-3">
+                    {ruleReviewItems.map((rule) => {
+                      const statusMeta = getZoneReviewStatusMeta(rule.reviewStatus);
+                      const StatusIcon = statusMeta.icon;
+                      const linkedDoc = rule.document?.id ? allDocs.find((doc) => doc.id === rule.document?.id) : null;
+                      return (
+                        <div key={rule.id} className="rounded-xl border bg-background p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="space-y-2 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                                  {rule.zoneCode ? `Zone ${rule.zoneCode}` : "Zone globale"}
+                                </Badge>
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {rule.themeLabel}
+                                </Badge>
+                                {typeof rule.articleNumber === "number" && rule.articleNumber > 0 && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    Art. {rule.articleNumber}
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className={statusMeta.className}>
+                                  <StatusIcon className="mr-1 h-3 w-3" />
+                                  {statusMeta.text}
+                                </Badge>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold">{rule.title}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {rule.document?.title ? `${rule.document.title} · ` : ""}
+                                  Pages {rule.startPage ?? "?"}{rule.endPage && rule.endPage !== rule.startPage ? ` à ${rule.endPage}` : ""}
+                                </p>
+                              </div>
+                              <div className="rounded-lg bg-muted/20 px-3 py-2 text-sm text-foreground/90">
+                                {rule.sourceText}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                <Badge variant="outline">
+                                  Confiance {rule.confidence || "low"}
+                                </Badge>
+                                {rule.valueHint && (
+                                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                    Valeur {rule.valueHint}
+                                  </Badge>
+                                )}
+                                {rule.conflictFlag && (
+                                  <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">
+                                    Conflit détecté
+                                  </Badge>
+                                )}
+                                {rule.requiresManualValidation && (
+                                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                                    Validation recommandée
+                                  </Badge>
+                                )}
+                                {rule.document?.textQualityLabel && (
+                                  <Badge variant="outline" className={getTextQualityBadgeMeta(rule.document.textQualityLabel).className}>
+                                    {getTextQualityBadgeMeta(rule.document.textQualityLabel).text}
+                                  </Badge>
+                                )}
+                              </div>
+                              {rule.sourceExcerpt && rule.sourceExcerpt !== rule.sourceText && (
+                                <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+                                  Extrait source : {rule.sourceExcerpt}
+                                </p>
+                              )}
+                              {rule.reviewNotes && (
+                                <p className="text-xs text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+                                  {rule.reviewNotes}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 lg:justify-end">
+                              {linkedDoc && (
+                                <Button variant="outline" size="sm" onClick={() => setSelectedDoc(linkedDoc)}>
+                                  <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                  Ouvrir
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-primary/20 text-primary hover:bg-primary/5"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => {
+                                  const reviewedZoneCode = window.prompt("Zone correcte pour cette règle", rule.zoneCode || "");
+                                  if (reviewedZoneCode == null) return;
+                                  reviewRuleMutation.mutate({
+                                    id: rule.id,
+                                    reviewStatus: "to_review",
+                                    reviewedZoneCode,
+                                  });
+                                }}
+                              >
+                                <MapPin className="mr-1.5 h-3.5 w-3.5" />
+                                Corriger zone
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => reviewRuleMutation.mutate({ id: rule.id, reviewStatus: "validated" })}
+                              >
+                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                                Valider
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => reviewRuleMutation.mutate({ id: rule.id, reviewStatus: "to_review" })}
+                              >
+                                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+                                À revoir
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                                disabled={reviewRuleMutation.isPending}
+                                onClick={() => reviewRuleMutation.mutate({ id: rule.id, reviewStatus: "rejected" })}
+                              >
+                                <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                Écarter
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Aucune règle critique n’a encore été stabilisée. L’ingestion continuera à en proposer dès que les unités réglementaires seront assez propres.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                Sélectionne une commune pour lire les règles critiques proposées.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {visibleUploads.length > 0 && (
+        <Card className="border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Uploads en cours ou reprenables ({visibleUploads.length})
+            </CardTitle>
+            <CardDescription>
+              Une fois le fichier entierement recu par le serveur, l'indexation continue cote API. Si tu reviens sur cette page apres un refresh, l'upload reprend automatiquement depuis le dernier chunk valide.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {visibleUploads.map((upload) => {
+              const progress = upload.totalBytes > 0 ? Math.min(100, Math.round((upload.receivedBytes / upload.totalBytes) * 100)) : 0;
+              const isRecoverable = upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded";
+              return (
+                <div key={upload.sessionId} className="rounded-xl border bg-background p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{upload.fileName}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {upload.commune} · {formatUploadBytes(upload.receivedBytes)} / {formatUploadBytes(upload.totalBytes)}
+                      </p>
+                    </div>
+                    <Badge variant={upload.status === "failed" ? "destructive" : "secondary"} className="shrink-0">
+                      {upload.status === "failed" ? "Interrompu" : upload.status === "processing" ? "Indexation" : `${progress}%`}
+                    </Badge>
+                  </div>
+                  <Progress value={upload.status === "processing" ? 100 : progress} className="h-2" />
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-muted-foreground">
+                      {upload.errorMessage || (upload.status === "processing"
+                        ? "Le fichier est cote serveur. L'indexation peut continuer meme si tu quittes la page."
+                        : "Le navigateur memorise le fichier pour reprendre l'envoi apres refresh.")}
+                    </p>
+                    {isRecoverable && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void resumeUpload(upload)}
+                        disabled={runningUploadIdsRef.current.has(upload.sessionId)}
+                      >
+                        Reprendre
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {!useRegulatoryCalibrationModule && allDocs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FileText className="w-4 h-4 text-primary" />
+              Documents indexes ({allDocs.length})
+            </CardTitle>
+            <CardDescription>
+              Chaque document compte dans le total ci-dessus et reste ouvrable ici, meme s'il est range dans une categorie repliee.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {allDocs.map((doc) => (
+              <div
+                key={doc.id}
+                className="flex items-center justify-between rounded-lg border bg-background px-3 py-2 cursor-pointer hover:border-primary/30 transition-colors"
+                onClick={() => setSelectedDoc(doc)}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{doc.title}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {doc.category} / {doc.subCategory} / {doc.documentType}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {doc.textQualityLabel && (
+                    <Badge variant="outline" className={`text-[10px] ${getTextQualityBadgeMeta(doc.textQualityLabel).className}`}>
+                      {getTextQualityBadgeMeta(doc.textQualityLabel).text}
+                    </Badge>
+                  )}
+                  {doc.availabilityStatus !== "indexed" && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {doc.availabilityStatus}
+                    </Badge>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedDoc(doc); }}>
+                    Voir
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <Accordion type="multiple" value={openItems} onValueChange={setOpenItems} className="space-y-4">
         {Object.entries(KB_STRUCTURE).map(([catKey, cat], idx) => (
           <AccordionItem key={catKey} value={`item-${idx}`} className="border rounded-xl bg-card overflow-hidden shadow-sm">
             <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors border-b">
@@ -1156,7 +2504,12 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   <cat.icon className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="font-bold text-base">{cat.label}</div>
+                  <div className="font-bold text-base flex items-center gap-2">
+                    {cat.label}
+                    {categorySummaries[idx]?.count > 0 && (
+                      <Badge variant="secondary" className="text-[10px]">{categorySummaries[idx].count}</Badge>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground font-normal">Classification IA activée</div>
                 </div>
               </div>
@@ -1191,6 +2544,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                   <input 
                                     type="file" 
                                     className="absolute inset-0 opacity-0 cursor-pointer" 
+                                    multiple
                                     accept=".pdf,image/*" 
                                     onChange={(e) => handleFileUpload(e, catKey, subKey, type)}
                                     disabled={isUploading}
@@ -1252,56 +2606,203 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   </div>
                 ))}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{doc.title || doc.fileName}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {doc.commune && <span className="mr-2">{doc.commune}</span>}
-                  {format(new Date(doc.createdAt), "d MMM yyyy", { locale: fr })}
-                </p>
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+
+      {/* MODAL DE DÉTAILS ET PRÉVISUALISATION PDF */}
+      {!useRegulatoryCalibrationModule && (
+      <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>
+        <SheetContent side="right" className="sm:max-w-[80vw] p-0 overflow-hidden flex flex-col">
+          <SheetHeader className="p-6 border-b bg-muted/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <FileText className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <SheetTitle className="text-lg font-bold">{selectedDoc?.title}</SheetTitle>
+                  <SheetDescription className="text-xs">
+                    {selectedDoc?.category} › {selectedDoc?.subCategory} › {selectedDoc?.documentType}
+                  </SheetDescription>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Badge variant="outline" className="text-[10px] hidden sm:flex">Analyser</Badge>
-                <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 text-destructive h-7 w-7 p-0"
-                  onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(doc.id); }}>
-                  <Trash2 className="w-3.5 h-3.5" />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-2"
+                  onClick={() => window.open(`/api/mairie/documents/${selectedDoc?.id}/view`, '_blank')}
+                  disabled={selectedDoc?.hasStoredFile === false}
+                >
+                  <Zap className="w-3.5 h-3.5" /> Ouvrir plein écran
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-2"
+                  onClick={() => selectedDoc?.id && resegmentDocumentMutation.mutate(selectedDoc.id)}
+                  disabled={!selectedDoc?.id || resegmentDocumentMutation.isPending}
+                >
+                  {resegmentDocumentMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                  Re-segmenter
                 </Button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Document detail / analysis sheet ── */}
-      <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-          <SheetHeader className="pr-6">
-            <SheetTitle className="text-base leading-snug break-words">{selectedDoc?.title || selectedDoc?.fileName}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {selectedDoc?.commune && <span className="mr-2">{selectedDoc.commune}</span>}
-              {selectedDoc && format(new Date(selectedDoc.createdAt), "d MMMM yyyy", { locale: fr })}
-            </SheetDescription>
           </SheetHeader>
-          {selectedDoc && <DocAnalysisPanel doc={selectedDoc} />}
-        </SheetContent>
-      </Sheet>
+          
+          <div className="flex-1 flex overflow-hidden">
+            {/* GAUCHE: PDF PREVIEW */}
+            <div className="flex-1 bg-muted/30 relative">
+              {selectedDoc?.hasStoredFile === false ? (
+                <div className="absolute inset-0 overflow-auto p-8">
+                  <div className="mx-auto flex h-full max-w-4xl flex-col gap-6">
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">
+                      <AlertTriangle className="w-8 h-8 mb-3 text-amber-600" />
+                      <h4 className="font-semibold mb-2">Fichier source indisponible</h4>
+                      <p className="text-sm leading-relaxed">
+                        {selectedDoc?.availabilityMessage || "Le PDF n'est plus present sur le disque. Reimporte ce document pour retrouver la previsualisation et son contenu source."}
+                      </p>
+                    </div>
 
-      {/* ── Reset confirmation ── */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="bg-card rounded-xl border shadow-2xl p-6 max-w-sm w-full mx-4 space-y-4">
-            <h3 className="font-bold text-lg">Réinitialiser la base ?</h3>
-            <p className="text-sm text-muted-foreground">
-              Tous les documents de <strong>{currentCommune}</strong> seront supprimés définitivement.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <Button variant="outline" onClick={() => setShowResetConfirm(false)}>Annuler</Button>
-              <Button variant="destructive" disabled={resetMutation.isPending} onClick={() => resetMutation.mutate()}>
-                {resetMutation.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                Tout supprimer
-              </Button>
+                    {selectedDoc?.rawTextPreview ? (
+                      <div className="rounded-2xl border bg-background shadow-sm">
+                        <div className="border-b px-5 py-3">
+                          <p className="text-sm font-semibold">Texte indexé disponible</p>
+                          <p className="text-xs text-muted-foreground">
+                            La prévisualisation PDF est absente, mais voici un extrait du texte réellement exploité par le moteur.
+                          </p>
+                        </div>
+                        <div className="max-h-[70vh] overflow-auto px-5 py-4">
+                          <pre className="whitespace-pre-wrap text-xs leading-6 text-foreground/90">
+                            {selectedDoc.rawTextPreview}
+                          </pre>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed bg-background/80 p-6 text-sm text-muted-foreground">
+                        Aucun extrait texte n'est disponible pour ce document. Une réimportation du fichier est recommandée.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : selectedDoc ? (
+                <iframe 
+                  src={`/api/mairie/documents/${selectedDoc.id}/view#toolbar=0`} 
+                  className="w-full h-full border-none"
+                  title="PDF Preview"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Loader2 className="w-10 h-10 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            </div>
+
+            {/* DROITE: MÉTADONNÉES & IA */}
+            <div className="w-[350px] border-l bg-background p-6 space-y-6 overflow-y-auto">
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold flex items-center gap-2 border-b pb-2">
+                  <BrainCircuit className="w-4 h-4 text-primary" />
+                  Analyse IA du Document
+                </h4>
+                
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Note Explicative (Synthèse)</label>
+                    <Textarea 
+                      className="text-xs min-h-[120px] bg-muted/10 italic leading-relaxed"
+                      placeholder="L'IA génère ici une note synthétique du contenu..."
+                      defaultValue={selectedDoc?.explanatoryNote}
+                      onBlur={(e) => {
+                        if (e.target.value !== selectedDoc?.explanatoryNote) {
+                          updateNoteMutation.mutate({ id: selectedDoc.id, note: e.target.value });
+                        }
+                      }}
+                    />
+                    <p className="text-[9px] text-muted-foreground italic">
+                      Cette note sera affichée dans la liste des documents pour faciliter la navigation.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t">
+                <h4 className="text-sm font-bold flex items-center gap-2 border-b pb-2">
+                  <Settings className="w-4 h-4 text-muted-foreground" />
+                  Métadonnées Réglementaires
+                </h4>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Classification</label>
+                    <div className="grid grid-cols-1 gap-2">
+                      <div className="p-2 bg-muted/30 rounded border text-[10px] font-bold">
+                        ORIGINE : {selectedDoc?.category} / {selectedDoc?.documentType}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedDoc?.textQualityLabel && (
+                          <Badge variant="outline" className={getTextQualityBadgeMeta(selectedDoc.textQualityLabel).className}>
+                            {getTextQualityBadgeMeta(selectedDoc.textQualityLabel).text}
+                            {typeof selectedDoc?.textQualityScore === "number" ? ` · ${selectedDoc.textQualityScore}%` : ""}
+                          </Badge>
+                        )}
+                        {selectedDoc?.hasVisualRegulatoryAnalysis && (
+                          <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200">
+                            OCR / vision renforcée
+                          </Badge>
+                        )}
+                        {selectedDoc?.extractionHint === "written_regulation" && (
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+                            Règlement écrit prioritaire
+                          </Badge>
+                        )}
+                      </div>
+                      {selectedDoc?.textQualityMessage && (
+                        <div className="p-2 bg-muted/20 rounded border text-[11px] text-muted-foreground leading-relaxed">
+                          {selectedDoc.textQualityMessage}
+                        </div>
+                      )}
+                      {selectedDoc?.textQualityLabel === "poor" && (
+                        <div className="p-2 rounded border border-amber-200 bg-amber-50 text-[11px] text-amber-800 leading-relaxed">
+                          Ce document est probablement scanné ou mal extrait. Réuploade-le ou relance une analyse vision pour améliorer les règles récupérées.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Date d'Indexation</label>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {selectedDoc && format(new Date(selectedDoc.createdAt), "dd/MM/yyyy HH:mm")}
+                    </div>
+                  </div>
+
+                  <div className="pt-4">
+                    <Button 
+                      variant="destructive" 
+                      className="w-full gap-2 h-9 text-xs"
+                      onClick={() => {
+                        if(confirm("Supprimer définitivement ce document de la base de connaissances ?")) {
+                          deleteMutation.mutate(selectedDoc.id);
+                          setSelectedDoc(null);
+                        }
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" /> Supprimer du corpus
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </SheetContent>
+      </Sheet>
       )}
     </div>
   );
@@ -1309,7 +2810,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
 export default function PortailMairiePage() {
   const { user, isAuthenticated, isLoading } = useAuth();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeDossierTab, setActiveDossierTab] = useState<string>("summary");
   const [activeTab, setActiveTab] = useState("dossiers");
@@ -1367,13 +2868,27 @@ export default function PortailMairiePage() {
     if (!isLoading) {
       if (!isAuthenticated) { setLocation("/login"); return; }
       if ((user?.role as string) !== "mairie" && user?.role !== "admin") { setLocation("/dashboard"); }
-      
+
+      const requestedCommune = typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("commune")
+        : null;
+      if (requestedCommune) {
+        setSelectedCommune(requestedCommune);
+        return;
+      }
+
       // Default to first commune if it's a mairie user
       if ((user?.role as string) === "mairie" && assignedCommunes.length > 0) {
         setSelectedCommune(assignedCommunes[0]);
       }
     }
   }, [isLoading, isAuthenticated, user, assignedCommunes]);
+
+  useEffect(() => {
+    if (location.startsWith("/portail-mairie/base-ia/")) {
+      setActiveTab("plu");
+    }
+  }, [location]);
 
   const { data: dossiersData, isLoading: loadingDossiers } = useQuery<{ dossiers: Dossier[] }>({
     queryKey: ["mairie-dossiers", selectedCommune],
@@ -1585,29 +3100,29 @@ export default function PortailMairiePage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+        <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 sm:h-12 sm:w-12">
             <Building className="w-6 h-6 text-primary" />
           </div>
           <div className="flex-1">
-            <h1 className="text-3xl font-bold tracking-tight text-primary">Portail Mairie</h1>
-            <p className="text-muted-foreground">Consultation des dossiers déposés et gestion de la base de connaissance IA.</p>
+            <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">Portail Mairie</h1>
+            <p className="text-sm text-muted-foreground sm:text-base">Consultation des dossiers déposés et gestion de la base de connaissance IA.</p>
           </div>
         </div>
 
         {!selectedId ? (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <TabsList className="grid w-full max-w-[650px] grid-cols-4">
+            <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
+              <TabsList className="w-full lg:max-w-[760px]">
                 <TabsTrigger value="dossiers">Dossiers CERFA</TabsTrigger>
                 <TabsTrigger value="plu" className="gap-2">Base IA (PLU)</TabsTrigger>
                 <TabsTrigger value="finance" className="gap-2"><Zap className="w-3.5 h-3.5" /> Fiscalité & Coûts</TabsTrigger>
                 <TabsTrigger value="config" className="gap-2"><Settings className="w-3.5 h-3.5" /> Config Prompt</TabsTrigger>
               </TabsList>
 
-              {communes.length > 0 && (activeTab === "dossiers" || activeTab === "config" || activeTab === "finance") && (
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+              {communes.length > 0 && (activeTab === "dossiers" || activeTab === "plu" || activeTab === "config" || activeTab === "finance") && (
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                   <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Commune :</span>
                   <Select value={selectedCommune} onValueChange={setSelectedCommune}>
                     <SelectTrigger className="w-full sm:w-[200px] h-9">
@@ -2056,6 +3571,50 @@ export default function PortailMairiePage() {
                           </div>
                         </div>
 
+                      </div>
+                      <div className="space-y-6 pt-8 border-t">
+                        <div className="space-y-4 p-4 border rounded-xl bg-muted/5">
+                          <h4 className="text-sm font-bold flex items-center gap-2 text-primary">
+                            <Building2 className="w-4 h-4" /> Portail citoyen
+                          </h4>
+                          <p className="text-[11px] text-muted-foreground">
+                            Ces informations sont affichées sur l’espace citoyen pour personnaliser le nom de la mairie et ses coordonnées d’accueil.
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Nom affiché de la mairie</label>
+                              <Input id="citizenPortalTownHallName" defaultValue={mairieSettingsData?.settings?.citizenPortalTownHallName ?? `Mairie de ${selectedCommune}`} placeholder={`Mairie de ${selectedCommune}`} />
+                            </div>
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Adresse ligne 1</label>
+                              <Input id="citizenPortalAddressLine1" defaultValue={mairieSettingsData?.settings?.citizenPortalAddressLine1 ?? ""} placeholder="Ex : 35 rue Eugène Gouin" />
+                            </div>
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Adresse ligne 2</label>
+                              <Input id="citizenPortalAddressLine2" defaultValue={mairieSettingsData?.settings?.citizenPortalAddressLine2 ?? ""} placeholder="Ex : Hôtel de Ville, accueil urbanisme" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Code postal</label>
+                              <Input id="citizenPortalPostalCode" defaultValue={mairieSettingsData?.settings?.citizenPortalPostalCode ?? ""} placeholder="37230" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Ville</label>
+                              <Input id="citizenPortalCity" defaultValue={mairieSettingsData?.settings?.citizenPortalCity ?? selectedCommune} placeholder={selectedCommune} />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Téléphone</label>
+                              <Input id="citizenPortalPhone" defaultValue={mairieSettingsData?.settings?.citizenPortalPhone ?? ""} placeholder="02 47 00 00 00" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Email</label>
+                              <Input id="citizenPortalEmail" defaultValue={mairieSettingsData?.settings?.citizenPortalEmail ?? ""} placeholder="urbanisme@mairie.fr" />
+                            </div>
+                            <div className="space-y-2 md:col-span-2">
+                              <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">Permanences / horaires</label>
+                              <Input id="citizenPortalHours" defaultValue={mairieSettingsData?.settings?.citizenPortalHours ?? ""} placeholder="Ex : Lundi au vendredi de 9h à 12h, sur rendez-vous l’après-midi" />
+                            </div>
+                          </div>
+                        </div>
                         <div className="flex justify-end pt-4 border-t">
                           <Button 
                             className="gap-2 bg-yellow-600 hover:bg-yellow-700 h-10 px-8"
@@ -2063,6 +3622,14 @@ export default function PortailMairiePage() {
                               const getVal = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
                               
                               saveSettingsMutation.mutate({
+                                citizenPortalTownHallName: getVal("citizenPortalTownHallName"),
+                                citizenPortalAddressLine1: getVal("citizenPortalAddressLine1"),
+                                citizenPortalAddressLine2: getVal("citizenPortalAddressLine2"),
+                                citizenPortalPostalCode: getVal("citizenPortalPostalCode"),
+                                citizenPortalCity: getVal("citizenPortalCity"),
+                                citizenPortalPhone: getVal("citizenPortalPhone"),
+                                citizenPortalEmail: getVal("citizenPortalEmail"),
+                                citizenPortalHours: getVal("citizenPortalHours"),
                                 taRateCommunal: parseFloat(getVal("taRateCommunal")) / 100,
                                 taRateDept: parseFloat(getVal("taRateDept")) / 100,
                                 taxeFonciereRate: parseFloat(getVal("taxeFonciereRate")) / 100,
@@ -2085,7 +3652,7 @@ export default function PortailMairiePage() {
                             disabled={saveSettingsMutation.isPending}
                           >
                             {saveSettingsMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Verrouiller les paramètres fiscaux
+                            Sauvegarder les paramètres de commune
                           </Button>
                         </div>
                       </div>
