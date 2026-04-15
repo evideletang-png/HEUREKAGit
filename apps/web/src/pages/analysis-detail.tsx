@@ -211,7 +211,7 @@ export default function AnalysisDetailPage() {
     );
   }
 
-  const { analysis, parcel, zoneAnalysis, buildability, logs } = data;
+  const { analysis, parcel, zoneAnalysis, buildability, constraints, logs } = data;
 
   // Parse JSON strings from DB
   const parsedGeometry = parcel?.geometryJson

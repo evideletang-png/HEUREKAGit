@@ -11,12 +11,39 @@ const TIMEOUT_MS   = 12000;
 
 function signal() { return AbortSignal.timeout(TIMEOUT_MS); }
 
+// Document structure keywords that are never valid zone/sub-sector identifiers
+const DOCUMENT_KEYWORDS = ["ARTICLE", "SECTION", "CHAPITRE", "ANNEXE", "TITRE", "PARAGRAPHE", "ALINEA", "DISPOSITIONS"];
+
+/**
+ * Validates that a zone label is not a document structural keyword.
+ * Fixes the "ARTICLE" bug where zone extraction mistakenly captured document terms.
+ */
+function sanitizeZoneLabel(libelle: string, libelong: string): { libelle: string; libelong: string; valid: boolean } {
+  if (!libelle || libelle.trim().length === 0) {
+    return { libelle: "", libelong: "", valid: false };
+  }
+
+  const upper = libelle.trim().toUpperCase();
+  // Check if label exactly matches a keyword or starts with one followed by space/number/underscore
+  const isInvalid = DOCUMENT_KEYWORDS.some(kw =>
+    upper === kw || upper.startsWith(kw + " ") || upper.startsWith(kw + "_") || upper.startsWith(kw + "-")
+  );
+
+  if (isInvalid) {
+    console.warn(`[planning] Invalid zone label "${libelle}" — looks like a document keyword. Discarding.`);
+    return { libelle: "", libelong: "", valid: false };
+  }
+
+  return { libelle, libelong, valid: true };
+}
+
 export interface ZoningInfo {
   zoneCode: string;
   zoningLabel: string;
   documentTitle: string;
   sourceUrl: string;
   rawText: string;
+  gpuConfirmed: boolean;  // True if zone came from GPU API (high confidence)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -93,11 +120,18 @@ export async function getZoningByCoords(lat: number, lng: number, commune?: stri
       return null;
     }
 
+    // Sanitize zone label — reject document keywords like "ARTICLE"
+    const sanitized = sanitizeZoneLabel(zone.libelle || "", zone.libelong || "");
+    if (!sanitized.valid || !sanitized.libelle) {
+      console.warn("[planning] Zone label failed validation — no valid zone extracted from GPU.");
+      return null;
+    }
+
     // Try to fetch document details (non-critical)
     const docDetails = zone.gpu_doc_id ? await fetchGpuDocDetails(zone.gpu_doc_id) : null;
 
-    const zoneCode    = zone.libelle  || "U";
-    const zoningLabel = zone.libelong || `Zone ${zoneCode}`;
+    const zoneCode    = sanitized.libelle || "U";
+    const zoningLabel = sanitized.libelong || `Zone ${zoneCode}`;
     let docTitle    = docDetails?.title ?? "PLU – Règlement de zone";
     let sourceUrl   = docDetails?.regulationUrl
       || `https://www.geoportail-urbanisme.gouv.fr/document/${zone.gpu_doc_id}`;
@@ -153,6 +187,7 @@ export async function getZoningByCoords(lat: number, lng: number, commune?: stri
       documentTitle: docTitle,
       sourceUrl,
       rawText,
+      gpuConfirmed: true,  // Zone came directly from GPU API — high confidence
     };
   } catch (err) {
     console.warn("[planning] GPU API error:", (err as Error).message);
