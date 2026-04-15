@@ -350,6 +350,127 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
         </CardContent>
       </Card>
 
+      {/* Map — always visible once parcel geometry is available */}
+      {parcelPositions.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Ruler className="w-4 h-4 text-primary" />
+                Vue cadastrale — Esquisse d'implantation
+              </CardTitle>
+              <div className="flex gap-1.5 shrink-0">
+                {([
+                  { key: "plan" as const, label: "Plan", Icon: MapPinned },
+                  { key: "satellite" as const, label: "Satellite", Icon: Satellite },
+                  { key: "cadastre" as const, label: "Cadastre", Icon: Layers3 },
+                ]).map(({ key, label, Icon }) => (
+                  <Button
+                    key={key}
+                    type="button"
+                    size="sm"
+                    variant={baseLayer === key ? "default" : "outline"}
+                    className="h-7 gap-1 rounded-full px-2.5 text-xs"
+                    onClick={() => setBaseLayer(key)}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 mt-2">
+              <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-red-500 opacity-60 inline-block" /> Parcelle</span>
+              {result && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-amber-400 opacity-70 inline-block" /> Zone constructible (après reculs)</span>}
+              {result && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-blue-500 opacity-70 inline-block" /> {ELEMENT_TYPES.find(e => e.value === elementType)?.label ?? "Aménagement"}</span>}
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="h-[480px] rounded-b-xl overflow-hidden relative z-0">
+              <>
+                <MapZoomButtons map={mapInstance} />
+                <MapContainer
+                  className="map-custom-zoom"
+                  center={mapCenter}
+                  zoom={20}
+                  maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}
+                  zoomSnap={SHARED_MAP_CONTAINER_OPTIONS.zoomSnap}
+                  zoomDelta={SHARED_MAP_CONTAINER_OPTIONS.zoomDelta}
+                  wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
+                  zoomAnimation={false}
+                  fadeAnimation={false}
+                  zoomControl={false}
+                  style={{ height: "100%", width: "100%" }}
+                >
+                  <MapInstanceBridge onMapReady={setMapInstance} />
+                  {baseLayer !== "cadastre" && (
+                    <TileLayer
+                      key={baseLayer}
+                      url={SHARED_MAP_TILE_LAYERS[baseLayer].url}
+                      attribution={SHARED_MAP_TILE_LAYERS[baseLayer].attribution}
+                      {...SHARED_MAP_TILE_LAYERS[baseLayer].tileOptions}
+                    />
+                  )}
+                  {baseLayer === "cadastre" && (
+                    <>
+                      <TileLayer
+                        url={SHARED_MAP_TILE_LAYERS.plan.url}
+                        attribution={SHARED_MAP_TILE_LAYERS.plan.attribution}
+                        {...SHARED_MAP_TILE_LAYERS.plan.tileOptions}
+                      />
+                      <TileLayer
+                        url={SHARED_MAP_TILE_LAYERS.cadastre.url}
+                        attribution={SHARED_MAP_TILE_LAYERS.cadastre.attribution}
+                        opacity={0.7}
+                        {...SHARED_MAP_TILE_LAYERS.cadastre.tileOptions}
+                      />
+                    </>
+                  )}
+                  {/* Parcel boundary — red */}
+                  <Polygon
+                    positions={parcelPositions}
+                    pathOptions={{ color: "#dc2626", fillColor: "#dc2626", fillOpacity: 0.12, weight: 3, dashArray: "6 3" }}
+                  />
+                  {/* Surface label */}
+                  {parcelLabelPosition && parcelLabelIcon && (
+                    <Marker position={parcelLabelPosition} icon={parcelLabelIcon} interactive={false} zIndexOffset={1000} />
+                  )}
+                  {/* Buildable zone — amber (only after compute) */}
+                  {result && result.buildableZonePositions.length > 0 && (
+                    <Polygon
+                      positions={result.buildableZonePositions}
+                      pathOptions={{ color: "#d97706", fillColor: "#fbbf24", fillOpacity: 0.25, weight: 2 }}
+                    >
+                      <LeafletTooltip direction="top" className="text-xs">
+                        Zone constructible : {result.buildableAreaM2} m²<br />Recul : {result.setbackUsed.toFixed(1)} m
+                      </LeafletTooltip>
+                    </Polygon>
+                  )}
+                  {/* Requested element — blue rectangle (only after compute) */}
+                  {result && result.elementBounds && (
+                    <Rectangle
+                      bounds={result.elementBounds}
+                      pathOptions={{
+                        color: result.elementFits ? "#2563eb" : "#f59e0b",
+                        fillColor: result.elementFits ? "#3b82f6" : "#fbbf24",
+                        fillOpacity: 0.55,
+                        weight: 2.5,
+                      }}
+                    >
+                      <LeafletTooltip permanent direction="center" className="bg-transparent border-0 shadow-none font-bold text-xs" opacity={1}>
+                        <div style={{ color: result.elementFits ? "#1d4ed8" : "#b45309" }}>
+                          {ELEMENT_TYPES.find(e => e.value === elementType)?.label}<br />{parseFloat(lengthM)}×{parseFloat(widthM)} m
+                        </div>
+                      </LeafletTooltip>
+                    </Rectangle>
+                  )}
+                </MapContainer>
+              </>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {result && (
         <>
           {/* Results summary */}
@@ -405,134 +526,6 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
               ))}
             </div>
           )}
-
-          {/* Map overlay */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Ruler className="w-4 h-4 text-primary" />
-                  Vue cadastrale — Esquisse d'implantation
-                </CardTitle>
-                <div className="flex gap-1.5 shrink-0">
-                  {([
-                    { key: "plan" as const, label: "Plan", Icon: MapPinned },
-                    { key: "satellite" as const, label: "Satellite", Icon: Satellite },
-                    { key: "cadastre" as const, label: "Cadastre", Icon: Layers3 },
-                  ]).map(({ key, label, Icon }) => (
-                    <Button
-                      key={key}
-                      type="button"
-                      size="sm"
-                      variant={baseLayer === key ? "default" : "outline"}
-                      className="h-7 gap-1 rounded-full px-2.5 text-xs"
-                      onClick={() => setBaseLayer(key)}
-                    >
-                      <Icon className="h-3 w-3" />
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-3 mt-2">
-                <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-red-500 opacity-60 inline-block" /> Parcelle</span>
-                <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-amber-400 opacity-70 inline-block" /> Zone constructible (après reculs)</span>
-                <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-blue-500 opacity-70 inline-block" /> {ELEMENT_TYPES.find(e => e.value === elementType)?.label ?? "Aménagement"}</span>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="h-[480px] rounded-b-xl overflow-hidden relative z-0">
-                {parcelPositions.length > 0 ? (
-                  <>
-                    <MapZoomButtons map={mapInstance} />
-                    <MapContainer
-                      className="map-custom-zoom"
-                      center={mapCenter}
-                      zoom={20}
-                      maxZoom={SHARED_MAP_CONTAINER_OPTIONS.maxZoom}
-                      zoomSnap={SHARED_MAP_CONTAINER_OPTIONS.zoomSnap}
-                      zoomDelta={SHARED_MAP_CONTAINER_OPTIONS.zoomDelta}
-                      wheelPxPerZoomLevel={SHARED_MAP_CONTAINER_OPTIONS.wheelPxPerZoomLevel}
-                      zoomAnimation={false}
-                      fadeAnimation={false}
-                      zoomControl={false}
-                      style={{ height: "100%", width: "100%" }}
-                    >
-                    <MapInstanceBridge onMapReady={setMapInstance} />
-                    {/* Base layer — switches between Plan, Satellite, and Cadastre */}
-                    {baseLayer !== "cadastre" && (
-                      <TileLayer
-                        key={baseLayer}
-                        url={SHARED_MAP_TILE_LAYERS[baseLayer].url}
-                        attribution={SHARED_MAP_TILE_LAYERS[baseLayer].attribution}
-                        {...SHARED_MAP_TILE_LAYERS[baseLayer].tileOptions}
-                      />
-                    )}
-                    {baseLayer === "cadastre" && (
-                      <>
-                        <TileLayer
-                          url={SHARED_MAP_TILE_LAYERS.plan.url}
-                          attribution={SHARED_MAP_TILE_LAYERS.plan.attribution}
-                          {...SHARED_MAP_TILE_LAYERS.plan.tileOptions}
-                        />
-                        <TileLayer
-                          url={SHARED_MAP_TILE_LAYERS.cadastre.url}
-                          attribution={SHARED_MAP_TILE_LAYERS.cadastre.attribution}
-                          opacity={0.7}
-                          {...SHARED_MAP_TILE_LAYERS.cadastre.tileOptions}
-                        />
-                      </>
-                    )}
-                    {/* Parcel boundary — red */}
-                    <Polygon
-                      positions={parcelPositions}
-                      pathOptions={{ color: "#dc2626", fillColor: "#dc2626", fillOpacity: 0.12, weight: 3, dashArray: "6 3" }}
-                    />
-                    {/* Surface label anchored to NW corner so it never overlaps buildings */}
-                    {parcelLabelPosition && parcelLabelIcon && (
-                      <Marker position={parcelLabelPosition} icon={parcelLabelIcon} interactive={false} zIndexOffset={1000} />
-                    )}
-
-                    {/* Buildable zone — amber */}
-                    {result.buildableZonePositions.length > 0 && (
-                      <Polygon
-                        positions={result.buildableZonePositions}
-                        pathOptions={{ color: "#d97706", fillColor: "#fbbf24", fillOpacity: 0.25, weight: 2 }}
-                      >
-                        <LeafletTooltip direction="top" className="text-xs">
-                          Zone constructible : {result.buildableAreaM2} m²<br />Recul : {result.setbackUsed.toFixed(1)} m
-                        </LeafletTooltip>
-                      </Polygon>
-                    )}
-
-                    {/* Requested element — blue rectangle */}
-                    {result.elementBounds && (
-                      <Rectangle
-                        bounds={result.elementBounds}
-                        pathOptions={{
-                          color: result.elementFits ? "#2563eb" : "#f59e0b",
-                          fillColor: result.elementFits ? "#3b82f6" : "#fbbf24",
-                          fillOpacity: 0.55,
-                          weight: 2.5,
-                        }}
-                      >
-                        <LeafletTooltip permanent direction="center" className="bg-transparent border-0 shadow-none font-bold text-xs" opacity={1}>
-                          <div style={{ color: result.elementFits ? "#1d4ed8" : "#b45309" }}>
-                            {ELEMENT_TYPES.find(e => e.value === elementType)?.label}<br />{parseFloat(lengthM)}×{parseFloat(widthM)} m
-                          </div>
-                        </LeafletTooltip>
-                      </Rectangle>
-                    )}
-                    </MapContainer>
-                  </>
-                ) : (
-                  <div className="w-full h-full bg-muted flex items-center justify-center">
-                    <p className="text-muted-foreground">Géométrie cadastrale indisponible</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
 
           {/* PLU rules reminder */}
           <Card className="border-dashed">

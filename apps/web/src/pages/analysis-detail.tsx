@@ -1113,6 +1113,7 @@ export default function AnalysisDetailPage() {
           <TabsTrigger value="calcul" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!buildability && !missingPluIssue}><Calculator className="w-4 h-4 mr-2"/> Constructibilité</TabsTrigger>
           <TabsTrigger value="rapport" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!data.report}><FileText className="w-4 h-4 mr-2"/> Rapport</TabsTrigger>
           <TabsTrigger value="implantation" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!gc}><Pencil className="w-4 h-4 mr-2"/> Implantation</TabsTrigger>
+          <TabsTrigger value="contraintes" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm" disabled={!constraints}><Shield className="w-4 h-4 mr-2"/> Contraintes</TabsTrigger>
           <TabsTrigger value="chat" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm font-bold border border-transparent data-[state=active]:border-primary/20 bg-primary/5 text-primary"><MessageSquare className="w-4 h-4 mr-2"/> Assistant IA</TabsTrigger>
           <TabsTrigger value="logs" className="py-2.5 px-5 rounded-lg text-sm data-[state=active]:shadow-sm"><Activity className="w-4 h-4 mr-2"/> Logs</TabsTrigger>
         </TabsList>
@@ -1374,78 +1375,6 @@ export default function AnalysisDetailPage() {
                 </Card>
               )}
 
-              {/* CONTRAINTES GÉOGRAPHIQUES */}
-              {constraints && constraints.length > 0 && (
-                <Card className="border-amber-200/50 bg-amber-50/30">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-amber-900">
-                      <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      Contraintes Géographiques & Réglementaires
-                    </CardTitle>
-                    <CardDescription className="text-amber-700/70">Détectées via IGN Géoportail de l'Urbanisme</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {constraints.map((constraint: any, idx: number) => {
-                        const severityColors: Record<string, string> = {
-                          high: "bg-red-50 border-red-200 text-red-900",
-                          medium: "bg-amber-50 border-amber-200 text-amber-900",
-                          low: "bg-blue-50 border-blue-200 text-blue-900",
-                          info: "bg-slate-50 border-slate-200 text-slate-700",
-                        };
-                        const severityBadge: Record<string, { label: string; variant: string }> = {
-                          high: { label: "Critique", variant: "bg-red-500 text-white" },
-                          medium: { label: "Modéré", variant: "bg-amber-500 text-white" },
-                          low: { label: "Bas", variant: "bg-blue-500 text-white" },
-                          info: { label: "Information", variant: "bg-slate-400 text-white" },
-                        };
-                        const colors = severityColors[constraint.severity] || severityColors.info;
-                        const badge = severityBadge[constraint.severity] || severityBadge.info;
-
-                        return (
-                          <div key={idx} className={`p-4 border rounded-lg transition-colors ${colors}`}>
-                            <div className="flex items-start gap-3">
-                              <div className="pt-0.5">
-                                {constraint.category === "protection" && <Shield className="w-4 h-4" />}
-                                {constraint.category === "servitude" && <AlertTriangle className="w-4 h-4" />}
-                                {constraint.category === "risque" && <AlertCircle className="w-4 h-4" />}
-                                {constraint.category === "nuisance" && <Volume2 className="w-4 h-4" />}
-                                {constraint.category === "autre" && <HelpCircle className="w-4 h-4" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-start gap-2 mb-1">
-                                  <h5 className="font-semibold text-sm">{constraint.title}</h5>
-                                  <Badge className={`${badge.variant} text-[9px] h-5 py-0 uppercase shrink-0`}>
-                                    {badge.label}
-                                  </Badge>
-                                </div>
-                                <p className="text-xs leading-relaxed opacity-90">{constraint.description}</p>
-                                <p className="text-[10px] opacity-60 mt-2">Source: {constraint.source}</p>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {constraints && constraints.length === 0 && (
-                <Card className="border-green-200/50 bg-green-50/30">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-green-900">
-                      <CheckCircle className="w-4 h-4 text-green-600" />
-                      Aucune contrainte détectée
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-green-800">
-                      Le terrain ne semble affecté par aucune contrainte majeure selon les données du Géoportail de l'Urbanisme.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
             </>
           )}
         </TabsContent>
@@ -2397,6 +2326,88 @@ export default function AnalysisDetailPage() {
             centroidLng={parcel?.centroidLng ?? null}
             plu={(gcplu && Object.keys(gcplu).length > 0 ? gcplu : null) as any}
           />
+        </TabsContent>
+
+        {/* TAB CONTRAINTES */}
+        <TabsContent value="contraintes" className="space-y-6 focus-visible:outline-none">
+          {constraints && constraints.length > 0 ? (
+            <>
+              <Card className="border-amber-200/50 bg-amber-50/30">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-amber-900">
+                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                    Contraintes Géographiques & Réglementaires
+                  </CardTitle>
+                  <CardDescription className="text-amber-700/70">
+                    {constraints.length} contrainte{constraints.length > 1 ? "s" : ""} détectée{constraints.length > 1 ? "s" : ""} via IGN Géoportail de l'Urbanisme
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {constraints.map((constraint: any, idx: number) => {
+                      const severityColors: Record<string, string> = {
+                        high: "bg-red-50 border-red-200 text-red-900",
+                        medium: "bg-amber-50 border-amber-200 text-amber-900",
+                        low: "bg-blue-50 border-blue-200 text-blue-900",
+                        info: "bg-slate-50 border-slate-200 text-slate-700",
+                      };
+                      const severityBadge: Record<string, { label: string; variant: string }> = {
+                        high: { label: "Critique", variant: "bg-red-500 text-white" },
+                        medium: { label: "Modéré", variant: "bg-amber-500 text-white" },
+                        low: { label: "Bas", variant: "bg-blue-500 text-white" },
+                        info: { label: "Information", variant: "bg-slate-400 text-white" },
+                      };
+                      const colors = severityColors[constraint.severity] || severityColors.info;
+                      const badge = severityBadge[constraint.severity] || severityBadge.info;
+
+                      return (
+                        <div key={idx} className={`p-4 border rounded-lg transition-colors ${colors}`}>
+                          <div className="flex items-start gap-3">
+                            <div className="pt-0.5">
+                              {constraint.category === "protection" && <Shield className="w-4 h-4" />}
+                              {constraint.category === "servitude" && <AlertTriangle className="w-4 h-4" />}
+                              {constraint.category === "risque" && <AlertCircle className="w-4 h-4" />}
+                              {constraint.category === "nuisance" && <Volume2 className="w-4 h-4" />}
+                              {constraint.category === "autre" && <HelpCircle className="w-4 h-4" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start gap-2 mb-1">
+                                <h5 className="font-semibold text-sm">{constraint.title}</h5>
+                                <Badge className={`${badge.variant} text-[9px] h-5 py-0 uppercase shrink-0`}>
+                                  {badge.label}
+                                </Badge>
+                              </div>
+                              <p className="text-xs leading-relaxed opacity-90">{constraint.description}</p>
+                              <p className="text-[10px] opacity-60 mt-2">Source: {constraint.source}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : constraints && constraints.length === 0 ? (
+            <Card className="border-green-200/50 bg-green-50/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-green-900">
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                  Aucune contrainte détectée
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-green-800">
+                  Le terrain ne semble affecté par aucune contrainte majeure selon les données du Géoportail de l'Urbanisme.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="text-center py-20 text-muted-foreground">
+              <Shield className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p>Lancez une analyse pour détecter les contraintes environnementales et réglementaires.</p>
+            </div>
+          )}
         </TabsContent>
 
         {/* TAB ASSISTANT IA */}
