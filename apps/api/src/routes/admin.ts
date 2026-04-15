@@ -332,17 +332,20 @@ router.put("/mairie/:userId/communes", async (req: AuthRequest, res) => {
 
     // Auto-create communes in communesTable so GovernanceTab (maillage) auto-populates
     for (const communeName of cleaned) {
-      const inseeCode = inseeMapping?.[communeName];
-      const finalInseeCode = inseeCode?.trim() || `auto-${communeName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-      await db.insert(communesTable)
-        .values({ name: communeName, inseeCode: finalInseeCode, jurisdictionId: "default" })
-        .onConflictDoUpdate({
-          target: communesTable.name,
-          set: inseeCode
-            ? { inseeCode: inseeCode.trim(), updatedAt: new Date() }
-            : { updatedAt: new Date() },
-        })
-        .catch(() => {}); // silently ignore inseeCode unique conflicts (edge case)
+      try {
+        const inseeCode = inseeMapping?.[communeName];
+        const finalInseeCode = inseeCode?.trim() || `auto-${communeName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+        await db.insert(communesTable)
+          .values({ name: communeName, inseeCode: finalInseeCode, jurisdictionId: "default" })
+          .onConflictDoUpdate({
+            target: communesTable.name,
+            set: inseeCode
+              ? { inseeCode: inseeCode.trim(), updatedAt: new Date() }
+              : { updatedAt: new Date() },
+          });
+      } catch (e) {
+        logger.warn("[admin] Auto-create commune skipped", { communeName, err: (e as any)?.message });
+      }
     }
 
     return res.json({ success: true, communes: cleaned });
