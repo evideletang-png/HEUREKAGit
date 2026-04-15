@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, Ruler, Info, Pencil, RotateCcw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Ruler, Info, Pencil, RotateCcw, Layers3, Satellite, MapPinned } from "lucide-react";
 import { MapZoomButtons } from "@/components/map/MapZoomButtons";
 
 type GeoContextPlu = {
@@ -94,6 +94,7 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
   const [result, setResult] = useState<PlacedResult | null>(null);
   const [computed, setComputed] = useState(false);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
+  const [baseLayer, setBaseLayer] = useState<"plan" | "satellite" | "cadastre">("plan");
 
   const parsedGeometry = parcelGeometryJson ? (() => { try { return JSON.parse(parcelGeometryJson); } catch { return null; } })() : null;
 
@@ -408,10 +409,31 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
           {/* Map overlay */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Ruler className="w-4 h-4 text-primary" />
-                Vue cadastrale — Esquisse d'implantation
-              </CardTitle>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Ruler className="w-4 h-4 text-primary" />
+                  Vue cadastrale — Esquisse d'implantation
+                </CardTitle>
+                <div className="flex gap-1.5 shrink-0">
+                  {([
+                    { key: "plan" as const, label: "Plan", Icon: MapPinned },
+                    { key: "satellite" as const, label: "Satellite", Icon: Satellite },
+                    { key: "cadastre" as const, label: "Cadastre", Icon: Layers3 },
+                  ]).map(({ key, label, Icon }) => (
+                    <Button
+                      key={key}
+                      type="button"
+                      size="sm"
+                      variant={baseLayer === key ? "default" : "outline"}
+                      className="h-7 gap-1 rounded-full px-2.5 text-xs"
+                      onClick={() => setBaseLayer(key)}
+                    >
+                      <Icon className="h-3 w-3" />
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
               <div className="flex flex-wrap gap-3 mt-2">
                 <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-red-500 opacity-60 inline-block" /> Parcelle</span>
                 <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-sm bg-amber-400 opacity-70 inline-block" /> Zone constructible (après reculs)</span>
@@ -437,11 +459,30 @@ export function SketchPlanner({ parcelGeometryJson, parcelSurfaceM2, centroidLat
                       style={{ height: "100%", width: "100%" }}
                     >
                     <MapInstanceBridge onMapReady={setMapInstance} />
-                    <TileLayer
-                      url={SHARED_MAP_TILE_LAYERS.plan.url}
-                      attribution={SHARED_MAP_TILE_LAYERS.plan.attribution}
-                      {...SHARED_MAP_TILE_LAYERS.plan.tileOptions}
-                    />
+                    {/* Base layer — switches between Plan, Satellite, and Cadastre */}
+                    {baseLayer !== "cadastre" && (
+                      <TileLayer
+                        key={baseLayer}
+                        url={SHARED_MAP_TILE_LAYERS[baseLayer].url}
+                        attribution={SHARED_MAP_TILE_LAYERS[baseLayer].attribution}
+                        {...SHARED_MAP_TILE_LAYERS[baseLayer].tileOptions}
+                      />
+                    )}
+                    {baseLayer === "cadastre" && (
+                      <>
+                        <TileLayer
+                          url={SHARED_MAP_TILE_LAYERS.plan.url}
+                          attribution={SHARED_MAP_TILE_LAYERS.plan.attribution}
+                          {...SHARED_MAP_TILE_LAYERS.plan.tileOptions}
+                        />
+                        <TileLayer
+                          url={SHARED_MAP_TILE_LAYERS.cadastre.url}
+                          attribution={SHARED_MAP_TILE_LAYERS.cadastre.attribution}
+                          opacity={0.7}
+                          {...SHARED_MAP_TILE_LAYERS.cadastre.tileOptions}
+                        />
+                      </>
+                    )}
                     {/* Parcel boundary — red */}
                     <Polygon
                       positions={parcelPositions}
