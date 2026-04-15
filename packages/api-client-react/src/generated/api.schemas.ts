@@ -287,6 +287,10 @@ export interface GeocodeItem {
   city?: string;
   lat: number;
   lng: number;
+  banId?: string;
+  inseeCode?: string;
+  /** Cadastral parcel IDUs directly linked to this address by the BAN */
+  parcelles?: string[];
 }
 
 export interface GeocodeResult {

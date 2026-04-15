@@ -21,6 +21,7 @@ type GeoSelection = {
   lng: number;
   banId?: string;
   inseeCode?: string;
+  parcelles?: string[];
 };
 
 type ParcelPreviewItem = {
@@ -132,6 +133,7 @@ export default function NewAnalysisPage() {
           lng: item.lng,
           banId: item.banId,
           label: item.label,
+          banParcelles: item.parcelles,
         }),
       });
       const data = await response.json();
@@ -278,6 +280,7 @@ export default function NewAnalysisPage() {
         city: selectedGeo.city,
         postcode: selectedGeo.postcode,
         selectedParcels: selectedAssemblyParcels,
+        banParcelles: selectedGeo.parcelles,
         title: address.split(',')[0]
       } as any
     });

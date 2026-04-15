@@ -15,6 +15,8 @@ export interface GeocodeItem {
   lng: number;
   banId?: string;
   inseeCode?: string;
+  /** Cadastral parcel IDUs directly linked to this address by the BAN (e.g. ["75056000AB0042"]) */
+  parcelles?: string[];
 }
 
 export async function geocodeAddress(query: string, type?: string): Promise<GeocodeItem[]> {
@@ -54,6 +56,9 @@ export async function geocodeAddress(query: string, type?: string): Promise<Geoc
       lng: f.geometry.coordinates[0],
       banId: f.properties.id,
       inseeCode: f.properties.citycode,
+      parcelles: Array.isArray(f.properties.parcelles) && f.properties.parcelles.length > 0
+        ? f.properties.parcelles as string[]
+        : undefined,
     }));
   } catch (err) {
     console.error("[geocoding] Error during geocoding:", (err as Error).message);
