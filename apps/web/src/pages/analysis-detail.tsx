@@ -2,26 +2,26 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { ProtectedLayout } from "@/components/layout/ProtectedLayout";
 import { useGetAnalysis, useRunAnalysis } from "@workspace/api-client-react";
 import { useParams } from "wouter";
-import { 
-  Loader2, 
-  Map as MapIcon, 
-  BookOpen, 
-  Calculator, 
-  FileText, 
-  Activity, 
-  RefreshCw, 
-  AlertTriangle, 
-  CheckCircle2, 
-  XCircle, 
-  Layers, 
-  Navigation, 
-  Mountain, 
-  Building2, 
-  Users, 
+import {
+  Loader2,
+  Map as MapIcon,
+  BookOpen,
+  Calculator,
+  FileText,
+  Activity,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Layers,
+  Navigation,
+  Mountain,
+  Building2,
+  Users,
   Home,
-  MessageSquare, 
-  Pencil, 
-  Info, 
+  MessageSquare,
+  Pencil,
+  Info,
   Lock,
   Zap,
   Gavel,
@@ -44,7 +44,11 @@ import {
   MoreVertical,
   ChevronRight,
   History,
-  Sparkles
+  Sparkles,
+  Shield,
+  Volume2,
+  HelpCircle,
+  CheckCircle
 } from "lucide-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";
@@ -559,7 +563,7 @@ export default function AnalysisDetailPage() {
     );
   }
 
-  const { analysis, parcel, zoneAnalysis, buildability, logs } = data;
+  const { analysis, parcel, zoneAnalysis, buildability, constraints, logs } = data;
 
   // Parse JSON strings from DB
   const parsedGeometry = parcel?.geometryJson
@@ -1366,6 +1370,79 @@ export default function AnalysisDetailPage() {
                         </div>
                       ))}
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* CONTRAINTES GÉOGRAPHIQUES */}
+              {constraints && constraints.length > 0 && (
+                <Card className="border-amber-200/50 bg-amber-50/30">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      Contraintes Géographiques & Réglementaires
+                    </CardTitle>
+                    <CardDescription className="text-amber-700/70">Détectées via IGN Géoportail de l'Urbanisme</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {constraints.map((constraint: any, idx: number) => {
+                        const severityColors: Record<string, string> = {
+                          high: "bg-red-50 border-red-200 text-red-900",
+                          medium: "bg-amber-50 border-amber-200 text-amber-900",
+                          low: "bg-blue-50 border-blue-200 text-blue-900",
+                          info: "bg-slate-50 border-slate-200 text-slate-700",
+                        };
+                        const severityBadge: Record<string, { label: string; variant: string }> = {
+                          high: { label: "Critique", variant: "bg-red-500 text-white" },
+                          medium: { label: "Modéré", variant: "bg-amber-500 text-white" },
+                          low: { label: "Bas", variant: "bg-blue-500 text-white" },
+                          info: { label: "Information", variant: "bg-slate-400 text-white" },
+                        };
+                        const colors = severityColors[constraint.severity] || severityColors.info;
+                        const badge = severityBadge[constraint.severity] || severityBadge.info;
+
+                        return (
+                          <div key={idx} className={`p-4 border rounded-lg transition-colors ${colors}`}>
+                            <div className="flex items-start gap-3">
+                              <div className="pt-0.5">
+                                {constraint.category === "protection" && <Shield className="w-4 h-4" />}
+                                {constraint.category === "servitude" && <AlertTriangle className="w-4 h-4" />}
+                                {constraint.category === "risque" && <AlertCircle className="w-4 h-4" />}
+                                {constraint.category === "nuisance" && <Volume2 className="w-4 h-4" />}
+                                {constraint.category === "autre" && <HelpCircle className="w-4 h-4" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start gap-2 mb-1">
+                                  <h5 className="font-semibold text-sm">{constraint.title}</h5>
+                                  <Badge className={`${badge.variant} text-[9px] h-5 py-0 uppercase shrink-0`}>
+                                    {badge.label}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs leading-relaxed opacity-90">{constraint.description}</p>
+                                <p className="text-[10px] opacity-60 mt-2">Source: {constraint.source}</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {constraints && constraints.length === 0 && (
+                <Card className="border-green-200/50 bg-green-50/30">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-green-900">
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                      Aucune contrainte détectée
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-green-800">
+                      Le terrain ne semble affecté par aucune contrainte majeure selon les données du Géoportail de l'Urbanisme.
+                    </p>
                   </CardContent>
                 </Card>
               )}

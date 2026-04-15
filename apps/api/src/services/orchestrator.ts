@@ -14,7 +14,9 @@ import {
   parcelsTable,
   buildingsTable,
   townHallPromptsTable,
-  geocodingCacheTable
+  geocodingCacheTable,
+  constraintsTable,
+  communesTable
 } from "@workspace/db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { createHash } from "crypto";
@@ -606,6 +608,7 @@ export async function orchestrateDossierAnalysis(
   const metrics = new MetricsTracker();
   let score = 100;
   let finalZone = "UA";
+  let zoneFromGPU = false;  // Track if zone was confirmed by GPU API
   let parcelData: any = null;
   let buildingData: any = null;
   let marketData: any = null;
@@ -873,6 +876,39 @@ export async function orchestrateDossierAnalysis(
         }
         
         abfDiagnostic = await ABFService.checkABFConstraints(bestMatch.lat, bestMatch.lng);
+
+        // ── FETCH GEO CONSTRAINTS (Phase 2) ──────────────────────────────────
+        // Fetch protected natural zones + servitudes from IGN APIs
+        if (analysisId && parcelData) {
+          try {
+            logger.info(`[Orchestrator] Fetching geo constraints for analysis ${analysisId}...`);
+            const geoConstraints = await fetchGeoConstraints(
+              bestMatch.lat,
+              bestMatch.lng,
+              parcelData.geometryJson
+            );
+
+            if (geoConstraints.length > 0) {
+              // Delete old constraints for this analysis
+              await db.delete(constraintsTable).where(eq(constraintsTable.analysisId, analysisId));
+
+              // Insert new constraints
+              await db.insert(constraintsTable).values(
+                geoConstraints.map(c => ({
+                  analysisId,
+                  category: c.category,
+                  title: c.title,
+                  description: c.description,
+                  severity: c.severity,
+                  source: c.source,
+                }))
+              );
+              logger.info(`[Orchestrator] Persisted ${geoConstraints.length} geo constraints for analysis ${analysisId}`);
+            }
+          } catch (geoErr) {
+            logger.warn("[Orchestrator] Geo constraints fetch failed (non-critical):", geoErr);
+          }
+        }
       }
     } catch (e) {
       logger.error("[Orchestrator] Smart enrichment failed:", e);
@@ -1182,6 +1218,10 @@ export async function orchestrateDossierAnalysis(
           : sourceDetails.meta.relationalRuleCount > 0
             ? ` Les relations documentaires calibrées ont été prises en compte dans cette conclusion.`
             : "";
+
+      // Confidence boost if zone was confirmed by GPU API (high confidence source)
+      const baseConfidence = (maxFootprint != null && maxFootprint > 0) ? 0.75 : 0.4;
+      const confidenceScore = zoneFromGPU ? Math.min(baseConfidence + 0.1, 0.95) : baseConfidence;
 
       const buildabilityData = {
         analysisId,
