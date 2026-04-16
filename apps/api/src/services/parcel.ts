@@ -395,14 +395,28 @@ type ClassifyResult = {
 };
 
 /**
+ * Extract the street name from a BAN geocode label.
+ * e.g. "15 Rue de la Paix, 75001 Paris" → "Rue de la Paix"
+ *      "Chemin des Vignes, 69130 Écully" → "Chemin des Vignes"
+ */
+function extractStreetFromLabel(label: string): string | null {
+  if (!label) return null;
+  // Strip leading house number (e.g. "15 " or "15bis ")
+  const noNum = label.replace(/^\d+[\w-]*\s+/, "");
+  // Take only the part before the first comma (strip city/postcode)
+  return noNum.split(",")[0].trim() || null;
+}
+
+/**
  * Local geometric fallback for classify-boundaries.
  * For each edge of the parcel polygon, finds the nearest road coordinate.
  * Edges whose midpoint is within ROAD_THRESHOLD_M of any road → "road frontage".
  * Everything else → "lateral".
+ * @param geocodeLabel  BAN geocode label (used to derive road name when BD TOPO has none)
  */
-function classifyBoundariesLocal(parcelFeature: any, roadFeatures: any[]): ClassifyResult {
+function classifyBoundariesLocal(parcelFeature: any, roadFeatures: any[], geocodeLabel?: string): ClassifyResult {
   const geom = parcelFeature?.geometry;
-  const ROAD_THRESHOLD_M = 15; // metres: edge is "facing road" if midpoint is within this distance
+  const ROAD_THRESHOLD_M = 20; // metres: edge is "facing road" if midpoint is within this distance
 
   let ring: [number, number][] | null = null;
   if (geom?.type === "Polygon") ring = geom.coordinates?.[0] ?? null;
@@ -410,12 +424,17 @@ function classifyBoundariesLocal(parcelFeature: any, roadFeatures: any[]): Class
 
   if (!ring?.length) return { ok: false, road_boundary_length_m: 0, side_boundary_length_m: 0, road_boundary_segments: [] };
 
+  // Street name extracted from geocode label as the final fallback
+  const labelStreetName = geocodeLabel ? extractStreetFromLabel(geocodeLabel) : null;
+
   // Pre-extract all road coordinates with their road name
   type RoadPoint = { lat: number; lng: number; name: string | null };
   const roadPoints: RoadPoint[] = [];
   for (const road of roadFeatures) {
+    // BD TOPO troncon_de_route uses nom_1_gauche / nom_1_droite for named streets
     const name: string | null =
       road.properties?.nom_1_gauche ||
+      road.properties?.nom_1_droite ||
       road.properties?.nom_voie ||
       road.properties?.toponyme_1 ||
       road.properties?.libelle_voie ||
@@ -445,7 +464,8 @@ function classifyBoundariesLocal(parcelFeature: any, roadFeatures: any[]): Class
       const d = haversineM(midLat, midLng, lat, lng);
       if (d < minDist) {
         minDist = d;
-        closestRoadName = name;
+        // Prefer BD TOPO name; fall back to geocode label street name
+        closestRoadName = name || labelStreetName;
       }
     }
 
@@ -457,11 +477,16 @@ function classifyBoundariesLocal(parcelFeature: any, roadFeatures: any[]): Class
     }
   }
 
+  // If no road features at all but we have a geocode label, still try to name the road
+  const finalSegments = roadSegments.length === 0 && labelStreetName && roadPoints.length === 0
+    ? [{ properties: { closest_road_name: labelStreetName, distance_m: 0 } }]
+    : roadSegments;
+
   return {
     ok: true,
     road_boundary_length_m: Math.round(roadFrontageM * 10) / 10,
     side_boundary_length_m: Math.round(lateralM * 10) / 10,
-    road_boundary_segments: roadSegments,
+    road_boundary_segments: finalSegments,
   };
 }
 
@@ -827,7 +852,7 @@ export async function getParcelByCoords(
       if (!classifyResult.ok) throw new Error("ok:false");
     } catch (e) {
       console.warn("[parcel] classify-boundaries Railway failed, using local geometric fallback:", (e as Error).message);
-      classifyResult = classifyBoundariesLocal(selectedFeature, roadFeatures);
+      classifyResult = classifyBoundariesLocal(selectedFeature, roadFeatures, geocodeLabel);
     }
     if (classifyResult.ok) {
       roadFrontageLengthM = Math.round(classifyResult.road_boundary_length_m * 10) / 10;

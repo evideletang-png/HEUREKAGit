@@ -20,11 +20,12 @@ export const SHARED_MAP_TILE_LAYERS: Record<
   }
 > = {
   plan: {
-    url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-    attribution: "&copy; IGN",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
       maxNativeZoom: 19,
+      subdomains: "abc",
     },
   },
   satellite: {
