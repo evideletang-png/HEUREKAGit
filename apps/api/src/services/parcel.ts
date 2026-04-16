@@ -689,16 +689,32 @@ export async function getParcelByCoords(
 
     // 2 — Select parcel
     let selectedFeature: any;
+    let selectedSection: string;
+    let selectedNumero: string;
+    let selectedCodeInsee: string;
+    let selectedContenanceM2: number;
+    let selectedIdu: string;
+
     if (banParcelles && banParcelles.length === 1 && cadastreFeatures.length === 1) {
       // Single BAN parcel — no need to call the ML selector
       selectedFeature = cadastreFeatures[0];
-      console.log("[parcel] Single BAN parcel used directly:", selectedFeature?.properties?.section, selectedFeature?.properties?.numero);
+      selectedSection = String(selectedFeature?.properties?.section ?? "??");
+      selectedNumero = String(selectedFeature?.properties?.numero ?? "???");
+      selectedCodeInsee = String(selectedFeature?.properties?.code_insee ?? "00000");
+      selectedContenanceM2 = Number(selectedFeature?.properties?.contenance ?? 0);
+      selectedIdu = String(selectedFeature?.properties?.idu ?? banParcelles[0]);
+      console.log("[parcel] Single BAN parcel used directly:", selectedSection, selectedNumero);
     } else {
       console.log("[parcel] Selecting best parcel via ML selector...");
       const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
       if (!selected.ok) throw new Error("select-parcel failed");
-      console.log("[parcel] Selected:", selected.selected_section, selected.selected_numero);
       selectedFeature = selected.selected_feature;
+      selectedSection = selected.selected_section;
+      selectedNumero = selected.selected_numero;
+      selectedCodeInsee = selected.selected_code_insee;
+      selectedContenanceM2 = selected.selected_contenance_m2;
+      selectedIdu = selected.selected_idu;
+      console.log("[parcel] Selected:", selectedSection, selectedNumero);
     }
 
     const centroid = computeCentroid(selectedFeature);
@@ -730,7 +746,7 @@ export async function getParcelByCoords(
 
     // 6 — Compute parcel geometric metrics
     const perimeterM = computePerimeterM(selectedFeature.geometry);
-    const areaM2 = selected.selected_contenance_m2;
+    const areaM2 = selectedContenanceM2;
     const shapeRatio = perimeterM > 0 ? Math.round((4 * Math.PI * areaM2) / (perimeterM * perimeterM) * 100) / 100 : 0;
     const depthM = estimateDepthM(selectedFeature.geometry, centroid);
     // Corner plot = more than one distinct road name in road_boundary_segments
@@ -756,21 +772,21 @@ export async function getParcelByCoords(
     }
 
     return {
-      cadastralSection: selected.selected_section,
-      parcelNumber: selected.selected_numero,
-      parcelSurfaceM2: selected.selected_contenance_m2,
+      cadastralSection: selectedSection,
+      parcelNumber: selectedNumero,
+      parcelSurfaceM2: selectedContenanceM2,
       geometryJson: selectedFeature,
       centroidLat: centroid.lat,
       centroidLng: centroid.lng,
       roadFrontageLengthM,
       sideBoundaryLengthM,
       metadata: {
-        commune: selected.selected_code_insee,
+        commune: selectedCodeInsee,
         prefixe: "000",
-        section: selected.selected_section,
-        numero: selected.selected_numero,
-        contenance: selected.selected_contenance_m2,
-        idu: selected.selected_idu,
+        section: selectedSection,
+        numero: selectedNumero,
+        contenance: selectedContenanceM2,
+        idu: selectedIdu,
       },
       _bboxString: bboxString,
       _cadastreFeatures: cadastreFeatures,

@@ -35,7 +35,6 @@ import { MetricsTracker, trackOpenAIUsage } from "../utils/metrics.js";
 import { withRetry } from "../utils/retry.js";
 import { evaluateRequiredPieces, PIECE_LABELS } from "./pieceRules.js";
 import { BusinessDecisionSchema, SYSTEM_PROMPTS, JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
-import { communesTable } from "@workspace/db";
 import { loadZoneSegmentsForCommuneZone } from "./expertZoneAnalysisService.js";
 
 import { geocodeAddress } from "./geocoding.js";
