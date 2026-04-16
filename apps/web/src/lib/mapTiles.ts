@@ -20,13 +20,11 @@ export const SHARED_MAP_TILE_LAYERS: Record<
   }
 > = {
   plan: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; Carto",
+    url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    attribution: "&copy; IGN",
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: true,
-      maxNativeZoom: 20,
-      subdomains: "abcd",
+      maxNativeZoom: 19,
     },
   },
   satellite: {
