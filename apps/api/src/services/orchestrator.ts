@@ -243,11 +243,12 @@ async function getCachedGeocode(address: string) {
   }
 }
 
-async function cacheGeocode(address: string, result: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string; cityName?: string; score?: number }) {
+async function cacheGeocode(address: string, result: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string; cityName?: string; score?: number; parcelles?: string[] }) {
   try {
     const key = normalizeAddressKey(address);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + GEOCODING_CACHE_TTL_DAYS);
+    const parcellesJson = result.parcelles && result.parcelles.length > 0 ? JSON.stringify(result.parcelles) : undefined;
     await db.insert(geocodingCacheTable).values({
       addressKey: key,
       originalAddress: address,
@@ -258,10 +259,11 @@ async function cacheGeocode(address: string, result: { lat: number; lng: number;
       inseeCode: result.inseeCode,
       cityName: result.cityName,
       score: result.score,
+      parcelles: parcellesJson,
       expiresAt,
     }).onConflictDoUpdate({
       target: geocodingCacheTable.addressKey,
-      set: { lat: result.lat, lng: result.lng, label: result.label, banId: result.banId, inseeCode: result.inseeCode, cityName: result.cityName, score: result.score, expiresAt },
+      set: { lat: result.lat, lng: result.lng, label: result.label, banId: result.banId, inseeCode: result.inseeCode, cityName: result.cityName, score: result.score, parcelles: parcellesJson, expiresAt },
     });
   } catch (e) {
     logger.warn("[GeocodeCache] Write failed", { error: e instanceof Error ? e.message : String(e) });
@@ -800,13 +802,14 @@ export async function orchestrateDossierAnalysis(
     try {
       // Check cache first
       const cachedGeocode = await getCachedGeocode(initialAddress);
-      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string } | null = cachedGeocode
+      let bestMatch: { lat: number; lng: number; label: string; banId?: string; inseeCode?: string; parcelles?: string[] } | null = cachedGeocode
         ? {
             lat: cachedGeocode.lat,
             lng: cachedGeocode.lng,
             label: cachedGeocode.label,
             banId: cachedGeocode.banId ?? undefined,
             inseeCode: cachedGeocode.inseeCode ?? undefined,
+            parcelles: cachedGeocode.parcelles ? JSON.parse(cachedGeocode.parcelles) : undefined,
           }
         : null;
       if (bestMatch) {
@@ -815,11 +818,11 @@ export async function orchestrateDossierAnalysis(
         const geoResults = await geocodeAddress(initialAddress);
         if (geoResults && geoResults.length > 0) {
           bestMatch = geoResults[0];
-          await cacheGeocode(initialAddress, { lat: bestMatch.lat, lng: bestMatch.lng, label: bestMatch.label, banId: bestMatch.banId, inseeCode: bestMatch.inseeCode, score: (bestMatch as any).score });
+          await cacheGeocode(initialAddress, { lat: bestMatch.lat, lng: bestMatch.lng, label: bestMatch.label, banId: bestMatch.banId, inseeCode: bestMatch.inseeCode, score: (bestMatch as any).score, parcelles: bestMatch.parcelles });
         }
       }
       if (bestMatch) {
-        parcelData = await getParcelByCoords(bestMatch.lat, bestMatch.lng, bestMatch.banId, bestMatch.label);
+        parcelData = await getParcelByCoords(bestMatch.lat, bestMatch.lng, bestMatch.banId, bestMatch.label, bestMatch.parcelles);
         if (parcelData) {
           buildingData = await getBuildingsByParcel(parcelData);
           const totalFootprint = buildingData.buildings.reduce((sum: number, b: any) => sum + b.footprintM2, 0);
@@ -1646,7 +1649,7 @@ async function identifyAnalysisContext(communeInsee: string, address?: string, s
           lat = gResults[0].lat;
           lng = gResults[0].lng;
           detectedCommune = gResults[0].inseeCode || communeInsee;
-          if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score });
+          if (address) await cacheGeocode(address, { lat, lng, label: gResults[0].label, banId: gResults[0].banId, inseeCode: detectedCommune, score: gResults[0].score, parcelles: gResults[0].parcelles });
         }
       }
     }

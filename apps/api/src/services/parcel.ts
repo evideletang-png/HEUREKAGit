@@ -90,7 +90,7 @@ function parseIdu(idu: string): { codeInsee: string; section: string; numero: st
   if (s.length !== 14) return null;
   return {
     codeInsee: s.slice(0, 5),
-    section: s.slice(8, 10).replace(/^0+/, "") || s.slice(8, 10), // strip leading zeros but keep non-empty
+    section: s.slice(8, 10), // keep exactly as-is; IGN API expects the raw section string
     numero: s.slice(10, 14),
   };
 }

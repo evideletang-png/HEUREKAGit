@@ -13,6 +13,8 @@ export const geocodingCacheTable = pgTable("geocoding_cache", {
   inseeCode: text("insee_code"),
   cityName: text("city_name"),
   score: doublePrecision("score"),
+  /** JSON-serialised string[] of cadastral IDUs from BAN (e.g. '["75056000AB0042"]') */
+  parcelles: text("parcelles"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Allow TTL-based expiry (null = never expires)
   expiresAt: timestamp("expires_at"),
