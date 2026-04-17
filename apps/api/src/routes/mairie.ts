@@ -2010,6 +2010,44 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
       }
     }
 
+    const knowledgeDocuments = await Promise.all(docs.map(async (doc) => {
+      const profile = profileByTownHallDocId.get(doc.id);
+      const availability = await resolveTownHallDocumentAvailability(doc);
+      const classification = resolveTownHallClassification({
+        rawText: doc.rawText || "",
+        fileName: doc.title || doc.fileName || "document",
+        category: doc.category,
+        subCategory: doc.subCategory,
+        documentType: doc.documentType,
+      });
+      const zones = Array.isArray(profile?.detectedZones) ? profile.detectedZones : [];
+      const topics = Array.isArray(profile?.structuredTopics) ? profile.structuredTopics : [];
+      return {
+        id: doc.id,
+        title: doc.title,
+        fileName: doc.fileName,
+        documentType: classification.resolved.documentType,
+        opposable: isCanonicalTypeOpposable(classification.canonicalType),
+        hasStoredFile: availability.hasStoredFile,
+        availabilityStatus: availability.availabilityStatus,
+        availabilityMessage: availability.availabilityMessage,
+        textQualityLabel: availability.textQualityLabel,
+        textQualityScore: availability.textQualityScore,
+        profile: profile ? {
+          id: profile.id,
+          status: profile.status,
+          extractionMode: profile.extractionMode,
+          extractionReliability: profile.extractionReliability,
+          manualReviewRequired: profile.manualReviewRequired,
+          detectedZonesCount: zones.length,
+          structuredTopicsCount: topics.length,
+          reasoningSummary: (profile as any).reasoningSummary || null,
+          reasoningJson: (profile as any).reasoningJson || null,
+        } : null,
+        extractedRuleCount: rulesByDocumentId.get(doc.id) || 0,
+      };
+    }));
+
     return res.json({
       commune: targetCommune,
       municipalityId: inseeCode || targetCommune,
@@ -2024,42 +2062,7 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
           + rules.filter((rule) => rule.requiresManualValidation).length
           + conflicts.filter((conflict) => conflict.requiresManualValidation).length,
       },
-      documents: docs.map((doc) => {
-        const profile = profileByTownHallDocId.get(doc.id);
-        const availability = getTownHallDocumentAvailability(doc);
-        const classification = resolveTownHallClassification({
-          rawText: doc.rawText || "",
-          fileName: doc.title || doc.fileName || "document",
-          category: doc.category,
-          subCategory: doc.subCategory,
-          documentType: doc.documentType,
-        });
-        const zones = Array.isArray(profile?.detectedZones) ? profile.detectedZones : [];
-        const topics = Array.isArray(profile?.structuredTopics) ? profile.structuredTopics : [];
-        return {
-          id: doc.id,
-          title: doc.title,
-          fileName: doc.fileName,
-          documentType: classification.resolved.documentType,
-          opposable: isCanonicalTypeOpposable(classification.canonicalType),
-          availabilityStatus: availability.availabilityStatus,
-          availabilityMessage: availability.availabilityMessage,
-          textQualityLabel: availability.textQualityLabel,
-          textQualityScore: availability.textQualityScore,
-          profile: profile ? {
-            id: profile.id,
-            status: profile.status,
-            extractionMode: profile.extractionMode,
-            extractionReliability: profile.extractionReliability,
-            manualReviewRequired: profile.manualReviewRequired,
-            detectedZonesCount: zones.length,
-            structuredTopicsCount: topics.length,
-            reasoningSummary: (profile as any).reasoningSummary || null,
-            reasoningJson: (profile as any).reasoningJson || null,
-          } : null,
-          extractedRuleCount: rulesByDocumentId.get(doc.id) || 0,
-        };
-      }),
+      documents: knowledgeDocuments,
       conflicts: conflicts
         .sort((left, right) => {
           const leftScore = left.requiresManualValidation ? 1 : 0;
@@ -3221,6 +3224,42 @@ function getTownHallDocumentAvailability(doc: {
   };
 }
 
+async function hasTownHallDocumentBlob(documentId: string) {
+  const [storedFile] = await db.select({
+    documentId: townHallDocumentFilesTable.documentId,
+  })
+    .from(townHallDocumentFilesTable)
+    .where(eq(townHallDocumentFilesTable.documentId, documentId))
+    .limit(1);
+
+  return !!storedFile?.documentId;
+}
+
+async function resolveTownHallDocumentAvailability(doc: {
+  id: string;
+  title?: string | null;
+  fileName: string | null;
+  rawText: string | null;
+  documentType?: string | null;
+  hasVisionAnalysis?: boolean | null;
+  hasStoredBlob?: boolean | null;
+}) {
+  const syncAvailability = getTownHallDocumentAvailability(doc);
+  if (syncAvailability.hasStoredFile) {
+    return syncAvailability;
+  }
+
+  const hasBlob = await hasTownHallDocumentBlob(doc.id);
+  if (!hasBlob) {
+    return syncAvailability;
+  }
+
+  return getTownHallDocumentAvailability({
+    ...doc,
+    hasStoredBlob: true,
+  });
+}
+
 async function maybeSyncTownHallDocumentClassification(doc: {
   id: string;
   title?: string | null;
@@ -3705,7 +3744,7 @@ router.get("/documents", async (req: AuthRequest, res) => {
       : filteredByAccess;
     
     const filteredDocs = await Promise.all(docsForCommune.map(async (d) => {
-      const availability = getTownHallDocumentAvailability(d);
+      const availability = await resolveTownHallDocumentAvailability(d);
       const classification = await maybeSyncTownHallDocumentClassification(d);
       return {
         id: d.id,
@@ -4522,6 +4561,11 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       ? await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: referenceDocumentId })
       : { sections: [], rules: [] };
 
+    const availabilityEntries = await Promise.all(
+      availableDocuments.map(async (doc) => [doc.id, await resolveTownHallDocumentAvailability(doc)] as const),
+    );
+    const availabilityByDocumentId = new Map(availabilityEntries);
+
     const articleAnchors = buildZoneArticleAnchors(workspacePages.map((page) => ({
       pageNumber: page.pageNumber,
       text: page.text,
@@ -4541,85 +4585,93 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       zoneRules.some((rule) => rule.overlayId === overlay.id)
       || derivedSegments.some((segment) => segment.overlayId === overlay.id),
     );
-    const expertAnalysis = await buildExpertZoneAnalysisWithAdjudication({
-      commune: access.targetCommune,
-      zone: {
-        zoneCode: zone.zoneCode,
-        zoneLabel: zone.zoneLabel,
-        parentZoneCode: zone.parentZoneCode,
-      },
-      referenceDocument: referenceDocument
-        ? {
-            id: referenceDocument.id,
-            title: referenceDocument.title,
-            fileName: referenceDocument.fileName,
-            documentType: referenceDocument.documentType,
-          }
-        : null,
-      overlays: activeOverlays,
-      segments: derivedSegments.map((segment) => ({
-        ...segment,
-        documentTitle: documentMap.get(segment.documentId)?.title || documentMap.get(segment.documentId)?.fileName || null,
-      })),
-      documents: availableDocuments,
-      documentProfiles,
-      zoneSections: zoneSections.map((section) => ({
-        id: section.id,
-        zoneCode: section.reviewedZoneCode || section.zoneCode,
-        heading: section.heading,
-        sourceText: section.sourceText || null,
-        startPage: section.reviewedStartPage ?? section.startPage,
-        endPage: section.reviewedEndPage ?? section.endPage,
-        townHallDocumentId: section.townHallDocumentId || null,
-        documentTitle: availableDocuments.find((doc) => doc.id === section.townHallDocumentId)?.title
-          || availableDocuments.find((doc) => doc.id === section.townHallDocumentId)?.fileName
-          || null,
-      })),
-      rules: zoneRules.map((rule) => ({
-        id: rule.id,
-        zoneCode: zone.zoneCode,
-        zoneLabel: zone.zoneLabel,
-        overlayId: rule.overlayId,
-        overlayCode: rule.overlayId ? (activeOverlays.find((overlay) => overlay.id === rule.overlayId)?.overlayCode || null) : null,
-        overlayLabel: rule.overlayId ? (activeOverlays.find((overlay) => overlay.id === rule.overlayId)?.overlayLabel || null) : null,
-        overlayType: rule.overlayType,
-        normativeEffect: rule.normativeEffect,
-        proceduralEffect: rule.proceduralEffect,
-        applicabilityScope: rule.applicabilityScope,
-        ruleAnchorType: rule.ruleAnchorType,
-        ruleAnchorLabel: rule.ruleAnchorLabel,
-        isRelationalRule: rule.isRelationalRule,
-        requiresCrossDocumentResolution: rule.requiresCrossDocumentResolution,
-        resolutionStatus: rule.resolutionStatus,
-        linkedRuleCount: rule.linkedRuleCount,
-        relationResolutionNote: null,
-        relations: [],
-        ruleFamily: rule.themeCode,
-        ruleTopic: rule.themeCode,
-        ruleLabel: rule.ruleLabel,
-        ruleTextRaw: rule.sourceText,
-        ruleSummary: rule.interpretationNote,
-        ruleValueType: rule.operator ? "structured" : null,
-        ruleValueMin: null,
-        ruleValueMax: null,
-        ruleValueExact: sanitizeZoneRuleValueNumeric(rule),
-        ruleUnit: rule.unit,
-        ruleCondition: rule.conditionText,
-        ruleException: null,
-        sourcePage: rule.sourcePage,
-        sourceArticle: rule.articleCode,
-        sourceExcerpt: rule.sourceText,
-        confidenceScore: rule.confidenceScore,
-        reviewStatus: rule.status,
-        requiresManualValidation: rule.status !== "published",
-        ruleConflictFlag: rule.conflictFlag,
-        sourceDocumentId: rule.documentId,
-        sourceDocumentKind: documentMap.get(rule.documentId)?.documentType || null,
-        sourceDocumentName: documentMap.get(rule.documentId)?.title || documentMap.get(rule.documentId)?.fileName || null,
-        visualCapture: null,
-        visualSupportNote: null,
-      })),
-    });
+    let expertAnalysis = null;
+    try {
+      expertAnalysis = await buildExpertZoneAnalysisWithAdjudication({
+        commune: access.targetCommune,
+        zone: {
+          zoneCode: zone.zoneCode,
+          zoneLabel: zone.zoneLabel,
+          parentZoneCode: zone.parentZoneCode,
+        },
+        referenceDocument: referenceDocument
+          ? {
+              id: referenceDocument.id,
+              title: referenceDocument.title,
+              fileName: referenceDocument.fileName,
+              documentType: referenceDocument.documentType,
+            }
+          : null,
+        overlays: activeOverlays,
+        segments: derivedSegments.map((segment) => ({
+          ...segment,
+          documentTitle: documentMap.get(segment.documentId)?.title || documentMap.get(segment.documentId)?.fileName || null,
+        })),
+        documents: availableDocuments,
+        documentProfiles,
+        zoneSections: zoneSections
+          .map((section) => ({
+            id: section.id,
+            zoneCode: section.reviewedZoneCode || section.zoneCode,
+            heading: section.heading,
+            sourceText: section.sourceText || null,
+            startPage: section.reviewedStartPage ?? section.startPage,
+            endPage: section.reviewedEndPage ?? section.endPage,
+            townHallDocumentId: section.townHallDocumentId || null,
+            documentTitle: availableDocuments.find((doc) => doc.id === section.townHallDocumentId)?.title
+              || availableDocuments.find((doc) => doc.id === section.townHallDocumentId)?.fileName
+              || null,
+          }))
+          .filter((section) => !!section.zoneCode),
+        rules: zoneRules.map((rule) => ({
+          id: rule.id,
+          zoneCode: zone.zoneCode,
+          zoneLabel: zone.zoneLabel,
+          overlayId: rule.overlayId,
+          overlayCode: rule.overlayId ? (activeOverlays.find((overlay) => overlay.id === rule.overlayId)?.overlayCode || null) : null,
+          overlayLabel: rule.overlayId ? (activeOverlays.find((overlay) => overlay.id === rule.overlayId)?.overlayLabel || null) : null,
+          overlayType: rule.overlayType,
+          normativeEffect: rule.normativeEffect,
+          proceduralEffect: rule.proceduralEffect,
+          applicabilityScope: rule.applicabilityScope,
+          ruleAnchorType: rule.ruleAnchorType,
+          ruleAnchorLabel: rule.ruleAnchorLabel,
+          isRelationalRule: rule.isRelationalRule,
+          requiresCrossDocumentResolution: rule.requiresCrossDocumentResolution,
+          resolutionStatus: rule.resolutionStatus,
+          linkedRuleCount: rule.linkedRuleCount,
+          relationResolutionNote: null,
+          relations: [],
+          ruleFamily: rule.themeCode,
+          ruleTopic: rule.themeCode,
+          ruleLabel: rule.ruleLabel,
+          ruleTextRaw: rule.sourceText,
+          ruleSummary: rule.interpretationNote,
+          ruleValueType: rule.operator ? "structured" : null,
+          ruleValueMin: null,
+          ruleValueMax: null,
+          ruleValueExact: sanitizeZoneRuleValueNumeric(rule),
+          ruleUnit: rule.unit,
+          ruleCondition: rule.conditionText,
+          ruleException: null,
+          sourcePage: rule.sourcePage,
+          sourceArticle: rule.articleCode,
+          sourceExcerpt: rule.sourceText,
+          confidenceScore: rule.confidenceScore,
+          reviewStatus: rule.status,
+          requiresManualValidation: rule.status !== "published",
+          ruleConflictFlag: rule.conflictFlag,
+          sourceDocumentId: rule.documentId,
+          sourceDocumentKind: documentMap.get(rule.documentId)?.documentType || null,
+          sourceDocumentName: documentMap.get(rule.documentId)?.title || documentMap.get(rule.documentId)?.fileName || null,
+          visualCapture: null,
+          visualSupportNote: null,
+        })),
+      });
+    } catch (expertAnalysisError) {
+      logger.error("[mairie/regulatory-calibration/zone-workspace expert-analysis]", expertAnalysisError);
+      expertAnalysis = null;
+    }
 
     return res.json({
       commune: access.targetCommune,
@@ -4636,7 +4688,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
             title: referenceDocument.title,
             fileName: referenceDocument.fileName,
             documentType: referenceDocument.documentType,
-            availability: getTownHallDocumentAvailability(referenceDocument),
+            availability: availabilityByDocumentId.get(referenceDocument.id) || getTownHallDocumentAvailability(referenceDocument),
           }
         : null,
       availableDocuments: availableDocuments.map((doc) => ({
@@ -4644,7 +4696,7 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
         title: doc.title,
         fileName: doc.fileName,
         documentType: doc.documentType,
-        availability: getTownHallDocumentAvailability(doc),
+        availability: availabilityByDocumentId.get(doc.id) || getTownHallDocumentAvailability(doc),
       })),
       overlays,
       themes: themes.map((theme) => ({
@@ -5510,7 +5562,7 @@ router.get("/regulatory-calibration/documents/:id/workspace", async (req: AuthRe
     const suggestions = await buildCalibrationSuggestionsForDocument({ communeAliases, townHallDocumentId: id });
     const zoneMap = new Map(calibrationData.zones.map((zone) => [zone.id, zone]));
     const overlayMap = new Map(calibrationData.overlays.map((overlay) => [overlay.id, overlay]));
-    const docAvailability = getTownHallDocumentAvailability(doc);
+    const docAvailability = await resolveTownHallDocumentAvailability(doc);
     const relations = await hydrateRuleRelations(calibrationData.relations || []);
 
     return res.json({
@@ -7551,15 +7603,15 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
       .where(eq(townHallDocumentsTable.id, id))
       .limit(1);
 
-    if (!doc || !doc.fileName) {
-      console.warn(`[mairie/view] Document record or filename not found for ID: ${id}`);
+    if (!doc) {
+      console.warn(`[mairie/view] Document record not found for ID: ${id}`);
       return res.status(404).json({ error: "DOCUMENT_NOT_FOUND" });
     }
     if (!canAccessCommune(role, assignedCommunes, doc.commune)) {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
-    const diskPath = resolveTownHallDocumentPath(id, doc.fileName);
+    const diskPath = doc.fileName ? resolveTownHallDocumentPath(id, doc.fileName) : null;
     if (diskPath && fs.existsSync(diskPath)) {
       if (!doc.hasStoredBlob) {
         await backfillTownHallDocumentBlobFromDisk({
@@ -7582,7 +7634,7 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
       return res.end(storedBlob.buffer);
     }
 
-    console.error(`[mairie/view] Physical file missing and persistent blob unavailable for: ${doc.fileName}`);
+    console.error(`[mairie/view] Physical file missing and persistent blob unavailable for: ${doc.fileName || id}`);
     return res.status(404).json({ error: "FILE_NOT_FOUND", message: "Le PDF source n'est disponible ni sur le disque ni dans le stockage persistant." });
   } catch (err) {
     console.error(`[mairie/view] Critical error for ID ${req.params.id}:`, err);

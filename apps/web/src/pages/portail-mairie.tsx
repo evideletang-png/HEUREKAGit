@@ -160,6 +160,7 @@ type PluKnowledgeSummary = {
     fileName: string | null;
     documentType: string | null;
     opposable: boolean;
+    hasStoredFile?: boolean;
     availabilityStatus: string;
     availabilityMessage: string;
     textQualityLabel: string | null;
