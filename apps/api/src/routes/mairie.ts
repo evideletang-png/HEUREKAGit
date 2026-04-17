@@ -1408,15 +1408,25 @@ async function ensureCalibrationZonesForCommune(args: {
   referenceDocumentId?: string | null;
   userId?: string | null;
 }) {
-  const zoneCodes = extractCalibrationZoneCodes(args.rawText, {
-    zoningLike: isLikelyZoningLikeSource({
-      rawText: args.rawText,
-      sourceName: args.sourceName,
-      sourceType: args.sourceType,
+  const extractedSections = extractRegulatoryZoneSections(args.rawText);
+  const sectionByZoneCode = new Map(
+    extractedSections
+      .map((section) => [normalizeConfiguredZoneCode(section.zoneCode), section] as const)
+      .filter((entry): entry is [string, (typeof extractedSections)[number]] => !!entry[0]),
+  );
+
+  const zoneCodes = Array.from(new Set([
+    ...Array.from(sectionByZoneCode.keys()),
+    ...extractCalibrationZoneCodes(args.rawText, {
+      zoningLike: isLikelyZoningLikeSource({
+        rawText: args.rawText,
+        sourceName: args.sourceName,
+        sourceType: args.sourceType,
+      }),
     }),
-  });
+  ]));
   if (zoneCodes.length === 0) {
-    return { detected: 0, created: 0 };
+    return { detected: 0, created: 0, updated: 0 };
   }
 
   const [existingZones, deletedZones] = await Promise.all([
@@ -1424,6 +1434,12 @@ async function ensureCalibrationZonesForCommune(args: {
       id: regulatoryCalibrationZonesTable.id,
       zoneCode: regulatoryCalibrationZonesTable.zoneCode,
       displayOrder: regulatoryCalibrationZonesTable.displayOrder,
+      guidanceNotes: regulatoryCalibrationZonesTable.guidanceNotes,
+      searchKeywords: regulatoryCalibrationZonesTable.searchKeywords,
+      referenceDocumentId: regulatoryCalibrationZonesTable.referenceDocumentId,
+      referenceStartPage: regulatoryCalibrationZonesTable.referenceStartPage,
+      referenceEndPage: regulatoryCalibrationZonesTable.referenceEndPage,
+      parentZoneCode: regulatoryCalibrationZonesTable.parentZoneCode,
     })
       .from(regulatoryCalibrationZonesTable)
       .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.communeAliases)),
@@ -1440,16 +1456,65 @@ async function ensureCalibrationZonesForCommune(args: {
       ),
   ]);
 
-  const existingZoneCodes = new Set(
+  const existingZoneByCode = new Map(
     existingZones
-      .map((zone) => normalizeConfiguredZoneCode(zone.zoneCode))
-      .filter((zoneCode): zoneCode is string => !!zoneCode),
+      .map((zone) => [normalizeConfiguredZoneCode(zone.zoneCode), zone] as const)
+      .filter((entry): entry is [string, (typeof existingZones)[number]] => !!entry[0]),
   );
+  const existingZoneCodes = new Set(existingZoneByCode.keys());
   const deletedZoneCodes = new Set(
     deletedZones
       .map((entry) => normalizeConfiguredZoneCode((entry.snapshot as Record<string, unknown> | null | undefined)?.zoneCode))
       .filter((zoneCode): zoneCode is string => !!zoneCode),
   );
+
+  let updated = 0;
+  for (const zoneCode of zoneCodes) {
+    const existingZone = existingZoneByCode.get(zoneCode);
+    if (!existingZone) continue;
+
+    const section = sectionByZoneCode.get(zoneCode) || null;
+    const autoKeywords = normalizeZoneSearchKeywords([
+      zoneCode,
+      `zone ${zoneCode}`,
+      section?.heading || "",
+    ]);
+    const nextReferenceStartPage = existingZone.referenceStartPage ?? section?.startPage ?? null;
+    const nextReferenceEndPage = existingZone.referenceEndPage ?? section?.endPage ?? null;
+    const nextReferenceDocumentId = existingZone.referenceDocumentId ?? args.referenceDocumentId ?? null;
+    const nextGuidanceNotes = existingZone.guidanceNotes ?? section?.heading ?? (
+      args.sourceName
+        ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
+        : "Zone détectée automatiquement depuis un document réglementaire."
+    );
+    const nextParentZoneCode = existingZone.parentZoneCode ?? section?.parentZoneCode ?? deriveParentZoneCode(zoneCode);
+    const existingKeywords = Array.isArray(existingZone.searchKeywords) ? existingZone.searchKeywords : [];
+    const mergedKeywords = Array.from(new Set([...existingKeywords, ...autoKeywords]));
+
+    const shouldUpdate =
+      nextReferenceStartPage !== existingZone.referenceStartPage
+      || nextReferenceEndPage !== existingZone.referenceEndPage
+      || nextReferenceDocumentId !== existingZone.referenceDocumentId
+      || nextGuidanceNotes !== existingZone.guidanceNotes
+      || nextParentZoneCode !== existingZone.parentZoneCode
+      || mergedKeywords.length !== existingKeywords.length;
+
+    if (!shouldUpdate) continue;
+
+    await db.update(regulatoryCalibrationZonesTable)
+      .set({
+        parentZoneCode: nextParentZoneCode,
+        guidanceNotes: nextGuidanceNotes,
+        searchKeywords: mergedKeywords,
+        referenceDocumentId: nextReferenceDocumentId,
+        referenceStartPage: nextReferenceStartPage,
+        referenceEndPage: nextReferenceEndPage,
+        updatedBy: args.userId || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(regulatoryCalibrationZonesTable.id, existingZone.id));
+    updated += 1;
+  }
 
   const nextDisplayOrder = existingZones.reduce((maxOrder, zone) => Math.max(maxOrder, zone.displayOrder || 0), 0) + 1;
   const zonesToCreate = zoneCodes
@@ -1457,24 +1522,36 @@ async function ensureCalibrationZonesForCommune(args: {
     .filter((zoneCode) => !deletedZoneCodes.has(zoneCode));
 
   if (zonesToCreate.length === 0) {
-    return { detected: zoneCodes.length, created: 0 };
+    return { detected: zoneCodes.length, created: 0, updated };
   }
 
   const createdZones = await db.insert(regulatoryCalibrationZonesTable).values(
-    zonesToCreate.map((zoneCode, index) => ({
-      communeId: args.communeKey,
-      zoneCode,
-      zoneLabel: `Zone ${zoneCode}`,
-      parentZoneCode: deriveParentZoneCode(zoneCode),
-      guidanceNotes: args.sourceName
-        ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
-        : "Zone détectée automatiquement depuis un document réglementaire.",
-      referenceDocumentId: args.referenceDocumentId || null,
-      displayOrder: nextDisplayOrder + index,
-      isActive: true,
-      createdBy: args.userId || null,
-      updatedBy: args.userId || null,
-    })),
+    zonesToCreate.map((zoneCode, index) => {
+      const section = sectionByZoneCode.get(zoneCode) || null;
+      return {
+        communeId: args.communeKey,
+        zoneCode,
+        zoneLabel: `Zone ${zoneCode}`,
+        parentZoneCode: section?.parentZoneCode ?? deriveParentZoneCode(zoneCode),
+        guidanceNotes: section?.heading || (
+          args.sourceName
+            ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
+            : "Zone détectée automatiquement depuis un document réglementaire."
+        ),
+        searchKeywords: normalizeZoneSearchKeywords([
+          zoneCode,
+          `zone ${zoneCode}`,
+          section?.heading || "",
+        ]),
+        referenceDocumentId: args.referenceDocumentId || null,
+        referenceStartPage: section?.startPage ?? null,
+        referenceEndPage: section?.endPage ?? null,
+        displayOrder: nextDisplayOrder + index,
+        isActive: true,
+        createdBy: args.userId || null,
+        updatedBy: args.userId || null,
+      };
+    }),
   ).returning();
 
   await Promise.all(
@@ -1493,6 +1570,7 @@ async function ensureCalibrationZonesForCommune(args: {
   return {
     detected: zoneCodes.length,
     created: createdZones.length,
+    updated,
   };
 }
 
@@ -1839,6 +1917,16 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
           sourceAuthority: authorityForCanonicalType(canonicalType),
           isOpposable: !!doc.isOpposable,
           rawText: doc.rawText,
+        });
+
+        await ensureCalibrationZonesForCommune({
+          communeKey: municipalityKey,
+          communeAliases: municipalityAliases,
+          rawText: doc.rawText,
+          sourceName: doc.title || doc.fileName,
+          sourceType: classification.resolved.documentType || null,
+          referenceDocumentId: doc.id,
+          userId: req.user!.userId,
         });
 
         await persistStructuredKnowledgeForDocument({
