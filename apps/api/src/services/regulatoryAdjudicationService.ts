@@ -37,6 +37,53 @@ const SourceDecisionSchema = z.object({
   confidence: ConfidenceEnum,
 });
 
+const CrossDocumentDependencySchema = z.object({
+  topic_code: z.string().nullable(),
+  source_document_id: z.string().nullable(),
+  source_document_name: z.string(),
+  target_document_id: z.string().nullable(),
+  target_document_name: z.string(),
+  dependency_type: z.enum([
+    "graphic_referral",
+    "annex_referral",
+    "risk_referral",
+    "overlay_referral",
+    "document_referral",
+    "subsector_referral",
+    "topic_support",
+  ]),
+  normative_effect: z.enum(["primary", "additive", "restrictive", "substitutive", "procedural", "informative"]),
+  reason: z.string(),
+  confidence: ConfidenceEnum,
+});
+
+const NormativeEffectSchema = z.object({
+  topic_code: z.string().nullable(),
+  source_label: z.string(),
+  effect: z.enum(["primary", "additive", "restrictive", "substitutive", "procedural", "informative"]),
+  reason: z.string(),
+  confidence: ConfidenceEnum,
+});
+
+const ArbitrationCandidateSchema = z.object({
+  topic_code: z.string(),
+  source_label: z.string(),
+  source_type: z.enum(["published_rule", "segment", "zone_section", "document", "overlay", "risk", "graphical_doc"]),
+  normative_effect: z.enum(["primary", "additive", "restrictive", "substitutive", "procedural", "informative"]),
+  role: z.enum(["primary", "secondary", "graphical", "risk", "context"]),
+  confidence: ConfidenceEnum,
+  note: z.string(),
+});
+
+const ArbitrationDecisionSchema = z.object({
+  topic_code: z.string(),
+  summary: z.string(),
+  primary_source: z.string().nullable(),
+  retained_sources: z.array(z.string()),
+  discarded_sources: z.array(z.string()),
+  confidence: ConfidenceEnum,
+});
+
 const TopicAnalysisSchema = z.object({
   commune: z.string(),
   document_set: z.array(z.object({
@@ -62,10 +109,14 @@ const TopicAnalysisSchema = z.object({
   exceptions: z.array(z.string()),
   graphical_dependencies: z.array(z.string()),
   risks_and_servitudes: z.array(z.string()),
+  cross_document_dependencies: z.array(CrossDocumentDependencySchema).optional(),
+  normative_effects: z.array(NormativeEffectSchema).optional(),
   warnings: z.array(z.string()),
   confidence: ConfidenceEnum,
   reasoning_summary: z.string(),
   source_decisions: z.array(SourceDecisionSchema).optional(),
+  arbitration_candidates: z.array(ArbitrationCandidateSchema).optional(),
+  arbitration_decision: ArbitrationDecisionSchema.nullable().optional(),
 });
 
 const ArticleSummarySchema = z.object({

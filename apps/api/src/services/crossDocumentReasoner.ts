@@ -2,9 +2,13 @@ import { REGULATORY_ARTICLE_REFERENCE, REGULATORY_THEME_SEED } from "./regulator
 import { resolveGraphicalDependencies } from "./graphicalRuleResolver.js";
 import { resolveRiskAndOverlayEffects } from "./riskAndOverlayResolver.js";
 import type {
+  ArbitrationCandidate,
+  ArbitrationDecision,
   ClassifiedRegulatoryDocument,
+  CrossDocumentDependency,
   GraphicalDependency,
   IndexedRegulatorySource,
+  NormativeEffectDescriptor,
   RegulatorySuggestion,
   RegulatoryArticleSummary,
   RegulatoryConfidence,
@@ -136,6 +140,7 @@ function buildReasoningSummary(args: {
   sources: IndexedRegulatorySource[];
   graphicalDependencies: string[];
   risksAndServitudes: string[];
+  crossDocumentDependencies: CrossDocumentDependency[];
 }) {
   const sourceTypes = unique(args.sources.map((source) => source.source_type));
   const parts = [
@@ -147,7 +152,59 @@ function buildReasoningSummary(args: {
   if (args.risksAndServitudes.length > 0) {
     parts.push("Des risques ou servitudes superposés doivent être recoupés.");
   }
+  if (args.crossDocumentDependencies.length > 0) {
+    parts.push("Des dépendances documentaires complémentaires ont été intégrées dans l'arbitrage.");
+  }
   return parts.join(" ");
+}
+
+function dedupeDependencies(dependencies: CrossDocumentDependency[]) {
+  const seen = new Set<string>();
+  return dependencies.filter((dependency) => {
+    const key = [
+      dependency.topic_code || "",
+      dependency.source_document_name,
+      dependency.target_document_name,
+      dependency.dependency_type,
+      dependency.reason,
+    ].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeNormativeEffects(effects: NormativeEffectDescriptor[]) {
+  const seen = new Set<string>();
+  return effects.filter((effect) => {
+    const key = [effect.topic_code || "", effect.source_label, effect.effect, effect.reason].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildArbitrationDecision(args: {
+  topicCode: string;
+  primarySource: IndexedRegulatorySource | null;
+  sourceDecisions: RegulatorySourceDecision[];
+  confidence: RegulatoryConfidence;
+}): ArbitrationDecision | null {
+  if (!args.primarySource && args.sourceDecisions.length === 0) return null;
+  return {
+    topic_code: args.topicCode,
+    summary: args.primarySource
+      ? `Source principale retenue : ${buildSourceLabel(args.primarySource)}. Les autres pièces ont été conservées comme compléments, risques ou contexte selon leur poids normatif.`
+      : "Aucune source principale suffisamment ferme n'a été retenue ; l'arbitrage reste prudent.",
+    primary_source: args.primarySource ? buildSourceLabel(args.primarySource) : null,
+    retained_sources: args.sourceDecisions
+      .filter((decision) => decision.decision !== "discarded_context" && decision.decision !== "discarded_low_confidence")
+      .map((decision) => decision.source_label),
+    discarded_sources: args.sourceDecisions
+      .filter((decision) => decision.decision === "discarded_context" || decision.decision === "discarded_low_confidence")
+      .map((decision) => decision.source_label),
+    confidence: args.confidence,
+  };
 }
 
 function deriveSuggestionStatus(args: {
@@ -395,6 +452,9 @@ export function buildCrossDocumentReasoning(args: {
         .map((signal) => `${signal.label}${signal.excerpt ? ` : ${truncate(signal.excerpt, 140)}` : ""}`),
       ...graphical.warnings,
       ...risks.warnings,
+      ...(bundle.cross_document_dependencies.length > 0
+        ? ["Le thème dépend d'autres pièces ou couches qui ont été recroisées dans l'arbitrage final."]
+        : []),
     ]);
 
     const values = bundle.direct_rules.map((source) => extractCandidateValue(source)).filter((candidate) => candidate.value != null);
@@ -420,6 +480,14 @@ export function buildCrossDocumentReasoning(args: {
       riskSources: bundle.risk_sources,
       hasGraphicReferral: bundle.cross_document_signals.some((signal) => signal.kind === "graphic_referral"),
     });
+    const crossDocumentDependencies = dedupeDependencies(bundle.cross_document_dependencies);
+    const normativeEffects = dedupeNormativeEffects(bundle.normative_effects);
+    const arbitrationDecision = buildArbitrationDecision({
+      topicCode: bundle.topic_code,
+      primarySource,
+      sourceDecisions,
+      confidence,
+    });
     const ruleSummary = primarySource
       ? truncate(primarySource.summary, 420)
       : `Aucune règle ferme n’a été stabilisée pour ${topicMeta.description.toLowerCase()}.`;
@@ -442,6 +510,8 @@ export function buildCrossDocumentReasoning(args: {
       exceptions,
       graphical_dependencies: graphical.dependencies.map((dependency) => `${dependency.document_name} — ${dependency.reason}`),
       risks_and_servitudes: risks.risks_and_servitudes,
+      cross_document_dependencies: crossDocumentDependencies,
+      normative_effects: normativeEffects,
       warnings: unique(warnings),
       confidence,
       reasoning_summary: buildReasoningSummary({
@@ -449,8 +519,11 @@ export function buildCrossDocumentReasoning(args: {
         sources: orderedSources,
         graphicalDependencies: graphical.dependencies.map((dependency) => dependency.document_name),
         risksAndServitudes: risks.risks_and_servitudes,
+        crossDocumentDependencies,
       }),
       source_decisions: sourceDecisions,
+      arbitration_candidates: bundle.arbitration_candidates,
+      arbitration_decision: arbitrationDecision,
     };
   });
 
@@ -543,6 +616,8 @@ export function buildCrossDocumentReasoning(args: {
       exceptions: analysis.exceptions,
       graphical_dependencies: graphicalDependencies,
       risks_and_servitudes: risksAndServitudes,
+      cross_document_dependencies: analysis.cross_document_dependencies,
+      normative_effects: analysis.normative_effects,
       warnings: analysis.warnings,
       confidence: analysis.confidence,
       reasoning_summary: analysis.reasoning_summary,

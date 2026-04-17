@@ -5,6 +5,7 @@ import { regulatoryOverlaysTable } from "../../../../packages/db/src/schema/regu
 import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
 import { zoneThematicSegmentsTable } from "../../../../packages/db/src/schema/zoneThematicSegments.js";
 import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
+import { regulatoryZoneSectionsTable } from "../../../../packages/db/src/schema/regulatoryZoneSections.js";
 import type { StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
 import { normalizeExtractedText } from "./textQualityService.js";
 import { REGULATORY_ARTICLE_REFERENCE, REGULATORY_THEME_SEED, splitDocumentIntoCalibrationPages } from "./regulatoryCalibrationService.js";
@@ -93,6 +94,12 @@ export type ExpertZoneAnalysis = {
       status: string | null;
     }>;
     complementaryDocuments: string[];
+    graphOverview?: {
+      documentCount: number;
+      dependencyCount: number;
+      graphicalDependencyCount: number;
+      riskConstraintCount: number;
+    };
   };
   articleOrThemeBlocks: ExpertZoneArticleOrThemeBlock[];
   multiDocumentAnalysis?: RegulatoryEngineOutput | null;
@@ -817,6 +824,7 @@ export function buildExpertZoneAnalysis(args: {
   };
   let certaintyBuckets: ExpertZoneAnalysis["certaintyBuckets"] | undefined;
   let suggestions: RegulatorySuggestion[] | undefined;
+  let graphOverview: ExpertZoneAnalysis["identification"]["graphOverview"] | undefined;
 
   if (args.documents && args.documentProfiles) {
     const engine = buildMultiDocumentRegulatoryEngine({
@@ -841,6 +849,12 @@ export function buildExpertZoneAnalysis(args: {
     multiDocumentAnalysis = engine.engineOutput;
     suggestions = engine.engineOutput.suggestions;
     certaintyBuckets = buildCertaintyBuckets(engine.engineOutput.topic_analyses);
+    graphOverview = {
+      documentCount: engine.engineOutput.document_set.length,
+      dependencyCount: engine.engineOutput.topic_analyses.reduce((sum, topic) => sum + (topic.cross_document_dependencies?.length || 0), 0),
+      graphicalDependencyCount: engine.engineOutput.topic_analyses.reduce((sum, topic) => sum + (topic.graphical_dependencies?.length || 0), 0),
+      riskConstraintCount: engine.engineOutput.topic_analyses.reduce((sum, topic) => sum + (topic.risks_and_servitudes?.length || 0), 0),
+    };
     otherDocuments = engine.otherDocuments.length > 0 ? engine.otherDocuments : otherDocuments;
     professionalInterpretation = engine.professionalInterpretation;
     operationalConclusion = engine.operationalConclusion;
@@ -873,6 +887,7 @@ export function buildExpertZoneAnalysis(args: {
         status: overlay.status,
       })),
       complementaryDocuments,
+      graphOverview,
     },
     articleOrThemeBlocks,
     multiDocumentAnalysis,
@@ -1144,18 +1159,37 @@ export async function loadZoneSegmentsForCommuneZone(args: {
       .where(inArray(documentKnowledgeProfilesTable.municipalityId, args.communeAliases))
     : [];
 
-  const zoneSections = referenceDocument
-    ? [{
-        id: `reference-${referenceDocument.id}`,
-        zoneCode: zone.zoneCode,
-        heading: referenceDocument.title || referenceDocument.fileName || null,
-        sourceText: referenceDocument.rawText || null,
-        startPage: zone.referenceStartPage || null,
-        endPage: zone.referenceEndPage || null,
-        townHallDocumentId: referenceDocument.id,
-        documentTitle: referenceDocument.title || referenceDocument.fileName || null,
-      }]
+  const storedZoneSections = args.communeAliases.length > 0
+    ? await db.select({
+        id: regulatoryZoneSectionsTable.id,
+        zoneCode: sql<string>`coalesce(${regulatoryZoneSectionsTable.reviewedZoneCode}, ${regulatoryZoneSectionsTable.zoneCode})`,
+        heading: regulatoryZoneSectionsTable.heading,
+        sourceText: regulatoryZoneSectionsTable.sourceText,
+        startPage: sql<number | null>`coalesce(${regulatoryZoneSectionsTable.reviewedStartPage}, ${regulatoryZoneSectionsTable.startPage})`,
+        endPage: sql<number | null>`coalesce(${regulatoryZoneSectionsTable.reviewedEndPage}, ${regulatoryZoneSectionsTable.endPage})`,
+        townHallDocumentId: regulatoryZoneSectionsTable.townHallDocumentId,
+        documentTitle: townHallDocumentsTable.title,
+      })
+        .from(regulatoryZoneSectionsTable)
+        .leftJoin(townHallDocumentsTable, eq(regulatoryZoneSectionsTable.townHallDocumentId, townHallDocumentsTable.id))
+        .where(inArray(regulatoryZoneSectionsTable.municipalityId, args.communeAliases))
     : [];
+
+  const zoneSections = [
+    ...storedZoneSections,
+    ...(referenceDocument
+      ? [{
+          id: `reference-${referenceDocument.id}`,
+          zoneCode: zone.zoneCode,
+          heading: referenceDocument.title || referenceDocument.fileName || null,
+          sourceText: referenceDocument.rawText || null,
+          startPage: zone.referenceStartPage || null,
+          endPage: zone.referenceEndPage || null,
+          townHallDocumentId: referenceDocument.id,
+          documentTitle: referenceDocument.title || referenceDocument.fileName || null,
+        }]
+      : []),
+  ];
 
   const expertAnalysis = await buildExpertZoneAnalysisWithAdjudication({
     commune: args.commune,

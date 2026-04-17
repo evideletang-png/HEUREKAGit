@@ -81,6 +81,45 @@ export type CrossDocumentSignal = {
   confidence: RegulatoryConfidence;
 };
 
+export type CrossDocumentDependency = {
+  topic_code: string | null;
+  source_document_id: string | null;
+  source_document_name: string;
+  target_document_id: string | null;
+  target_document_name: string;
+  dependency_type:
+    | "graphic_referral"
+    | "annex_referral"
+    | "risk_referral"
+    | "overlay_referral"
+    | "document_referral"
+    | "subsector_referral"
+    | "topic_support";
+  normative_effect:
+    | "primary"
+    | "additive"
+    | "restrictive"
+    | "substitutive"
+    | "procedural"
+    | "informative";
+  reason: string;
+  confidence: RegulatoryConfidence;
+};
+
+export type NormativeEffectDescriptor = {
+  topic_code: string | null;
+  source_label: string;
+  effect:
+    | "primary"
+    | "additive"
+    | "restrictive"
+    | "substitutive"
+    | "procedural"
+    | "informative";
+  reason: string;
+  confidence: RegulatoryConfidence;
+};
+
 export type ClassifiedRegulatoryDocument = {
   document_id: string;
   profile_id: string | null;
@@ -102,6 +141,10 @@ export type ClassifiedRegulatoryDocument = {
   zone_hints: string[];
   structured_topics: string[];
   detected_signals: CrossDocumentSignal[];
+  cross_document_dependencies: CrossDocumentDependency[];
+  graphical_dependencies: GraphicalDependency[];
+  risk_constraints: RiskOverlayConstraint[];
+  normative_effects: NormativeEffectDescriptor[];
   relevance_score: number;
   reasoning_note: string;
 };
@@ -147,6 +190,9 @@ export type IndexedTopicBundle = {
   graphical_sources: IndexedRegulatorySource[];
   risk_sources: IndexedRegulatorySource[];
   cross_document_signals: CrossDocumentSignal[];
+  cross_document_dependencies: CrossDocumentDependency[];
+  normative_effects: NormativeEffectDescriptor[];
+  arbitration_candidates: ArbitrationCandidate[];
 };
 
 export type ZoneRegulatoryIndex = {
@@ -211,6 +257,38 @@ export type RiskOverlayConstraint = {
   note: string;
 };
 
+export type ArbitrationCandidate = {
+  topic_code: string;
+  source_label: string;
+  source_type:
+    | "published_rule"
+    | "segment"
+    | "zone_section"
+    | "document"
+    | "overlay"
+    | "risk"
+    | "graphical_doc";
+  normative_effect:
+    | "primary"
+    | "additive"
+    | "restrictive"
+    | "substitutive"
+    | "procedural"
+    | "informative";
+  role: "primary" | "secondary" | "graphical" | "risk" | "context";
+  confidence: RegulatoryConfidence;
+  note: string;
+};
+
+export type ArbitrationDecision = {
+  topic_code: string;
+  summary: string;
+  primary_source: string | null;
+  retained_sources: string[];
+  discarded_sources: string[];
+  confidence: RegulatoryConfidence;
+};
+
 export type ZoneAndSubsectorResolution = {
   requested_zone: string;
   identified_zone: string;
@@ -259,6 +337,8 @@ export type RegulatorySuggestion = {
   exceptions: string[];
   graphical_dependencies: GraphicalDependency[];
   risks_and_servitudes: RiskOverlayConstraint[];
+  cross_document_dependencies: CrossDocumentDependency[];
+  normative_effects: NormativeEffectDescriptor[];
   warnings: string[];
   confidence: RegulatoryConfidence;
   reasoning_summary: string;
@@ -290,10 +370,14 @@ export type RegulatoryTopicAnalysis = {
   exceptions: string[];
   graphical_dependencies: string[];
   risks_and_servitudes: string[];
+  cross_document_dependencies: CrossDocumentDependency[];
+  normative_effects: NormativeEffectDescriptor[];
   warnings: string[];
   confidence: RegulatoryConfidence;
   reasoning_summary: string;
   source_decisions?: RegulatorySourceDecision[];
+  arbitration_candidates?: ArbitrationCandidate[];
+  arbitration_decision?: ArbitrationDecision | null;
 };
 
 export type RegulatoryArticleSummary = {
