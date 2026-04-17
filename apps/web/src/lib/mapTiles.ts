@@ -20,13 +20,12 @@ export const SHARED_MAP_TILE_LAYERS: Record<
   }
 > = {
   plan: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; Carto",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     tileOptions: {
       ...SHARED_TILE_LAYER_OPTIONS,
-      detectRetina: true,
-      maxNativeZoom: 20,
-      subdomains: "abcd",
+      maxNativeZoom: 19,
+      subdomains: "abc",
     },
   },
   satellite: {

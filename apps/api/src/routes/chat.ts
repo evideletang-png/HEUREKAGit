@@ -370,8 +370,25 @@ async function buildSystemPrompt(args: {
         expertZoneAnalysis.documentSet?.length
           ? `Jeu documentaire: ${expertZoneAnalysis.documentSet.slice(0, 6).map((doc: any) => `${doc.source_name} (${doc.canonical_type})`).join(", ")}.`
           : "",
+        expertZoneAnalysis.identification?.graphOverview
+          ? `Graphe communal: ${expertZoneAnalysis.identification.graphOverview.documentCount ?? 0} documents relies, ${expertZoneAnalysis.identification.graphOverview.dependencyCount ?? 0} dependances croisees, ${expertZoneAnalysis.identification.graphOverview.graphicalDependencyCount ?? 0} renvois graphiques, ${expertZoneAnalysis.identification.graphOverview.riskConstraintCount ?? 0} risques ou servitudes.`
+          : "",
         expertZoneAnalysis.topicAnalyses?.length
           ? `Thèmes: ${expertZoneAnalysis.topicAnalyses.slice(0, 6).map((topic: any) => `${topic.topic} [${topic.confidence}]`).join(", ")}.`
+          : "",
+        expertZoneAnalysis.topicAnalyses?.some((topic: any) => Array.isArray(topic.cross_document_dependencies) && topic.cross_document_dependencies.length > 0)
+          ? `Dependances croisees retenues: ${expertZoneAnalysis.topicAnalyses
+              .slice(0, 4)
+              .map((topic: any) => {
+                const deps = (topic.cross_document_dependencies || [])
+                  .slice(0, 2)
+                  .map((dependency: any) => dependency.label || dependency.target_document || dependency.dependency_type)
+                  .filter(Boolean)
+                  .join(", ");
+                return deps ? `${topic.topic}: ${deps}` : null;
+              })
+              .filter(Boolean)
+              .join(" | ")}.`
           : "",
         expertZoneAnalysis.topicAnalyses?.some((topic: any) => Array.isArray(topic.source_decisions) && topic.source_decisions.length > 0)
           ? `Arbitrage des sources: ${expertZoneAnalysis.topicAnalyses
@@ -384,6 +401,13 @@ async function buildSystemPrompt(args: {
                   .join(", ");
                 return retained ? `${topic.topic}: ${retained}` : null;
               })
+              .filter(Boolean)
+              .join(" | ")}.`
+          : "",
+        expertZoneAnalysis.topicAnalyses?.some((topic: any) => topic.arbitration_decision?.summary)
+          ? `Decisions d'arbitrage: ${expertZoneAnalysis.topicAnalyses
+              .slice(0, 4)
+              .map((topic: any) => topic.arbitration_decision?.summary ? `${topic.topic}: ${topic.arbitration_decision.summary}` : null)
               .filter(Boolean)
               .join(" | ")}.`
           : "",

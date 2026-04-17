@@ -2,9 +2,12 @@ import { REGULATORY_ARTICLE_REFERENCE, REGULATORY_THEME_SEED } from "./regulator
 import { detectCrossDocumentSignalsFromText } from "./regulatoryDocumentClassifier.js";
 import { normalizeExtractedText } from "./textQualityService.js";
 import type {
+  ArbitrationCandidate,
   ClassifiedRegulatoryDocument,
+  CrossDocumentDependency,
   IndexedRegulatorySource,
   IndexedTopicBundle,
+  NormativeEffectDescriptor,
   ZoneRegulatoryIndex,
   CrossDocumentSignal,
 } from "./regulatoryInterpretationTypes.js";
@@ -177,6 +180,83 @@ function dedupeSignals(signals: CrossDocumentSignal[]) {
   });
 }
 
+function dedupeDependencies(dependencies: CrossDocumentDependency[]) {
+  const seen = new Set<string>();
+  return dependencies.filter((dependency) => {
+    const key = [
+      dependency.topic_code || "",
+      dependency.source_document_name,
+      dependency.target_document_name,
+      dependency.dependency_type,
+      dependency.reason,
+    ].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeNormativeEffects(effects: NormativeEffectDescriptor[]) {
+  const seen = new Set<string>();
+  return effects.filter((effect) => {
+    const key = [effect.topic_code || "", effect.source_label, effect.effect, effect.reason].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function inferNormativeEffectFromSource(source: IndexedRegulatorySource): ArbitrationCandidate["normative_effect"] {
+  if (source.source_type === "risk" || source.source_type === "overlay") return "restrictive";
+  if (source.source_type === "graphical_doc") return "additive";
+  if (source.qualification === "orientation de projet" || source.qualification === "justification / doctrine locale") return "informative";
+  if (source.qualification === "règle opposable indirecte") return "additive";
+  return "primary";
+}
+
+function makeArbitrationCandidate(args: {
+  topicCode: string;
+  source: IndexedRegulatorySource;
+  role: ArbitrationCandidate["role"];
+  normativeEffect: ArbitrationCandidate["normative_effect"];
+  note: string;
+}): ArbitrationCandidate {
+  return {
+    topic_code: args.topicCode,
+    source_label: [args.source.document_title, args.source.anchor_label].filter(Boolean).join(" · ") || args.source.summary.slice(0, 120),
+    source_type: args.source.source_type,
+    normative_effect: args.normativeEffect,
+    role: args.role,
+    confidence: args.source.confidence,
+    note: args.note,
+  };
+}
+
+function buildDependenciesFromSignals(args: {
+  topicCode: string;
+  source: IndexedRegulatorySource;
+  documentTitle: string | null;
+}): CrossDocumentDependency[] {
+  return args.source.signals.map((signal) => ({
+    topic_code: args.topicCode,
+    source_document_id: args.source.document_id,
+    source_document_name: args.documentTitle || args.source.anchor_label || "Source",
+    target_document_id: null,
+    target_document_name: signal.label,
+    dependency_type: signal.kind,
+    normative_effect:
+      signal.kind === "risk_referral" || signal.kind === "overlay_referral"
+        ? "restrictive"
+        : signal.kind === "subsector_referral"
+          ? "primary"
+          : signal.kind === "graphic_referral" || signal.kind === "annex_referral"
+            ? "additive"
+            : "procedural",
+    reason: signal.excerpt || signal.label,
+    confidence: signal.confidence,
+  }));
+}
+
 function createEmptyTopicBundle(topicCode: string): IndexedTopicBundle {
   return {
     topic_code: topicCode,
@@ -188,6 +268,9 @@ function createEmptyTopicBundle(topicCode: string): IndexedTopicBundle {
     graphical_sources: [],
     risk_sources: [],
     cross_document_signals: [],
+    cross_document_dependencies: [],
+    normative_effects: [],
+    arbitration_candidates: [],
   };
 }
 
@@ -360,6 +443,22 @@ export function buildZoneRegulatoryIndex(args: {
         bundle.indirect_sources.push(documentSource);
       }
       bundle.cross_document_signals.push(...documentSource.signals);
+      bundle.cross_document_dependencies.push(...doc.cross_document_dependencies.filter((dependency) => !dependency.topic_code || dependency.topic_code === topicCode));
+      bundle.normative_effects.push(...doc.normative_effects.filter((effect) => !effect.topic_code || effect.topic_code === topicCode));
+      bundle.arbitration_candidates.push(
+        makeArbitrationCandidate({
+          topicCode,
+          source: documentSource,
+          role: documentSource.source_type === "graphical_doc"
+            ? "graphical"
+            : documentSource.source_type === "risk"
+              ? "risk"
+              : "context",
+          normativeEffect: doc.normative_effects.find((effect) => !effect.topic_code || effect.topic_code === topicCode)?.effect || inferNormativeEffectFromSource(documentSource),
+          note: doc.cross_document_dependencies.find((dependency) => !dependency.topic_code || dependency.topic_code === topicCode)?.reason
+            || "Document communal conservé pour recroiser ce thème au-delà du seul code de zone.",
+        }),
+      );
     }
   }
 
@@ -398,6 +497,27 @@ export function buildZoneRegulatoryIndex(args: {
     bundle.indirect_sources.push(source);
     if (articleCode && !bundle.relevant_articles.includes(articleCode)) bundle.relevant_articles.push(articleCode);
     bundle.cross_document_signals.push(...source.signals);
+    bundle.cross_document_dependencies.push(...buildDependenciesFromSignals({
+      topicCode,
+      source,
+      documentTitle: segment.documentTitle || null,
+    }));
+    bundle.normative_effects.push({
+      topic_code: topicCode,
+      source_label: segment.documentTitle || segment.anchorLabel || "Segment de zone",
+      effect: inferNormativeEffectFromSource(source),
+      reason: "Bloc thématique consolidé retenu comme matière de recroisement pour ce thème.",
+      confidence: source.confidence,
+    });
+    bundle.arbitration_candidates.push(
+      makeArbitrationCandidate({
+        topicCode,
+        source,
+        role: "secondary",
+        normativeEffect: inferNormativeEffectFromSource(source),
+        note: "Segment de zone utilisé pour préciser ou nuancer la règle principale.",
+      }),
+    );
     registerSubzoneCandidates(extractSubzoneCandidates(
       args.zoneCode,
       segment.anchorLabel,
@@ -448,6 +568,35 @@ export function buildZoneRegulatoryIndex(args: {
     bundle.direct_rules.push(source);
     if (articleCode && !bundle.relevant_articles.includes(articleCode)) bundle.relevant_articles.push(articleCode);
     bundle.cross_document_signals.push(...signals);
+    bundle.cross_document_dependencies.push(...buildDependenciesFromSignals({
+      topicCode,
+      source,
+      documentTitle: getRuleDocumentName(rule),
+    }));
+    bundle.normative_effects.push({
+      topic_code: topicCode,
+      source_label: getRuleDocumentName(rule) || getRuleAnchorLabel(rule) || "Règle publiée",
+      effect:
+        getRuleNormativeEffect(rule) === "substitutive" ? "substitutive"
+          : getRuleNormativeEffect(rule) === "restrictive" ? "restrictive"
+            : getRuleNormativeEffect(rule) === "additive" ? "additive"
+              : inferNormativeEffectFromSource(source),
+      reason: relationResolutionNote || "Règle publiée calibrée retenue comme socle normatif prioritaire.",
+      confidence: source.confidence,
+    });
+    bundle.arbitration_candidates.push(
+      makeArbitrationCandidate({
+        topicCode,
+        source,
+        role: "primary",
+        normativeEffect:
+          getRuleNormativeEffect(rule) === "substitutive" ? "substitutive"
+            : getRuleNormativeEffect(rule) === "restrictive" ? "restrictive"
+              : getRuleNormativeEffect(rule) === "additive" ? "additive"
+                : inferNormativeEffectFromSource(source),
+        note: relationResolutionNote || "Règle publiée utilisée comme base de décision prioritaire.",
+      }),
+    );
     if (articleCode) {
       articleSourceMap.set(articleCode, [...(articleSourceMap.get(articleCode) || []), source]);
     }
@@ -491,6 +640,27 @@ export function buildZoneRegulatoryIndex(args: {
     bundle.indirect_sources.push(source);
     if (articleCode && !bundle.relevant_articles.includes(articleCode)) bundle.relevant_articles.push(articleCode);
     bundle.cross_document_signals.push(...source.signals);
+    bundle.cross_document_dependencies.push(...buildDependenciesFromSignals({
+      topicCode,
+      source,
+      documentTitle: section.documentTitle || null,
+    }));
+    bundle.normative_effects.push({
+      topic_code: topicCode,
+      source_label: section.documentTitle || section.heading || "Section de zone",
+      effect: inferNormativeEffectFromSource(source),
+      reason: "Section de zone relue comme socle textuel à recroiser avec les autres pièces.",
+      confidence: source.confidence,
+    });
+    bundle.arbitration_candidates.push(
+      makeArbitrationCandidate({
+        topicCode,
+        source,
+        role: "secondary",
+        normativeEffect: inferNormativeEffectFromSource(source),
+        note: "Chapitre de zone mobilisé pour relire le thème dans son contexte complet.",
+      }),
+    );
     registerSubzoneCandidates(extractSubzoneCandidates(
       args.zoneCode,
       section.heading,
@@ -523,6 +693,33 @@ export function buildZoneRegulatoryIndex(args: {
     const bundle = ensureTopicBundle(topicMap, "risques");
     bundle.sources.push(source);
     bundle.risk_sources.push(source);
+    bundle.cross_document_dependencies.push({
+      topic_code: "risques",
+      source_document_id: null,
+      source_document_name: overlay.overlayLabel || overlay.overlayCode,
+      target_document_id: null,
+      target_document_name: overlay.overlayCode,
+      dependency_type: "overlay_referral",
+      normative_effect: source.source_type === "risk" ? "restrictive" : "additive",
+      reason: "Overlay communal à recouper avec le socle réglementaire de zone.",
+      confidence: source.confidence,
+    });
+    bundle.normative_effects.push({
+      topic_code: "risques",
+      source_label: overlay.overlayLabel || overlay.overlayCode,
+      effect: source.source_type === "risk" ? "restrictive" : "additive",
+      reason: "Couche superposée susceptible de compléter ou restreindre le dossier.",
+      confidence: source.confidence,
+    });
+    bundle.arbitration_candidates.push(
+      makeArbitrationCandidate({
+        topicCode: "risques",
+        source,
+        role: source.source_type === "risk" ? "risk" : "context",
+        normativeEffect: source.source_type === "risk" ? "restrictive" : "additive",
+        note: "Overlay communal intégré au recroisement global du dossier.",
+      }),
+    );
   }
 
   const article_index = Array.from(new Set([
@@ -550,6 +747,8 @@ export function buildZoneRegulatoryIndex(args: {
       ...bundle,
       relevant_articles: Array.from(new Set(bundle.relevant_articles)).sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10)),
       cross_document_signals: dedupeSignals(bundle.cross_document_signals),
+      cross_document_dependencies: dedupeDependencies(bundle.cross_document_dependencies),
+      normative_effects: dedupeNormativeEffects(bundle.normative_effects),
     }))
     .sort((left, right) => {
       const leftArticle = Number.parseInt(left.relevant_articles[0] || "999", 10);

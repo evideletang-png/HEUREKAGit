@@ -384,9 +384,113 @@ async function getBdTopoRoads(bbox: string, count = 20): Promise<any[]> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// STEP 6 — Railway classify-boundaries
+// STEP 6 — Railway classify-boundaries + local geometric fallback
 // ────────────────────────────────────────────────────────────────────────────
-async function classifyBoundaries(parcelFeature: any, roadFeatures: any[]) {
+
+type ClassifyResult = {
+  ok: boolean;
+  road_boundary_length_m: number;
+  side_boundary_length_m: number;
+  road_boundary_segments: Array<{ properties: { closest_road_name: string | null; distance_m: number } }>;
+};
+
+/**
+ * Extract the street name from a BAN geocode label.
+ * e.g. "15 Rue de la Paix, 75001 Paris" → "Rue de la Paix"
+ *      "Chemin des Vignes, 69130 Écully" → "Chemin des Vignes"
+ */
+function extractStreetFromLabel(label: string): string | null {
+  if (!label) return null;
+  // Strip leading house number (e.g. "15 " or "15bis ")
+  const noNum = label.replace(/^\d+[\w-]*\s+/, "");
+  // Take only the part before the first comma (strip city/postcode)
+  return noNum.split(",")[0].trim() || null;
+}
+
+/**
+ * Local geometric fallback for classify-boundaries.
+ * For each edge of the parcel polygon, finds the nearest road coordinate.
+ * Edges whose midpoint is within ROAD_THRESHOLD_M of any road → "road frontage".
+ * Everything else → "lateral".
+ * @param geocodeLabel  BAN geocode label (used to derive road name when BD TOPO has none)
+ */
+function classifyBoundariesLocal(parcelFeature: any, roadFeatures: any[], geocodeLabel?: string): ClassifyResult {
+  const geom = parcelFeature?.geometry;
+  const ROAD_THRESHOLD_M = 20; // metres: edge is "facing road" if midpoint is within this distance
+
+  let ring: [number, number][] | null = null;
+  if (geom?.type === "Polygon") ring = geom.coordinates?.[0] ?? null;
+  else if (geom?.type === "MultiPolygon") ring = geom.coordinates?.[0]?.[0] ?? null;
+
+  if (!ring?.length) return { ok: false, road_boundary_length_m: 0, side_boundary_length_m: 0, road_boundary_segments: [] };
+
+  // Street name extracted from geocode label as the final fallback
+  const labelStreetName = geocodeLabel ? extractStreetFromLabel(geocodeLabel) : null;
+
+  // Pre-extract all road coordinates with their road name
+  type RoadPoint = { lat: number; lng: number; name: string | null };
+  const roadPoints: RoadPoint[] = [];
+  for (const road of roadFeatures) {
+    // BD TOPO troncon_de_route uses nom_1_gauche / nom_1_droite for named streets
+    const name: string | null =
+      road.properties?.nom_1_gauche ||
+      road.properties?.nom_1_droite ||
+      road.properties?.nom_voie ||
+      road.properties?.toponyme_1 ||
+      road.properties?.libelle_voie ||
+      road.properties?.nom ||
+      null;
+    const coords = extractCoordinates(road.geometry);
+    for (const [lng, lat] of coords) {
+      roadPoints.push({ lat, lng, name });
+    }
+  }
+
+  let roadFrontageM = 0;
+  let lateralM = 0;
+  const roadSegments: ClassifyResult["road_boundary_segments"] = [];
+
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [lng1, lat1] = ring[i];
+    const [lng2, lat2] = ring[i + 1];
+    const edgeLenM = haversineM(lat1, lng1, lat2, lng2);
+    const midLat = (lat1 + lat2) / 2;
+    const midLng = (lng1 + lng2) / 2;
+
+    let minDist = Infinity;
+    let closestRoadName: string | null = null;
+
+    for (const { lat, lng, name } of roadPoints) {
+      const d = haversineM(midLat, midLng, lat, lng);
+      if (d < minDist) {
+        minDist = d;
+        // Prefer BD TOPO name; fall back to geocode label street name
+        closestRoadName = name || labelStreetName;
+      }
+    }
+
+    if (roadPoints.length > 0 && minDist <= ROAD_THRESHOLD_M) {
+      roadFrontageM += edgeLenM;
+      roadSegments.push({ properties: { closest_road_name: closestRoadName, distance_m: minDist } });
+    } else {
+      lateralM += edgeLenM;
+    }
+  }
+
+  // If no road features at all but we have a geocode label, still try to name the road
+  const finalSegments = roadSegments.length === 0 && labelStreetName && roadPoints.length === 0
+    ? [{ properties: { closest_road_name: labelStreetName, distance_m: 0 } }]
+    : roadSegments;
+
+  return {
+    ok: true,
+    road_boundary_length_m: Math.round(roadFrontageM * 10) / 10,
+    side_boundary_length_m: Math.round(lateralM * 10) / 10,
+    road_boundary_segments: finalSegments,
+  };
+}
+
+async function classifyBoundaries(parcelFeature: any, roadFeatures: any[]): Promise<ClassifyResult> {
   const res = await fetch(`${RAILWAY_BASE}/classify-boundaries`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -394,11 +498,13 @@ async function classifyBoundaries(parcelFeature: any, roadFeatures: any[]) {
     body: JSON.stringify({ parcel_feature: parcelFeature, road_features: roadFeatures }),
   });
   if (!res.ok) throw new Error(`classify-boundaries ${res.status}`);
-  return res.json() as Promise<{
-    ok: boolean;
-    road_boundary_length_m: number;
-    side_boundary_length_m: number;
-  }>;
+  const data = await res.json() as any;
+  return {
+    ok: data.ok ?? true,
+    road_boundary_length_m: data.road_boundary_length_m ?? 0,
+    side_boundary_length_m: data.side_boundary_length_m ?? 0,
+    road_boundary_segments: data.road_boundary_segments ?? [],
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -593,15 +699,17 @@ export async function buildParcelDataFromSelectedFeatures(
 
   let roadFrontageLengthM = 0;
   let sideBoundaryLengthM = 0;
-  let classifyResult: any = null;
+  let classifyResult: ClassifyResult | null = null;
   try {
     classifyResult = await classifyBoundaries(mergedFeature, roadFeatures);
-    if (classifyResult.ok) {
-      roadFrontageLengthM = Math.round(classifyResult.road_boundary_length_m * 10) / 10;
-      sideBoundaryLengthM = Math.round(classifyResult.side_boundary_length_m * 10) / 10;
-    }
+    if (!classifyResult.ok) throw new Error("ok:false");
   } catch (e) {
-    console.warn("[parcel] classify-boundaries failed for grouped parcel:", (e as Error).message);
+    console.warn("[parcel] classify-boundaries Railway failed (grouped parcel), using local fallback:", (e as Error).message);
+    classifyResult = classifyBoundariesLocal(mergedFeature, roadFeatures);
+  }
+  if (classifyResult.ok) {
+    roadFrontageLengthM = Math.round(classifyResult.road_boundary_length_m * 10) / 10;
+    sideBoundaryLengthM = Math.round(classifyResult.side_boundary_length_m * 10) / 10;
   }
 
   const parcelSurfaceM2 = validFeatures.reduce((sum, feature) => sum + Number(feature?.properties?.contenance || 0), 0);
@@ -689,16 +797,32 @@ export async function getParcelByCoords(
 
     // 2 — Select parcel
     let selectedFeature: any;
+    let selectedSection: string;
+    let selectedNumero: string;
+    let selectedCodeInsee: string;
+    let selectedContenanceM2: number;
+    let selectedIdu: string;
+
     if (banParcelles && banParcelles.length === 1 && cadastreFeatures.length === 1) {
       // Single BAN parcel — no need to call the ML selector
       selectedFeature = cadastreFeatures[0];
-      console.log("[parcel] Single BAN parcel used directly:", selectedFeature?.properties?.section, selectedFeature?.properties?.numero);
+      selectedSection = String(selectedFeature?.properties?.section ?? "??");
+      selectedNumero = String(selectedFeature?.properties?.numero ?? "???");
+      selectedCodeInsee = String(selectedFeature?.properties?.code_insee ?? "00000");
+      selectedContenanceM2 = Number(selectedFeature?.properties?.contenance ?? 0);
+      selectedIdu = String(selectedFeature?.properties?.idu ?? banParcelles[0]);
+      console.log("[parcel] Single BAN parcel used directly:", selectedSection, selectedNumero);
     } else {
       console.log("[parcel] Selecting best parcel via ML selector...");
       const selected = await selectParcel(lat, lng, banId, geocodeLabel, cadastreFeatures);
       if (!selected.ok) throw new Error("select-parcel failed");
-      console.log("[parcel] Selected:", selected.selected_section, selected.selected_numero);
       selectedFeature = selected.selected_feature;
+      selectedSection = selected.selected_section;
+      selectedNumero = selected.selected_numero;
+      selectedCodeInsee = selected.selected_code_insee;
+      selectedContenanceM2 = selected.selected_contenance_m2;
+      selectedIdu = selected.selected_idu;
+      console.log("[parcel] Selected:", selectedSection, selectedNumero);
     }
 
     const centroid = computeCentroid(selectedFeature);
@@ -710,27 +834,34 @@ export async function getParcelByCoords(
 
     // 4 — Roads (needed for classify-boundaries)
     console.log("[parcel] Fetching roads...");
-    const roadFeatures = await getBdTopoRoads(bboxString);
+    let roadFeatures: any[] = [];
+    try {
+      roadFeatures = await getBdTopoRoads(bboxString);
+    } catch (e) {
+      console.warn("[parcel] getBdTopoRoads failed (non-critical):", (e as Error).message);
+    }
     console.log("[parcel] Found", roadFeatures.length, "roads");
 
     // 5 — Classify boundaries (road frontage vs side)
     console.log("[parcel] Classifying boundaries...");
     let roadFrontageLengthM = 0;
     let sideBoundaryLengthM = 0;
-    let classifyResult: any = null;
+    let classifyResult: ClassifyResult | null = null;
     try {
       classifyResult = await classifyBoundaries(selectedFeature, roadFeatures);
-      if (classifyResult.ok) {
-        roadFrontageLengthM = Math.round(classifyResult.road_boundary_length_m * 10) / 10;
-        sideBoundaryLengthM = Math.round(classifyResult.side_boundary_length_m * 10) / 10;
-      }
+      if (!classifyResult.ok) throw new Error("ok:false");
     } catch (e) {
-      console.warn("[parcel] classify-boundaries failed (non-critical):", (e as Error).message);
+      console.warn("[parcel] classify-boundaries Railway failed, using local geometric fallback:", (e as Error).message);
+      classifyResult = classifyBoundariesLocal(selectedFeature, roadFeatures, geocodeLabel);
+    }
+    if (classifyResult.ok) {
+      roadFrontageLengthM = Math.round(classifyResult.road_boundary_length_m * 10) / 10;
+      sideBoundaryLengthM = Math.round(classifyResult.side_boundary_length_m * 10) / 10;
     }
 
     // 6 — Compute parcel geometric metrics
     const perimeterM = computePerimeterM(selectedFeature.geometry);
-    const areaM2 = selected.selected_contenance_m2;
+    const areaM2 = selectedContenanceM2;
     const shapeRatio = perimeterM > 0 ? Math.round((4 * Math.PI * areaM2) / (perimeterM * perimeterM) * 100) / 100 : 0;
     const depthM = estimateDepthM(selectedFeature.geometry, centroid);
     // Corner plot = more than one distinct road name in road_boundary_segments
@@ -756,21 +887,21 @@ export async function getParcelByCoords(
     }
 
     return {
-      cadastralSection: selected.selected_section,
-      parcelNumber: selected.selected_numero,
-      parcelSurfaceM2: selected.selected_contenance_m2,
+      cadastralSection: selectedSection,
+      parcelNumber: selectedNumero,
+      parcelSurfaceM2: selectedContenanceM2,
       geometryJson: selectedFeature,
       centroidLat: centroid.lat,
       centroidLng: centroid.lng,
       roadFrontageLengthM,
       sideBoundaryLengthM,
       metadata: {
-        commune: selected.selected_code_insee,
+        commune: selectedCodeInsee,
         prefixe: "000",
-        section: selected.selected_section,
-        numero: selected.selected_numero,
-        contenance: selected.selected_contenance_m2,
-        idu: selected.selected_idu,
+        section: selectedSection,
+        numero: selectedNumero,
+        contenance: selectedContenanceM2,
+        idu: selectedIdu,
       },
       _bboxString: bboxString,
       _cadastreFeatures: cadastreFeatures,

@@ -1,11 +1,15 @@
 import { normalizeExtractedText } from "./textQualityService.js";
 import type {
   ClassifiedRegulatoryDocument,
+  CrossDocumentDependency,
   CrossDocumentSignal,
+  GraphicalDependency,
+  NormativeEffectDescriptor,
   RegulatoryConfidence,
   RegulatoryDocumentCanonicalType,
   RegulatoryDocumentContentMode,
   RegulatoryNormativeWeight,
+  RiskOverlayConstraint,
   RegulatorySetRole,
 } from "./regulatoryInterpretationTypes.js";
 
@@ -23,6 +27,7 @@ type DocumentProfileLike = {
   rawClassification?: unknown;
   detectedZones?: unknown;
   structuredTopics?: unknown;
+  reasoningJson?: unknown;
 };
 
 type TownHallDocumentLike = {
@@ -187,6 +192,26 @@ function parseStringArray(input: unknown) {
   return [];
 }
 
+function parseStructuredArray<T extends Record<string, unknown>>(input: unknown) {
+  if (Array.isArray(input)) return input.filter((item): item is T => !!item && typeof item === "object");
+  return [];
+}
+
+function extractReasoningGraph(profile: DocumentProfileLike | null | undefined) {
+  const raw = profile?.reasoningJson && typeof profile.reasoningJson === "object"
+    ? profile.reasoningJson as Record<string, unknown>
+    : {};
+  const graph = raw.graph && typeof raw.graph === "object"
+    ? raw.graph as Record<string, unknown>
+    : {};
+  return {
+    crossDocumentDependencies: parseStructuredArray<CrossDocumentDependency>(graph.cross_document_dependencies),
+    graphicalDependencies: parseStructuredArray<GraphicalDependency>(graph.graphical_dependencies),
+    riskConstraints: parseStructuredArray<RiskOverlayConstraint>(graph.risk_constraints),
+    normativeEffects: parseStructuredArray<NormativeEffectDescriptor>(graph.normative_effects),
+  };
+}
+
 function extractZoneHints(profile: DocumentProfileLike | null | undefined, doc: TownHallDocumentLike) {
   const hints = new Set<string>();
   parseStringArray((profile?.detectedZones as any) || []).forEach((value) => hints.add(value));
@@ -267,14 +292,19 @@ function computeSetRole(args: {
   normativeWeight: RegulatoryNormativeWeight;
   zoneHints: string[];
   structuredTopics: string[];
+  crossDocumentDependencies: CrossDocumentDependency[];
+  riskConstraints: RiskOverlayConstraint[];
   zoneCode?: string | null;
 }) : RegulatorySetRole {
   const normalizedZone = normalizeExtractedText(args.zoneCode || "").replace(/\s+/g, "");
   const matchesZone = normalizedZone.length > 0
     && args.zoneHints.some((hint) => normalizeExtractedText(hint).replace(/\s+/g, "") === normalizedZone);
 
-  if (["ppri", "pprt", "risk_plan", "sup_servitude", "spr_heritage"].includes(args.canonicalType)) return "risk_overlay";
-  if (["zoning_map", "height_map", "special_provisions_map", "graphic_regulation", "heritage_map"].includes(args.canonicalType)) return "graphical_dependency";
+  if (["ppri", "pprt", "risk_plan", "sup_servitude", "spr_heritage"].includes(args.canonicalType) || args.riskConstraints.length > 0) return "risk_overlay";
+  if (
+    ["zoning_map", "height_map", "special_provisions_map", "graphic_regulation", "heritage_map"].includes(args.canonicalType)
+    || args.crossDocumentDependencies.some((dep) => dep.dependency_type === "graphic_referral")
+  ) return "graphical_dependency";
   if (matchesZone || args.normativeWeight === "opposable_direct" || args.structuredTopics.length > 0) return "primary";
   if (args.normativeWeight === "opposable_indirect") return "secondary";
   return "context";
@@ -286,6 +316,8 @@ function buildReasoningNote(args: {
   zoneHints: string[];
   structuredTopics: string[];
   signals: CrossDocumentSignal[];
+  crossDocumentDependencies: CrossDocumentDependency[];
+  normativeEffects: NormativeEffectDescriptor[];
 }) {
   const parts = [
     `Type ${args.canonicalType.replace(/_/g, " ")}`,
@@ -294,6 +326,8 @@ function buildReasoningNote(args: {
   if (args.zoneHints.length > 0) parts.push(`zones détectées: ${args.zoneHints.slice(0, 3).join(", ")}`);
   if (args.structuredTopics.length > 0) parts.push(`thèmes: ${args.structuredTopics.slice(0, 4).join(", ")}`);
   if (args.signals.length > 0) parts.push(`renvois: ${args.signals.map((signal) => signal.label).join(", ")}`);
+  if (args.crossDocumentDependencies.length > 0) parts.push(`dépendances: ${args.crossDocumentDependencies.slice(0, 3).map((dep) => dep.target_document_name).join(", ")}`);
+  if (args.normativeEffects.length > 0) parts.push(`effets: ${args.normativeEffects.slice(0, 3).map((effect) => `${effect.source_label} (${effect.effect})`).join(", ")}`);
   return parts.join(" · ");
 }
 
@@ -306,6 +340,8 @@ function computeRelevanceScore(args: {
   zoneCode?: string | null;
   structuredTopics: string[];
   signals: CrossDocumentSignal[];
+  crossDocumentDependencies: CrossDocumentDependency[];
+  riskConstraints: RiskOverlayConstraint[];
 }) {
   let score = args.classifierConfidence * 40;
   if (args.normativeWeight === "opposable_direct") score += 25;
@@ -321,6 +357,8 @@ function computeRelevanceScore(args: {
   }
   if (args.structuredTopics.length > 0) score += Math.min(12, args.structuredTopics.length * 2);
   if (args.signals.length > 0) score += Math.min(10, args.signals.length * 3);
+  if (args.crossDocumentDependencies.length > 0) score += Math.min(12, args.crossDocumentDependencies.length * 3);
+  if (args.riskConstraints.length > 0) score += Math.min(8, args.riskConstraints.length * 3);
   if (["height_map", "special_provisions_map", "zoning_map", "written_regulation"].includes(args.canonicalType)) score += 10;
   return score;
 }
@@ -349,12 +387,21 @@ export function classifyRegulatoryDocument(args: {
   const classifierConfidence = Number(profile?.classifierConfidence ?? rawClassification.suggestionConfidence ?? 0.6);
   const zoneHints = extractZoneHints(profile, args.doc);
   const structuredTopics = extractTopicHints(profile, args.doc);
-  const detectedSignals = detectSignals([
-    args.doc.title || "",
-    args.doc.fileName || "",
-    args.doc.rawText || "",
-    Array.from(extractStructuredContentStrings(args.doc.structuredContent)).join("\n"),
-  ].join("\n"));
+  const reasoningGraph = extractReasoningGraph(profile);
+  const detectedSignals = [
+    ...detectSignals([
+      args.doc.title || "",
+      args.doc.fileName || "",
+      args.doc.rawText || "",
+      Array.from(extractStructuredContentStrings(args.doc.structuredContent)).join("\n"),
+    ].join("\n")),
+    ...reasoningGraph.crossDocumentDependencies.map((dependency) => ({
+      kind: dependency.dependency_type === "topic_support" ? "document_referral" : dependency.dependency_type,
+      label: dependency.target_document_name,
+      excerpt: dependency.reason,
+      confidence: dependency.confidence,
+    } satisfies CrossDocumentSignal)),
+  ];
   const normativeWeight = inferNormativeWeight(canonicalType);
   const contentMode = inferContentMode({
     canonicalType,
@@ -366,6 +413,8 @@ export function classifyRegulatoryDocument(args: {
     normativeWeight,
     zoneHints,
     structuredTopics,
+    crossDocumentDependencies: reasoningGraph.crossDocumentDependencies,
+    riskConstraints: reasoningGraph.riskConstraints,
     zoneCode: args.zoneCode,
   });
   const relevanceScore = computeRelevanceScore({
@@ -377,6 +426,8 @@ export function classifyRegulatoryDocument(args: {
     zoneCode: args.zoneCode,
     structuredTopics,
     signals: detectedSignals,
+    crossDocumentDependencies: reasoningGraph.crossDocumentDependencies,
+    riskConstraints: reasoningGraph.riskConstraints,
   });
 
   return {
@@ -404,10 +455,16 @@ export function classifyRegulatoryDocument(args: {
     reasoning_note: buildReasoningNote({
       canonicalType,
       normativeWeight,
-      zoneHints,
-      structuredTopics,
-      signals: detectedSignals,
-    }),
+    zoneHints,
+    structuredTopics,
+    signals: detectedSignals,
+    crossDocumentDependencies: reasoningGraph.crossDocumentDependencies,
+    normativeEffects: reasoningGraph.normativeEffects,
+  }),
+    cross_document_dependencies: reasoningGraph.crossDocumentDependencies,
+    graphical_dependencies: reasoningGraph.graphicalDependencies,
+    risk_constraints: reasoningGraph.riskConstraints,
+    normative_effects: reasoningGraph.normativeEffects,
   };
 }
 

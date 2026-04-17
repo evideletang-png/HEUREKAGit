@@ -1330,6 +1330,7 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   if (!rawText || rawText.trim().length < (options?.zoningLike ? 20 : 80)) return [];
 
   const detected = new Set<string>();
+  const zoneCodePattern = String.raw`(?:\d{1,2}AU[A-Za-z0-9-]{0,4}|[UNA][A-Za-z0-9-]{0,4})`;
   const addZoneCode = (raw: unknown, options?: { allowSingleLetter?: boolean }) => {
     const zoneCode = isLikelyPluZoneCode(raw, options);
     if (zoneCode) detected.add(zoneCode);
@@ -1340,9 +1341,9 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   }
 
   const explicitZonePatterns = [
-    /\br[ée]glement\s+de\s+la\s+zone\s+([A-Z0-9-]+)/gi,
-    /\bdispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Z0-9-]+)/gi,
-    /\bzone\s+([A-Z0-9-]+)/gi,
+    new RegExp(`\\br[èée]glement\\s+de\\s+la\\s+zone\\s+(${zoneCodePattern})\\b`, "gi"),
+    new RegExp(`\\bdispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone\\s+(${zoneCodePattern})\\b`, "gi"),
+    new RegExp(`\\bzone\\s+(${zoneCodePattern})\\b`, "gi"),
   ];
 
   for (const pattern of explicitZonePatterns) {
@@ -1353,44 +1354,57 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   }
 
   if (options?.zoningLike) {
-    const inlineTokenPattern = /\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g;
+    const inlineTokenPattern = new RegExp(`\\b${zoneCodePattern}\\b`, "g");
     let inlineMatch: RegExpExecArray | null;
-    while ((inlineMatch = inlineTokenPattern.exec(rawText.toUpperCase())) !== null) {
+    while ((inlineMatch = inlineTokenPattern.exec(rawText)) !== null) {
       addZoneCode(inlineMatch[0], { allowSingleLetter: true });
     }
   }
 
   for (const line of rawText.replace(/\r\n?/g, "\n").split("\n")) {
     const trimmed = line.trim().replace(/\s+/g, " ");
-    const maxLineLength = options?.zoningLike ? 96 : 36;
-    if (!trimmed || trimmed.length > maxLineLength) continue;
+    if (!trimmed) continue;
 
-    const headingMatch = trimmed.match(/^(?:r[ée]glement\s+de\s+la\s+zone|dispositions\s+applicables\s+(?:à|a)\s+la\s+zone|zone)\s+([A-Z0-9-]+)$/i);
+    const looksLikeZoneInventory =
+      /\b(?:zones?|sous[- ]zones?|secteurs?|sous[- ]secteurs?)\b/i.test(trimmed)
+      && /[\/,;()]/.test(trimmed);
+
+    if (looksLikeZoneInventory) {
+      const listedTokens = trimmed.match(new RegExp(`\\b${zoneCodePattern}\\b`, "g")) || [];
+      for (const token of listedTokens) {
+        addZoneCode(token, { allowSingleLetter: true });
+      }
+    }
+
+    const maxLineLength = options?.zoningLike ? 96 : 36;
+    if (trimmed.length > maxLineLength) continue;
+
+    const headingMatch = trimmed.match(new RegExp(`^(?:r[èée]glement\\s+de\\s+la\\s+zone|dispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone|zone)\\s+(${zoneCodePattern})(?:\\s*\\([^)]*\\))?$`, "i"));
     if (headingMatch?.[1]) {
       addZoneCode(headingMatch[1], { allowSingleLetter: true });
       continue;
     }
 
-    const prefixedMatch = trimmed.match(/^zone\s+([A-Z0-9-]+)$/i);
+    const prefixedMatch = trimmed.match(new RegExp(`^zone\\s+(${zoneCodePattern})(?:\\s*\\([^)]*\\))?$`, "i"));
     if (prefixedMatch?.[1]) {
       addZoneCode(prefixedMatch[1], { allowSingleLetter: true });
       continue;
     }
 
     if (!options?.zoningLike) {
-      const standaloneZoneMatch = trimmed.match(/^((?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*)$/i);
+      const standaloneZoneMatch = trimmed.match(new RegExp(`^(${zoneCodePattern})(?:\\s*\\([^)]*\\))?$`, "i"));
       if (standaloneZoneMatch?.[1]) {
         addZoneCode(standaloneZoneMatch[1], { allowSingleLetter: true });
       }
       continue;
     }
 
-    const lineLeadMatch = trimmed.match(/^(?:zone\s+)?((?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*)\b/i);
+    const lineLeadMatch = trimmed.match(new RegExp(`^(?:zone\\s+)?(${zoneCodePattern})\\b`, "i"));
     if (lineLeadMatch?.[1]) {
       addZoneCode(lineLeadMatch[1], { allowSingleLetter: true });
     }
 
-    const tokens = trimmed.toUpperCase().match(/\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g) || [];
+    const tokens = trimmed.match(new RegExp(`\\b${zoneCodePattern}\\b`, "g")) || [];
     for (const token of tokens) {
       addZoneCode(token, { allowSingleLetter: true });
     }
@@ -1408,15 +1422,25 @@ async function ensureCalibrationZonesForCommune(args: {
   referenceDocumentId?: string | null;
   userId?: string | null;
 }) {
-  const zoneCodes = extractCalibrationZoneCodes(args.rawText, {
-    zoningLike: isLikelyZoningLikeSource({
-      rawText: args.rawText,
-      sourceName: args.sourceName,
-      sourceType: args.sourceType,
+  const extractedSections = extractRegulatoryZoneSections(args.rawText);
+  const sectionByZoneCode = new Map(
+    extractedSections
+      .map((section) => [normalizeConfiguredZoneCode(section.zoneCode), section] as const)
+      .filter((entry): entry is [string, (typeof extractedSections)[number]] => !!entry[0]),
+  );
+
+  const zoneCodes = Array.from(new Set([
+    ...Array.from(sectionByZoneCode.keys()),
+    ...extractCalibrationZoneCodes(args.rawText, {
+      zoningLike: isLikelyZoningLikeSource({
+        rawText: args.rawText,
+        sourceName: args.sourceName,
+        sourceType: args.sourceType,
+      }),
     }),
-  });
+  ]));
   if (zoneCodes.length === 0) {
-    return { detected: 0, created: 0 };
+    return { detected: 0, created: 0, updated: 0 };
   }
 
   const [existingZones, deletedZones] = await Promise.all([
@@ -1424,6 +1448,13 @@ async function ensureCalibrationZonesForCommune(args: {
       id: regulatoryCalibrationZonesTable.id,
       zoneCode: regulatoryCalibrationZonesTable.zoneCode,
       displayOrder: regulatoryCalibrationZonesTable.displayOrder,
+      guidanceNotes: regulatoryCalibrationZonesTable.guidanceNotes,
+      searchKeywords: regulatoryCalibrationZonesTable.searchKeywords,
+      referenceDocumentId: regulatoryCalibrationZonesTable.referenceDocumentId,
+      referenceStartPage: regulatoryCalibrationZonesTable.referenceStartPage,
+      referenceEndPage: regulatoryCalibrationZonesTable.referenceEndPage,
+      parentZoneCode: regulatoryCalibrationZonesTable.parentZoneCode,
+      sectorCode: regulatoryCalibrationZonesTable.sectorCode,
     })
       .from(regulatoryCalibrationZonesTable)
       .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.communeAliases)),
@@ -1440,16 +1471,71 @@ async function ensureCalibrationZonesForCommune(args: {
       ),
   ]);
 
-  const existingZoneCodes = new Set(
+  const existingZoneByCode = new Map(
     existingZones
-      .map((zone) => normalizeConfiguredZoneCode(zone.zoneCode))
-      .filter((zoneCode): zoneCode is string => !!zoneCode),
+      .map((zone) => [normalizeConfiguredZoneCode(zone.zoneCode), zone] as const)
+      .filter((entry): entry is [string, (typeof existingZones)[number]] => !!entry[0]),
   );
+  const existingZoneCodes = new Set(existingZoneByCode.keys());
   const deletedZoneCodes = new Set(
     deletedZones
       .map((entry) => normalizeConfiguredZoneCode((entry.snapshot as Record<string, unknown> | null | undefined)?.zoneCode))
       .filter((zoneCode): zoneCode is string => !!zoneCode),
   );
+
+  let updated = 0;
+  for (const zoneCode of zoneCodes) {
+    const existingZone = existingZoneByCode.get(zoneCode);
+    if (!existingZone) continue;
+
+    const section = sectionByZoneCode.get(zoneCode) || null;
+    const autoKeywords = normalizeZoneSearchKeywords([
+      zoneCode,
+      `zone ${zoneCode}`,
+      section?.heading || "",
+    ]);
+    const nextReferenceStartPage = existingZone.referenceStartPage ?? section?.startPage ?? null;
+    const nextReferenceEndPage = existingZone.referenceEndPage ?? section?.endPage ?? null;
+    const nextReferenceDocumentId = existingZone.referenceDocumentId ?? args.referenceDocumentId ?? null;
+    const nextGuidanceNotes = existingZone.guidanceNotes ?? section?.heading ?? (
+      args.sourceName
+        ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
+        : "Zone détectée automatiquement depuis un document réglementaire."
+    );
+    const nextParentZoneCode = existingZone.parentZoneCode ?? section?.parentZoneCode ?? deriveParentZoneCode(zoneCode);
+    const nextSectorCode = existingZone.sectorCode ?? (section?.isSubZone ? zoneCode : null);
+    const existingKeywords = Array.isArray(existingZone.searchKeywords) ? existingZone.searchKeywords : [];
+    const mergedKeywords = Array.from(new Set([...existingKeywords, ...autoKeywords]));
+    const sameKeywords =
+      mergedKeywords.length === existingKeywords.length
+      && mergedKeywords.every((keyword, index) => keyword === existingKeywords[index]);
+
+    const shouldUpdate =
+      nextReferenceStartPage !== existingZone.referenceStartPage
+      || nextReferenceEndPage !== existingZone.referenceEndPage
+      || nextReferenceDocumentId !== existingZone.referenceDocumentId
+      || nextGuidanceNotes !== existingZone.guidanceNotes
+      || nextParentZoneCode !== existingZone.parentZoneCode
+      || nextSectorCode !== existingZone.sectorCode
+      || !sameKeywords;
+
+    if (!shouldUpdate) continue;
+
+    await db.update(regulatoryCalibrationZonesTable)
+      .set({
+        parentZoneCode: nextParentZoneCode,
+        sectorCode: nextSectorCode,
+        guidanceNotes: nextGuidanceNotes,
+        searchKeywords: mergedKeywords,
+        referenceDocumentId: nextReferenceDocumentId,
+        referenceStartPage: nextReferenceStartPage,
+        referenceEndPage: nextReferenceEndPage,
+        updatedBy: args.userId || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(regulatoryCalibrationZonesTable.id, existingZone.id));
+    updated += 1;
+  }
 
   const nextDisplayOrder = existingZones.reduce((maxOrder, zone) => Math.max(maxOrder, zone.displayOrder || 0), 0) + 1;
   const zonesToCreate = zoneCodes
@@ -1457,24 +1543,37 @@ async function ensureCalibrationZonesForCommune(args: {
     .filter((zoneCode) => !deletedZoneCodes.has(zoneCode));
 
   if (zonesToCreate.length === 0) {
-    return { detected: zoneCodes.length, created: 0 };
+    return { detected: zoneCodes.length, created: 0, updated };
   }
 
   const createdZones = await db.insert(regulatoryCalibrationZonesTable).values(
-    zonesToCreate.map((zoneCode, index) => ({
-      communeId: args.communeKey,
-      zoneCode,
-      zoneLabel: `Zone ${zoneCode}`,
-      parentZoneCode: deriveParentZoneCode(zoneCode),
-      guidanceNotes: args.sourceName
-        ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
-        : "Zone détectée automatiquement depuis un document réglementaire.",
-      referenceDocumentId: args.referenceDocumentId || null,
-      displayOrder: nextDisplayOrder + index,
-      isActive: true,
-      createdBy: args.userId || null,
-      updatedBy: args.userId || null,
-    })),
+    zonesToCreate.map((zoneCode, index) => {
+      const section = sectionByZoneCode.get(zoneCode) || null;
+      return {
+        communeId: args.communeKey,
+        zoneCode,
+        zoneLabel: section?.isSubZone ? `Sous-zone ${zoneCode}` : `Zone ${zoneCode}`,
+        parentZoneCode: section?.parentZoneCode ?? deriveParentZoneCode(zoneCode),
+        sectorCode: section?.isSubZone ? zoneCode : null,
+        guidanceNotes: section?.heading || (
+          args.sourceName
+            ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
+            : "Zone détectée automatiquement depuis un document réglementaire."
+        ),
+        searchKeywords: normalizeZoneSearchKeywords([
+          zoneCode,
+          `zone ${zoneCode}`,
+          section?.heading || "",
+        ]),
+        referenceDocumentId: args.referenceDocumentId || null,
+        referenceStartPage: section?.startPage ?? null,
+        referenceEndPage: section?.endPage ?? null,
+        displayOrder: nextDisplayOrder + index,
+        isActive: true,
+        createdBy: args.userId || null,
+        updatedBy: args.userId || null,
+      };
+    }),
   ).returning();
 
   await Promise.all(
@@ -1493,6 +1592,7 @@ async function ensureCalibrationZonesForCommune(args: {
   return {
     detected: zoneCodes.length,
     created: createdZones.length,
+    updated,
   };
 }
 
@@ -1841,6 +1941,16 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
           rawText: doc.rawText,
         });
 
+        await ensureCalibrationZonesForCommune({
+          communeKey: municipalityKey,
+          communeAliases: municipalityAliases,
+          rawText: doc.rawText,
+          sourceName: doc.title || doc.fileName,
+          sourceType: classification.resolved.documentType || null,
+          referenceDocumentId: doc.id,
+          userId: req.user!.userId,
+        });
+
         await persistStructuredKnowledgeForDocument({
           townHallDocumentId: doc.id,
           municipalityId: municipalityKey,
@@ -1944,6 +2054,8 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
             manualReviewRequired: profile.manualReviewRequired,
             detectedZonesCount: zones.length,
             structuredTopicsCount: topics.length,
+            reasoningSummary: (profile as any).reasoningSummary || null,
+            reasoningJson: (profile as any).reasoningJson || null,
           } : null,
           extractedRuleCount: rulesByDocumentId.get(doc.id) || 0,
         };
@@ -2615,7 +2727,7 @@ function autoSuggestClassification(text: string, fileName: string): SuggestedCla
   const firstWindow = content.slice(0, 20000);
 
   const writtenRegulationScore =
-    countPatternMatches(firstWindow, /r[ée]glement\s+de\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
+    countPatternMatches(firstWindow, /r[èée]glement\s+de\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
     countPatternMatches(firstWindow, /dispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
     countPatternMatches(firstWindow, /article\s+(?:1|2|3|4|6|7|8|9|10|11|12|13|14)\b/gi) * 2 +
     countPatternMatches(firstWindow, /implantation\s+par\s+rapport\s+aux\s+voies/gi) * 3 +
@@ -2640,7 +2752,7 @@ function autoSuggestClassification(text: string, fileName: string): SuggestedCla
     countPatternMatches(firstWindow, /plan\s+de\s+zonage/gi) * 7 +
     countPatternMatches(firstWindow, /document\s+graphique/gi) * 6 +
     countPatternMatches(firstWindow, /planche\s+de\s+zonage/gi) * 6 +
-    countPatternMatches(firstWindow, /zonage\s+r[ée]glementaire/gi) * 5 +
+    countPatternMatches(firstWindow, /zonage\s+r[èée]glementaire/gi) * 5 +
     countPatternMatches(firstWindow, /l[ée]gende/gi) * 2;
 
   const administrativeActScore =
@@ -3277,7 +3389,7 @@ async function queueTownHallDocumentIndexing(args: {
         municipalityId: municipalityKey,
         documentType: canonicalType,
         documentSubtype: args.documentType || null,
-        sourceName: path.basename(args.persistentPath),
+        sourceName: args.originalName,
         sourceAuthority: authorityForCanonicalType(canonicalType),
         opposable: isOpposable,
         rawText,
@@ -4608,8 +4720,9 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       workspaceReady: !!referenceDocumentId,
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     logger.error("[mairie/regulatory-calibration/zone-workspace GET]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: msg });
   }
 });
 
@@ -7167,6 +7280,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                });
                await persistRegulatoryUnitsForDocument({
                  baseIADocumentId: doc.id,
+                 townHallDocumentId: townHallDoc.id,
                  municipalityId: municipalityKey,
                  zoneCode: req.body.zone || null,
                  documentType: canonicalType,
@@ -7176,6 +7290,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                });
                await persistRegulatoryZoneSectionsForDocument({
                  baseIADocumentId: doc.id,
+                 townHallDocumentId: townHallDoc.id,
                  municipalityId: municipalityKey,
                  documentType: canonicalType,
                  sourceAuthority: authorityForCanonicalType(canonicalType),
@@ -7190,6 +7305,27 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  sourceType: classification.resolved.documentType,
                  referenceDocumentId: doc.id,
                  userId: req.user!.userId,
+               });
+               await persistStructuredKnowledgeForDocument({
+                 baseIADocumentId: doc.id,
+                 townHallDocumentId: townHallDoc.id,
+                 municipalityId: municipalityKey,
+                 documentType: canonicalType,
+                 documentSubtype: classification.resolved.documentType || null,
+                 sourceName: file.originalname,
+                 sourceAuthority: authorityForCanonicalType(canonicalType),
+                 opposable: isOpposable,
+                 rawText,
+                 rawClassification: {
+                   category,
+                   subCategory,
+                   requestedDocumentType: req.body.documentType || null,
+                   resolvedDocumentType: classification.resolved.documentType,
+                   autoCorrected: classification.autoCorrected,
+                   suggestionConfidence: classification.suggestionConfidence,
+                   suggestionReason: classification.suggestionReason,
+                   source: "mairie_batch_upload",
+                 },
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
              } catch (ragErr) {

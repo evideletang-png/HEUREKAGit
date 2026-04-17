@@ -167,14 +167,7 @@
       "idx": 23,
       "version": "7",
       "when": 1775710800000,
-      "tag": "0023_document_knowledge_reasoning",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1775718000000,
-      "tag": "0024_geocoding_cache_parcelles",
+      "tag": "0023_geocoding_cache_parcelles",
       "breakpoints": true
     }
   ]

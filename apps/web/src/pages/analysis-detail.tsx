@@ -1504,6 +1504,12 @@ export default function AnalysisDetailPage() {
                              {parsedExpertAnalysis.identification?.referenceDocument?.title ? (
                                <p className="text-muted-foreground">Doc. de référence : {parsedExpertAnalysis.identification.referenceDocument.title}</p>
                              ) : null}
+                             {parsedExpertAnalysis.identification?.graphOverview ? (
+                               <div className="pt-2 text-xs text-muted-foreground space-y-1">
+                                 <p>{parsedExpertAnalysis.identification.graphOverview.documentCount ?? 0} documents reliés</p>
+                                 <p>{parsedExpertAnalysis.identification.graphOverview.dependencyCount ?? 0} dépendances croisées · {parsedExpertAnalysis.identification.graphOverview.graphicalDependencyCount ?? 0} renvois graphiques · {parsedExpertAnalysis.identification.graphOverview.riskConstraintCount ?? 0} risques / servitudes</p>
+                               </div>
+                             ) : null}
                            </div>
                          </div>
                          <div className="rounded-xl border bg-muted/10 p-4">
@@ -1650,6 +1656,32 @@ export default function AnalysisDetailPage() {
                                ) : null}
                                {topic.risks_and_servitudes?.length ? (
                                  <p className="text-xs text-muted-foreground">Risques / servitudes : {topic.risks_and_servitudes.join(" · ")}</p>
+                               ) : null}
+                               {topic.cross_document_dependencies?.length ? (
+                                 <p className="text-xs text-muted-foreground">
+                                   Dépendances croisées : {topic.cross_document_dependencies.slice(0, 4).map((dependency: any) => dependency.label || dependency.target_document || dependency.dependency_type).join(" · ")}
+                                 </p>
+                               ) : null}
+                               {topic.normative_effects?.length ? (
+                                 <p className="text-xs text-muted-foreground">
+                                   Effets normatifs : {topic.normative_effects.slice(0, 4).map((effect: any) => `${effect.effect} via ${effect.source_label}`).join(" · ")}
+                                 </p>
+                               ) : null}
+                               {topic.arbitration_decision?.summary ? (
+                                 <div className="rounded-lg border bg-muted/20 p-3">
+                                   <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Décision d’arbitrage</div>
+                                   <p className="mt-2 text-xs text-muted-foreground">{topic.arbitration_decision.summary}</p>
+                                   {topic.arbitration_decision.retained_sources?.length ? (
+                                     <p className="mt-1 text-xs text-muted-foreground">
+                                       Sources retenues : {topic.arbitration_decision.retained_sources.join(" · ")}
+                                     </p>
+                                   ) : null}
+                                   {topic.arbitration_decision.watchpoints?.length ? (
+                                     <p className="mt-1 text-xs text-amber-700">
+                                       Points de vigilance : {topic.arbitration_decision.watchpoints.join(" · ")}
+                                     </p>
+                                   ) : null}
+                                 </div>
                                ) : null}
                                {topic.source_decisions?.length ? (
                                  <div className="rounded-lg border bg-muted/20 p-3">

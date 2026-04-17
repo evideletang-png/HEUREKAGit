@@ -24,20 +24,89 @@ type ExtractedZoneSection = {
 };
 
 type TocZoneEntry = {
+  rawZoneCode: string;
   zoneCode: string;
   heading: string;
   pageNumber: number;
 };
 
+const ZONE_CODE_PATTERN = String.raw`(?:\d{1,2}AU[A-Za-z0-9-]{0,3}|[UNA][A-Za-z0-9-]{0,3}|[UNA])`;
+
+function isLikelyZoneCode(raw: string): boolean {
+  const normalized = normalizeZoneCode(raw);
+  if (!normalized) return false;
+
+  if (/^\d{1,2}AU[A-Z0-9-]{0,3}$/.test(normalized)) return true;
+  if (/^[UNA][A-Z0-9-]{0,3}$/.test(normalized)) return true;
+  if (/^(?:U|A|N)$/.test(normalized)) return true;
+  return false;
+}
+
 function normalizeZoneCode(raw: string): string {
   return raw.replace(/\s+/g, "").trim().toUpperCase();
 }
 
-function deriveParentZone(zoneCode: string): string | null {
-  const match = zoneCode.match(/^([A-Z]+)/);
-  if (!match?.[1]) return null;
-  const parent = match[1].toUpperCase();
-  return parent !== zoneCode ? parent : null;
+function isPotentialChildZone(parentZoneCode: string, candidateZoneCode: string) {
+  const parent = normalizeZoneCode(parentZoneCode);
+  const candidate = normalizeZoneCode(candidateZoneCode);
+  if (!parent || !candidate || parent === candidate) return false;
+  return candidate.startsWith(parent);
+}
+
+function deriveZoneRelationship(
+  rawZoneCode: string,
+  heading?: string | null,
+  options?: { parentHint?: string | null; fromSummary?: boolean },
+) {
+  const compactRaw = rawZoneCode.replace(/\s+/g, "").trim();
+  const normalizedZoneCode = normalizeZoneCode(compactRaw);
+  const lowerHint = `${heading || ""} ${compactRaw}`.toLowerCase();
+  const normalizedParentHint = options?.parentHint ? normalizeZoneCode(options.parentHint) : null;
+  const explicitSubZoneHint = /sous[- ]zone|sous secteur|sous-secteur/.test(lowerHint);
+
+  if (options?.fromSummary && !explicitSubZoneHint) {
+    return {
+      zoneCode: normalizedZoneCode,
+      parentZoneCode: null,
+      isSubZone: false,
+    };
+  }
+
+  if (normalizedParentHint && isPotentialChildZone(normalizedParentHint, normalizedZoneCode)) {
+    return {
+      zoneCode: normalizedZoneCode,
+      parentZoneCode: normalizedParentHint,
+      isSubZone: true,
+    };
+  }
+
+  const lowerCaseSuffixMatch = compactRaw.match(/^(\d+)?([A-Z]{1,4})([a-z][A-Za-z0-9-]*)$/);
+  if (lowerCaseSuffixMatch && explicitSubZoneHint) {
+    const parentZoneCode = `${lowerCaseSuffixMatch[1] || ""}${lowerCaseSuffixMatch[2].toUpperCase()}`;
+    return {
+      zoneCode: normalizedZoneCode,
+      parentZoneCode,
+      isSubZone: parentZoneCode !== normalizedZoneCode,
+    };
+  }
+
+  if (explicitSubZoneHint) {
+    const genericSuffixMatch = normalizedZoneCode.match(/^(\d+)?([A-Z]{1,4})([A-Z0-9-]+)$/);
+    if (genericSuffixMatch) {
+      const parentZoneCode = `${genericSuffixMatch[1] || ""}${genericSuffixMatch[2]}`;
+      return {
+        zoneCode: normalizedZoneCode,
+        parentZoneCode: parentZoneCode !== normalizedZoneCode ? parentZoneCode : null,
+        isSubZone: parentZoneCode !== normalizedZoneCode,
+      };
+    }
+  }
+
+  return {
+    zoneCode: normalizedZoneCode,
+    parentZoneCode: null,
+    isSubZone: false,
+  };
 }
 
 function inferPageAtOffset(text: string, offset: number): number | null {
@@ -90,15 +159,20 @@ function extractPages(rawText: string) {
 }
 
 function extractZoneEntriesFromSummary(rawText: string): TocZoneEntry[] {
-  const summaryPattern = /(^|\n)\s*(r[ée]glement\s+de\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))\s+(\d{1,4})\s*$/gim;
+  const summaryPattern = new RegExp(
+    `(^|\\n)\\s*((?:r[èée]glement\\s+de\\s+la\\s+zone|dispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone)\\s+(${ZONE_CODE_PATTERN})\\b)[\\s.]+(\\d{1,4})\\s*$`,
+    "gim",
+  );
   const entries: TocZoneEntry[] = [];
 
   let match: RegExpExecArray | null;
   while ((match = summaryPattern.exec(rawText)) !== null) {
-    const zoneCode = normalizeZoneCode(match[3] || "");
+    const rawZoneCode = (match[3] || "").trim();
+    const zoneCode = normalizeZoneCode(rawZoneCode);
     const pageNumber = Number(match[4] || 0);
     if (!zoneCode || !Number.isFinite(pageNumber) || pageNumber <= 0) continue;
     entries.push({
+      rawZoneCode,
       zoneCode,
       heading: match[2].trim(),
       pageNumber,
@@ -148,42 +222,115 @@ function buildSectionsFromSummary(rawText: string): ExtractedZoneSection[] {
     if (sourceText.length < 300) continue;
     if (scoreZoneHeadingPresence(sourceText, current.zoneCode) === 0) continue;
 
-    const parentZoneCode = deriveParentZone(current.zoneCode);
+    const relationship = deriveZoneRelationship(current.rawZoneCode, current.heading, {
+      fromSummary: true,
+    });
     sections.push({
-      zoneCode: current.zoneCode,
-      parentZoneCode,
+      zoneCode: relationship.zoneCode,
+      parentZoneCode: relationship.parentZoneCode,
       heading: current.heading,
       sourceText,
       startOffset,
       endOffset,
       startPage: actualStartPage,
       endPage: actualEndPage,
-      isSubZone: !!parentZoneCode,
+      isSubZone: relationship.isSubZone,
     });
   }
 
   return sections;
 }
 
+function extractSubZoneSectionsFromParentSections(parentSections: ExtractedZoneSection[], rawText: string) {
+  const subZoneHeaderPattern = new RegExp(
+    `(^|\\n)\\s*((?:dispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+sous[- ]zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:r[èée]glement\\s+de\\s+la\\s+sous[- ]zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:sous[- ]zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:secteur\\s+(${ZONE_CODE_PATTERN})\\b))[^\\n]*`,
+    "gim",
+  );
+
+  const extracted: ExtractedZoneSection[] = [];
+
+  for (const parentSection of parentSections) {
+    const matches: Array<{ rawZoneCode: string; heading: string; index: number }> = [];
+    let match: RegExpExecArray | null;
+    while ((match = subZoneHeaderPattern.exec(parentSection.sourceText)) !== null) {
+      const capturedZone = match[3] || match[4] || match[5] || match[6];
+      if (!capturedZone) continue;
+
+      const rawZoneCode = capturedZone.trim();
+      const relationship = deriveZoneRelationship(rawZoneCode, match[2], {
+        parentHint: parentSection.zoneCode,
+      });
+
+      if (!relationship.isSubZone) continue;
+      if (!isPotentialChildZone(parentSection.zoneCode, relationship.zoneCode)) continue;
+
+      const index = (match.index + (match[1]?.length || 0));
+      if (matches.some((item) => item.rawZoneCode.toUpperCase() === rawZoneCode.toUpperCase() && Math.abs(item.index - index) < 100)) {
+        continue;
+      }
+
+      matches.push({
+        rawZoneCode,
+        heading: match[2].trim(),
+        index,
+      });
+    }
+
+    matches.sort((left, right) => left.index - right.index);
+
+    for (let index = 0; index < matches.length; index++) {
+      const current = matches[index];
+      const next = matches[index + 1];
+      const localStartOffset = current.index;
+      const localEndOffset = next ? next.index : parentSection.sourceText.length;
+      const sourceText = parentSection.sourceText.slice(localStartOffset, localEndOffset).trim();
+      if (sourceText.length < 200) continue;
+
+      const relationship = deriveZoneRelationship(current.rawZoneCode, current.heading, {
+        parentHint: parentSection.zoneCode,
+      });
+      const startOffset = parentSection.startOffset + localStartOffset;
+      const endOffset = parentSection.startOffset + localEndOffset;
+
+      extracted.push({
+        zoneCode: relationship.zoneCode,
+        parentZoneCode: relationship.parentZoneCode,
+        heading: current.heading,
+        sourceText,
+        startOffset,
+        endOffset,
+        startPage: inferPageAtOffset(rawText, startOffset),
+        endPage: inferPageAtOffset(rawText, Math.max(startOffset, endOffset - 1)),
+        isSubZone: true,
+      });
+    }
+  }
+
+  return extracted;
+}
+
 export function extractRegulatoryZoneSections(rawText: string): ExtractedZoneSection[] {
   if (!rawText || rawText.trim().length < 500) return [];
 
-  const headerPattern =
-    /(^|\n)\s*((?:chapitre[^\n]{0,80}\bzone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:dispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:r[ée]glement\s+de\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:r[ée]glement\s+du\s+secteur\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:secteur\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:sous[- ]zone\s+([A-Z]{1,4}[A-Za-z0-9-]*)))[^\n]*/gim;
+  const headerPattern = new RegExp(
+    `(^|\\n)\\s*((?:chapitre[^\\n]{0,80}\\bzone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:dispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:r[èée]glement\\s+de\\s+la\\s+zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:r[èée]glement\\s+du\\s+secteur\\s+(${ZONE_CODE_PATTERN})\\b)|(?:zone\\s+(${ZONE_CODE_PATTERN})\\b)(?:\\s*\\([^\\n)]*\\))?|(?:secteur\\s+(${ZONE_CODE_PATTERN})\\b)|(?:sous[- ]zone\\s+(${ZONE_CODE_PATTERN})\\b))[^\\n]*`,
+    "gim",
+  );
 
-  const matches: Array<{ zoneCode: string; heading: string; index: number }> = [];
+  const matches: Array<{ rawZoneCode: string; zoneCode: string; heading: string; index: number }> = [];
 
   let match: RegExpExecArray | null;
   while ((match = headerPattern.exec(rawText)) !== null) {
     const capturedZone = match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9];
     if (!capturedZone) continue;
-    const zoneCode = normalizeZoneCode(capturedZone);
-    if (!/^[A-Z]{1,4}[A-Z0-9a-z-]*$/.test(zoneCode)) continue;
+    const rawZoneCode = capturedZone.trim();
+    const zoneCode = normalizeZoneCode(rawZoneCode);
+    if (!isLikelyZoneCode(zoneCode)) continue;
 
     const index = match.index + (match[1]?.length || 0);
     const heading = match[2].trim();
     if (matches.some((item) => item.zoneCode === zoneCode && Math.abs(item.index - index) < 100)) continue;
-    matches.push({ zoneCode, heading, index });
+    matches.push({ rawZoneCode, zoneCode, heading, index });
   }
 
   if (matches.length === 0) return [];
@@ -193,28 +340,47 @@ export function extractRegulatoryZoneSections(rawText: string): ExtractedZoneSec
   const sections: ExtractedZoneSection[] = [];
   for (let index = 0; index < matches.length; index++) {
     const current = matches[index];
-    const next = matches[index + 1];
+    const currentRelationship = deriveZoneRelationship(current.rawZoneCode, current.heading);
+    let nextIndex = index + 1;
+    if (!currentRelationship.isSubZone) {
+      while (nextIndex < matches.length) {
+        const candidate = matches[nextIndex];
+        const candidateRelationship = deriveZoneRelationship(candidate.rawZoneCode, candidate.heading, {
+          parentHint: currentRelationship.zoneCode,
+        });
+        if (candidateRelationship.isSubZone) {
+          nextIndex += 1;
+          continue;
+        }
+        break;
+      }
+    }
+
+    const next = nextIndex < matches.length ? matches[nextIndex] : null;
     const startOffset = current.index;
     const endOffset = next ? next.index : rawText.length;
     const sourceText = rawText.slice(startOffset, endOffset).trim();
     if (sourceText.length < 300) continue;
 
-    const parentZoneCode = deriveParentZone(current.zoneCode);
     sections.push({
-      zoneCode: current.zoneCode,
-      parentZoneCode,
+      zoneCode: currentRelationship.zoneCode,
+      parentZoneCode: currentRelationship.parentZoneCode,
       heading: current.heading,
       sourceText,
       startOffset,
       endOffset,
       startPage: inferPageAtOffset(rawText, startOffset),
       endPage: inferPageAtOffset(rawText, Math.max(startOffset, endOffset - 1)),
-      isSubZone: !!parentZoneCode,
+      isSubZone: currentRelationship.isSubZone,
     });
   }
 
+  const summarySections = buildSectionsFromSummary(rawText);
+  const parentSections = [...summarySections, ...sections].filter((section) => !section.isSubZone);
+  const nestedSubSections = extractSubZoneSectionsFromParentSections(parentSections, rawText);
+
   const deduped = new Map<string, ExtractedZoneSection>();
-  for (const section of [...buildSectionsFromSummary(rawText), ...sections]) {
+  for (const section of [...summarySections, ...sections, ...nestedSubSections]) {
     const existing = deduped.get(section.zoneCode);
     const sectionScore = scoreZoneHeadingPresence(section.sourceText, section.zoneCode) * 100000 + section.sourceText.length;
     const existingScore = existing ? scoreZoneHeadingPresence(existing.sourceText, existing.zoneCode) * 100000 + existing.sourceText.length : -1;

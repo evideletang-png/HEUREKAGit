@@ -107,6 +107,12 @@ type ZoneWorkspaceResponse = {
       identifiedZoneCode?: string;
       identifiedSubzone?: string | null;
       zoneResolutionConfidence?: string | null;
+      graphOverview?: {
+        documentCount?: number;
+        dependencyCount?: number;
+        graphicalDependencyCount?: number;
+        riskConstraintCount?: number;
+      };
     };
     documentSet?: Array<{
       document_id: string;
@@ -123,6 +129,24 @@ type ZoneWorkspaceResponse = {
       rule_summary: string;
       primary_source: string;
       warnings: string[];
+      cross_document_dependencies?: Array<{
+        label: string;
+        target_document?: string | null;
+        dependency_type: string;
+        reason?: string | null;
+      }>;
+      normative_effects?: Array<{
+        effect: string;
+        source_label: string;
+        topic?: string | null;
+        note?: string | null;
+      }>;
+      arbitration_decision?: {
+        status: string;
+        summary: string;
+        retained_sources: string[];
+        watchpoints: string[];
+      };
       source_decisions?: Array<{
         source_label: string;
         decision: string;
@@ -1343,6 +1367,25 @@ export function ZoneCalibrationWorkspace({
                     </p>
                   </div>
                 ) : null}
+                {visibleExpertAnalysis.identification?.graphOverview ? (
+                  <div className="rounded-xl border bg-muted/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Graphe réglementaire communal</div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{visibleExpertAnalysis.identification.graphOverview.documentCount ?? 0}</span> documents reliés
+                      </div>
+                      <div className="rounded-lg border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{visibleExpertAnalysis.identification.graphOverview.dependencyCount ?? 0}</span> dépendances croisées
+                      </div>
+                      <div className="rounded-lg border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{visibleExpertAnalysis.identification.graphOverview.graphicalDependencyCount ?? 0}</span> renvois graphiques
+                      </div>
+                      <div className="rounded-lg border bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{visibleExpertAnalysis.identification.graphOverview.riskConstraintCount ?? 0}</span> risques / servitudes
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {visibleExpertAnalysis.certaintyBuckets ? (
                   <div className="grid gap-3 lg:grid-cols-3">
                     <div className="rounded-xl border bg-emerald-50/60 p-3">
@@ -1404,6 +1447,25 @@ export function ZoneCalibrationWorkspace({
                           <Badge variant="outline">Confiance {topic.confidence}</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground">{topic.rule_summary}</p>
+                        {topic.arbitration_decision?.summary ? (
+                          <p className="text-xs text-muted-foreground">
+                            Arbitrage retenu : {topic.arbitration_decision.summary}
+                          </p>
+                        ) : null}
+                        {(topic.cross_document_dependencies?.length || topic.normative_effects?.length) ? (
+                          <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                            {topic.cross_document_dependencies?.length ? (
+                              <span className="rounded-full border bg-muted/30 px-2 py-1">
+                                {topic.cross_document_dependencies.length} dépendance{topic.cross_document_dependencies.length > 1 ? "s" : ""} croisée{topic.cross_document_dependencies.length > 1 ? "s" : ""}
+                              </span>
+                            ) : null}
+                            {topic.normative_effects?.length ? (
+                              <span className="rounded-full border bg-muted/30 px-2 py-1">
+                                {topic.normative_effects.length} effet{topic.normative_effects.length > 1 ? "s" : ""} normatif{topic.normative_effects.length > 1 ? "s" : ""}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                         {topic.source_decisions?.length ? (
                           <div className="space-y-1 text-xs text-muted-foreground">
                             {topic.source_decisions.slice(0, 3).map((decision, index) => (
