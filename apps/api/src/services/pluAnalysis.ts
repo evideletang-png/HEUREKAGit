@@ -10,6 +10,9 @@ import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.
 import {
   buildRegulatorySinglePipeContext,
   loadRegulatorySinglePipePrompt,
+  REGULATORY_SINGLE_PIPE_CORPUS_MAX_CHARS,
+  REGULATORY_SINGLE_PIPE_DOCUMENT_MAX_CHARS,
+  REGULATORY_SINGLE_PIPE_TIMEOUT_MS,
   truncateSinglePipeField,
 } from "./regulatorySinglePipe.js";
 
@@ -1121,7 +1124,7 @@ export async function extractDocumentData(
       commune: commune || null,
       zone_code: zoneCode || null,
     },
-    document_text: truncateSinglePipeField(text, 100000),
+    document_text: truncateSinglePipeField(text, REGULATORY_SINGLE_PIPE_DOCUMENT_MAX_CHARS),
     dossier_context: dossierDocs,
     regulatory_context: regulatoryRules,
     expected_output: {
@@ -1145,6 +1148,8 @@ export async function extractDocumentData(
       ],
       response_format: { type: "json_object" },
       temperature: 0
+    }, {
+      timeout: REGULATORY_SINGLE_PIPE_TIMEOUT_MS,
     });
 
     const resultText = response.choices[0]?.message?.content || "{}";
@@ -1175,8 +1180,35 @@ export async function extractDocumentData(
       }
     };
   } catch (err) {
-    console.error("[extractDocumentData] IA Error:", err);
-    throw err;
+    logger.error("[extractDocumentData] single pipe failed", err, {
+      documentType,
+      commune,
+      zoneCode,
+      textLength: text.length,
+    });
+    return {
+      status: "warning",
+      data: {
+        document_code: documentType || "unknown",
+        status: "warning",
+        confidence_score: 0,
+        extracted_data: {},
+        regulatory_checks: [],
+        cross_document_issues: [],
+        missing_information: ["Extraction IA indisponible ou expirée."],
+        recommendations: ["Relancer l'analyse ou réduire le périmètre documentaire si le contexte est très volumineux."],
+        analysis: {
+          compliance: "uncertain",
+          summary: "Le pipe unique n'a pas pu répondre à temps. Les données du document restent non stabilisées.",
+        },
+        document_type: documentType || "unknown",
+        document_nature: "indéterminé",
+        expertise_notes: err instanceof Error ? err.message : "Erreur inconnue pendant l'extraction réglementaire.",
+        raw_mentions: [],
+      },
+      warnings: [err instanceof Error ? err.message : "Erreur inconnue pendant l'extraction réglementaire."],
+      missing_elements: ["Extraction structurée indisponible"],
+    };
   }
 }
 
@@ -1521,7 +1553,7 @@ export async function compareWithPLU(
         parking_requirements: plu.rules?.parking_requirements ?? buildability?.parkingRequirement ?? null,
         remaining_footprint_m2: buildability?.remainingFootprintM2 ?? null,
       },
-      regulatory_corpus: truncateSinglePipeField(townHallDocumentsText || "", 90000),
+      regulatory_corpus: truncateSinglePipeField(townHallDocumentsText || "", REGULATORY_SINGLE_PIPE_CORPUS_MAX_CHARS),
       commune_custom_instructions: townHallCustomPrompt || null,
       territorial_context: territorialContext || [],
       jurisdiction_context: jurisdictionContext || null,
@@ -1548,6 +1580,8 @@ export async function compareWithPLU(
         { role: "user", content: input }
       ],
       response_format: { type: "json_object" },
+    }, {
+      timeout: REGULATORY_SINGLE_PIPE_TIMEOUT_MS,
     });
 
     const resultText = response.choices[0]?.message?.content;
@@ -1579,7 +1613,12 @@ export async function compareWithPLU(
       analysis: { compliance: (result as any).global_status || "uncertain", issues: [], risks: [], opportunities: [] }
     };
   } catch (err) {
-    console.error("[compareWithPLU] Modular Engine Error:", err);
+    logger.error("[compareWithPLU] single pipe failed", err, {
+      zoneCode,
+      cityName,
+      articlesCount: Array.isArray(articles) ? articles.length : 0,
+      hasRegulatoryCorpus: !!townHallDocumentsText,
+    });
     return {
       status: "error",
       data: { summary: "Erreur", global_status: "indéterminé", conformities: [], inconsistencies: [], points_attention: [], recommendations: [] },

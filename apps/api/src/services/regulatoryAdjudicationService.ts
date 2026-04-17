@@ -9,7 +9,12 @@ import type {
   RegulatoryEngineOutput,
   RegulatoryTopicAnalysis,
 } from "./regulatoryInterpretationTypes.js";
-import { buildRegulatorySinglePipeContext, loadRegulatorySinglePipePrompt } from "./regulatorySinglePipe.js";
+import {
+  buildRegulatorySinglePipeContext,
+  loadRegulatorySinglePipePrompt,
+  REGULATORY_SINGLE_PIPE_ADJUDICATION_MAX_CHARS,
+  REGULATORY_SINGLE_PIPE_TIMEOUT_MS,
+} from "./regulatorySinglePipe.js";
 
 const ConfidenceEnum = z.enum(["high", "medium", "low"]);
 const RuleTypeEnum = z.enum(["textual", "textual_conditional", "graphical", "mixed", "cross_document", "undetermined"]);
@@ -226,9 +231,16 @@ export async function adjudicateRegulatoryEngineOutput(args: {
       temperature: 0,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: payload.length > 45000 ? `${payload.slice(0, 45000)}...` : payload },
+        {
+          role: "user",
+          content: payload.length > REGULATORY_SINGLE_PIPE_ADJUDICATION_MAX_CHARS
+            ? `${payload.slice(0, REGULATORY_SINGLE_PIPE_ADJUDICATION_MAX_CHARS)}...`
+            : payload,
+        },
       ],
       response_format: zodResponseFormat(RegulatoryAiAdjudicationSchema, "regulatory_ai_adjudication"),
+    }, {
+      timeout: REGULATORY_SINGLE_PIPE_TIMEOUT_MS,
     });
 
     const raw = completion.choices[0]?.message?.content || "{}";
