@@ -24,6 +24,7 @@ type ExtractedZoneSection = {
 };
 
 type TocZoneEntry = {
+  rawZoneCode: string;
   zoneCode: string;
   heading: string;
   pageNumber: number;
@@ -33,11 +34,38 @@ function normalizeZoneCode(raw: string): string {
   return raw.replace(/\s+/g, "").trim().toUpperCase();
 }
 
-function deriveParentZone(zoneCode: string): string | null {
-  const match = zoneCode.match(/^([A-Z]+)/);
-  if (!match?.[1]) return null;
-  const parent = match[1].toUpperCase();
-  return parent !== zoneCode ? parent : null;
+function deriveZoneRelationship(rawZoneCode: string, heading?: string | null) {
+  const compactRaw = rawZoneCode.replace(/\s+/g, "").trim();
+  const normalizedZoneCode = normalizeZoneCode(compactRaw);
+  const lowerHint = `${heading || ""} ${compactRaw}`.toLowerCase();
+
+  const lowerCaseSuffixMatch = compactRaw.match(/^(\d+)?([A-Z]{1,4})([a-z][A-Za-z0-9-]*)$/);
+  if (lowerCaseSuffixMatch) {
+    const parentZoneCode = `${lowerCaseSuffixMatch[1] || ""}${lowerCaseSuffixMatch[2].toUpperCase()}`;
+    return {
+      zoneCode: normalizedZoneCode,
+      parentZoneCode,
+      isSubZone: parentZoneCode !== normalizedZoneCode,
+    };
+  }
+
+  if (/sous[- ]zone|sous secteur|sous-secteur/.test(lowerHint)) {
+    const genericSuffixMatch = normalizedZoneCode.match(/^(\d+)?([A-Z]{1,4})([A-Z0-9-]+)$/);
+    if (genericSuffixMatch) {
+      const parentZoneCode = `${genericSuffixMatch[1] || ""}${genericSuffixMatch[2]}`;
+      return {
+        zoneCode: normalizedZoneCode,
+        parentZoneCode: parentZoneCode !== normalizedZoneCode ? parentZoneCode : null,
+        isSubZone: parentZoneCode !== normalizedZoneCode,
+      };
+    }
+  }
+
+  return {
+    zoneCode: normalizedZoneCode,
+    parentZoneCode: null,
+    isSubZone: false,
+  };
 }
 
 function inferPageAtOffset(text: string, offset: number): number | null {
@@ -95,10 +123,12 @@ function extractZoneEntriesFromSummary(rawText: string): TocZoneEntry[] {
 
   let match: RegExpExecArray | null;
   while ((match = summaryPattern.exec(rawText)) !== null) {
-    const zoneCode = normalizeZoneCode(match[3] || "");
+    const rawZoneCode = (match[3] || "").trim();
+    const zoneCode = normalizeZoneCode(rawZoneCode);
     const pageNumber = Number(match[4] || 0);
     if (!zoneCode || !Number.isFinite(pageNumber) || pageNumber <= 0) continue;
     entries.push({
+      rawZoneCode,
       zoneCode,
       heading: match[2].trim(),
       pageNumber,
@@ -148,17 +178,17 @@ function buildSectionsFromSummary(rawText: string): ExtractedZoneSection[] {
     if (sourceText.length < 300) continue;
     if (scoreZoneHeadingPresence(sourceText, current.zoneCode) === 0) continue;
 
-    const parentZoneCode = deriveParentZone(current.zoneCode);
+    const relationship = deriveZoneRelationship(current.rawZoneCode, current.heading);
     sections.push({
-      zoneCode: current.zoneCode,
-      parentZoneCode,
+      zoneCode: relationship.zoneCode,
+      parentZoneCode: relationship.parentZoneCode,
       heading: current.heading,
       sourceText,
       startOffset,
       endOffset,
       startPage: actualStartPage,
       endPage: actualEndPage,
-      isSubZone: !!parentZoneCode,
+      isSubZone: relationship.isSubZone,
     });
   }
 
@@ -171,19 +201,20 @@ export function extractRegulatoryZoneSections(rawText: string): ExtractedZoneSec
   const headerPattern =
     /(^|\n)\s*((?:chapitre[^\n]{0,80}\bzone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:dispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:r[ée]glement\s+de\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:r[ée]glement\s+du\s+secteur\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:secteur\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:sous[- ]zone\s+([A-Z]{1,4}[A-Za-z0-9-]*)))[^\n]*/gim;
 
-  const matches: Array<{ zoneCode: string; heading: string; index: number }> = [];
+  const matches: Array<{ rawZoneCode: string; zoneCode: string; heading: string; index: number }> = [];
 
   let match: RegExpExecArray | null;
   while ((match = headerPattern.exec(rawText)) !== null) {
     const capturedZone = match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9];
     if (!capturedZone) continue;
-    const zoneCode = normalizeZoneCode(capturedZone);
+    const rawZoneCode = capturedZone.trim();
+    const zoneCode = normalizeZoneCode(rawZoneCode);
     if (!/^[A-Z]{1,4}[A-Z0-9a-z-]*$/.test(zoneCode)) continue;
 
     const index = match.index + (match[1]?.length || 0);
     const heading = match[2].trim();
     if (matches.some((item) => item.zoneCode === zoneCode && Math.abs(item.index - index) < 100)) continue;
-    matches.push({ zoneCode, heading, index });
+    matches.push({ rawZoneCode, zoneCode, heading, index });
   }
 
   if (matches.length === 0) return [];
@@ -199,17 +230,17 @@ export function extractRegulatoryZoneSections(rawText: string): ExtractedZoneSec
     const sourceText = rawText.slice(startOffset, endOffset).trim();
     if (sourceText.length < 300) continue;
 
-    const parentZoneCode = deriveParentZone(current.zoneCode);
+    const relationship = deriveZoneRelationship(current.rawZoneCode, current.heading);
     sections.push({
-      zoneCode: current.zoneCode,
-      parentZoneCode,
+      zoneCode: relationship.zoneCode,
+      parentZoneCode: relationship.parentZoneCode,
       heading: current.heading,
       sourceText,
       startOffset,
       endOffset,
       startPage: inferPageAtOffset(rawText, startOffset),
       endPage: inferPageAtOffset(rawText, Math.max(startOffset, endOffset - 1)),
-      isSubZone: !!parentZoneCode,
+      isSubZone: relationship.isSubZone,
     });
   }
 

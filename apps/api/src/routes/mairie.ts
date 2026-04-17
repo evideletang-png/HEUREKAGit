@@ -1440,6 +1440,7 @@ async function ensureCalibrationZonesForCommune(args: {
       referenceStartPage: regulatoryCalibrationZonesTable.referenceStartPage,
       referenceEndPage: regulatoryCalibrationZonesTable.referenceEndPage,
       parentZoneCode: regulatoryCalibrationZonesTable.parentZoneCode,
+      sectorCode: regulatoryCalibrationZonesTable.sectorCode,
     })
       .from(regulatoryCalibrationZonesTable)
       .where(buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, args.communeAliases)),
@@ -1488,8 +1489,12 @@ async function ensureCalibrationZonesForCommune(args: {
         : "Zone détectée automatiquement depuis un document réglementaire."
     );
     const nextParentZoneCode = existingZone.parentZoneCode ?? section?.parentZoneCode ?? deriveParentZoneCode(zoneCode);
+    const nextSectorCode = existingZone.sectorCode ?? (section?.isSubZone ? zoneCode : null);
     const existingKeywords = Array.isArray(existingZone.searchKeywords) ? existingZone.searchKeywords : [];
     const mergedKeywords = Array.from(new Set([...existingKeywords, ...autoKeywords]));
+    const sameKeywords =
+      mergedKeywords.length === existingKeywords.length
+      && mergedKeywords.every((keyword, index) => keyword === existingKeywords[index]);
 
     const shouldUpdate =
       nextReferenceStartPage !== existingZone.referenceStartPage
@@ -1497,13 +1502,15 @@ async function ensureCalibrationZonesForCommune(args: {
       || nextReferenceDocumentId !== existingZone.referenceDocumentId
       || nextGuidanceNotes !== existingZone.guidanceNotes
       || nextParentZoneCode !== existingZone.parentZoneCode
-      || mergedKeywords.length !== existingKeywords.length;
+      || nextSectorCode !== existingZone.sectorCode
+      || !sameKeywords;
 
     if (!shouldUpdate) continue;
 
     await db.update(regulatoryCalibrationZonesTable)
       .set({
         parentZoneCode: nextParentZoneCode,
+        sectorCode: nextSectorCode,
         guidanceNotes: nextGuidanceNotes,
         searchKeywords: mergedKeywords,
         referenceDocumentId: nextReferenceDocumentId,
@@ -1531,8 +1538,9 @@ async function ensureCalibrationZonesForCommune(args: {
       return {
         communeId: args.communeKey,
         zoneCode,
-        zoneLabel: `Zone ${zoneCode}`,
+        zoneLabel: section?.isSubZone ? `Sous-zone ${zoneCode}` : `Zone ${zoneCode}`,
         parentZoneCode: section?.parentZoneCode ?? deriveParentZoneCode(zoneCode),
+        sectorCode: section?.isSubZone ? zoneCode : null,
         guidanceNotes: section?.heading || (
           args.sourceName
             ? `Zone détectée automatiquement depuis ${args.sourceName}${args.sourceType ? ` (${args.sourceType})` : ""}.`
