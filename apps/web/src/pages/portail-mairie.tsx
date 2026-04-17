@@ -172,6 +172,11 @@ type PluKnowledgeSummary = {
       manualReviewRequired: boolean;
       detectedZonesCount: number;
       structuredTopicsCount: number;
+      reasoningSummary?: string | null;
+      reasoningJson?: {
+        confidence?: "high" | "medium" | "low";
+        warnings?: string[];
+      } | null;
     } | null;
     extractedRuleCount: number;
   }>;
@@ -1861,6 +1866,23 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                             <div className="mt-1 font-semibold">{doc.extractedRuleCount}</div>
                           </div>
                         </div>
+                        {doc.profile?.reasoningSummary && (
+                          <div className="mt-3 rounded-lg border border-primary/10 bg-primary/5 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[11px] font-semibold text-primary">Raisonnement stocké</p>
+                              {doc.profile?.reasoningJson?.confidence && (
+                                <Badge variant="outline" className="bg-white/70 text-[10px]">
+                                  {doc.profile.reasoningJson.confidence === "high"
+                                    ? "Confiance élevée"
+                                    : doc.profile.reasoningJson.confidence === "medium"
+                                      ? "Confiance moyenne"
+                                      : "Confiance prudente"}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[11px] leading-relaxed text-slate-700">{doc.profile.reasoningSummary}</p>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

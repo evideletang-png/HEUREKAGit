@@ -26,6 +26,8 @@ export const documentKnowledgeProfilesTable = pgTable("document_knowledge_profil
   rawClassification: jsonb("raw_classification").default({}),
   detectedZones: jsonb("detected_zones").default([]),
   structuredTopics: jsonb("structured_topics").default([]),
+  reasoningSummary: text("reasoning_summary"),
+  reasoningJson: jsonb("reasoning_json").default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

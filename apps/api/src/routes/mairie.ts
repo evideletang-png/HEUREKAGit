@@ -1944,6 +1944,8 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
             manualReviewRequired: profile.manualReviewRequired,
             detectedZonesCount: zones.length,
             structuredTopicsCount: topics.length,
+            reasoningSummary: (profile as any).reasoningSummary || null,
+            reasoningJson: (profile as any).reasoningJson || null,
           } : null,
           extractedRuleCount: rulesByDocumentId.get(doc.id) || 0,
         };
@@ -3277,7 +3279,7 @@ async function queueTownHallDocumentIndexing(args: {
         municipalityId: municipalityKey,
         documentType: canonicalType,
         documentSubtype: args.documentType || null,
-        sourceName: path.basename(args.persistentPath),
+        sourceName: args.originalName,
         sourceAuthority: authorityForCanonicalType(canonicalType),
         opposable: isOpposable,
         rawText,
@@ -7167,6 +7169,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                });
                await persistRegulatoryUnitsForDocument({
                  baseIADocumentId: doc.id,
+                 townHallDocumentId: townHallDoc.id,
                  municipalityId: municipalityKey,
                  zoneCode: req.body.zone || null,
                  documentType: canonicalType,
@@ -7176,6 +7179,7 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                });
                await persistRegulatoryZoneSectionsForDocument({
                  baseIADocumentId: doc.id,
+                 townHallDocumentId: townHallDoc.id,
                  municipalityId: municipalityKey,
                  documentType: canonicalType,
                  sourceAuthority: authorityForCanonicalType(canonicalType),
@@ -7190,6 +7194,27 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
                  sourceType: classification.resolved.documentType,
                  referenceDocumentId: doc.id,
                  userId: req.user!.userId,
+               });
+               await persistStructuredKnowledgeForDocument({
+                 baseIADocumentId: doc.id,
+                 townHallDocumentId: townHallDoc.id,
+                 municipalityId: municipalityKey,
+                 documentType: canonicalType,
+                 documentSubtype: classification.resolved.documentType || null,
+                 sourceName: file.originalname,
+                 sourceAuthority: authorityForCanonicalType(canonicalType),
+                 opposable: isOpposable,
+                 rawText,
+                 rawClassification: {
+                   category,
+                   subCategory,
+                   requestedDocumentType: req.body.documentType || null,
+                   resolvedDocumentType: classification.resolved.documentType,
+                   autoCorrected: classification.autoCorrected,
+                   suggestionConfidence: classification.suggestionConfidence,
+                   suggestionReason: classification.suggestionReason,
+                   source: "mairie_batch_upload",
+                 },
                });
                console.log(`[mairie/batch] Successfully processed RAG for doc ${doc.id}`);
              } catch (ragErr) {
