@@ -1340,9 +1340,9 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   }
 
   const explicitZonePatterns = [
-    /\br[ée]glement\s+de\s+la\s+zone\s+([A-Z0-9-]+)/gi,
-    /\bdispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Z0-9-]+)/gi,
-    /\bzone\s+([A-Z0-9-]+)/gi,
+    /\br[ée]glement\s+de\s+la\s+zone\s+([A-Za-z0-9-]+)/gi,
+    /\bdispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Za-z0-9-]+)/gi,
+    /\bzone\s+([A-Za-z0-9-]+)/gi,
   ];
 
   for (const pattern of explicitZonePatterns) {
@@ -1353,44 +1353,57 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   }
 
   if (options?.zoningLike) {
-    const inlineTokenPattern = /\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g;
+    const inlineTokenPattern = /\b(?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})\b/g;
     let inlineMatch: RegExpExecArray | null;
-    while ((inlineMatch = inlineTokenPattern.exec(rawText.toUpperCase())) !== null) {
+    while ((inlineMatch = inlineTokenPattern.exec(rawText)) !== null) {
       addZoneCode(inlineMatch[0], { allowSingleLetter: true });
     }
   }
 
   for (const line of rawText.replace(/\r\n?/g, "\n").split("\n")) {
     const trimmed = line.trim().replace(/\s+/g, " ");
-    const maxLineLength = options?.zoningLike ? 96 : 36;
-    if (!trimmed || trimmed.length > maxLineLength) continue;
+    if (!trimmed) continue;
 
-    const headingMatch = trimmed.match(/^(?:r[ée]glement\s+de\s+la\s+zone|dispositions\s+applicables\s+(?:à|a)\s+la\s+zone|zone)\s+([A-Z0-9-]+)$/i);
+    const looksLikeZoneInventory =
+      /\b(?:zones?|sous[- ]zones?|secteurs?|sous[- ]secteurs?)\b/i.test(trimmed)
+      && /[\/,;()]/.test(trimmed);
+
+    if (looksLikeZoneInventory) {
+      const listedTokens = trimmed.match(/\b(?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})\b/g) || [];
+      for (const token of listedTokens) {
+        addZoneCode(token, { allowSingleLetter: true });
+      }
+    }
+
+    const maxLineLength = options?.zoningLike ? 96 : 36;
+    if (trimmed.length > maxLineLength) continue;
+
+    const headingMatch = trimmed.match(/^(?:r[ée]glement\s+de\s+la\s+zone|dispositions\s+applicables\s+(?:à|a)\s+la\s+zone|zone)\s+([A-Za-z0-9-]+)(?:\s*\([^)]*\))?$/i);
     if (headingMatch?.[1]) {
       addZoneCode(headingMatch[1], { allowSingleLetter: true });
       continue;
     }
 
-    const prefixedMatch = trimmed.match(/^zone\s+([A-Z0-9-]+)$/i);
+    const prefixedMatch = trimmed.match(/^zone\s+([A-Za-z0-9-]+)(?:\s*\([^)]*\))?$/i);
     if (prefixedMatch?.[1]) {
       addZoneCode(prefixedMatch[1], { allowSingleLetter: true });
       continue;
     }
 
     if (!options?.zoningLike) {
-      const standaloneZoneMatch = trimmed.match(/^((?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*)$/i);
+      const standaloneZoneMatch = trimmed.match(/^((?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})?)(?:\s*\([^)]*\))?$/i);
       if (standaloneZoneMatch?.[1]) {
         addZoneCode(standaloneZoneMatch[1], { allowSingleLetter: true });
       }
       continue;
     }
 
-    const lineLeadMatch = trimmed.match(/^(?:zone\s+)?((?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*)\b/i);
+    const lineLeadMatch = trimmed.match(/^(?:zone\s+)?((?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})?)\b/i);
     if (lineLeadMatch?.[1]) {
       addZoneCode(lineLeadMatch[1], { allowSingleLetter: true });
     }
 
-    const tokens = trimmed.toUpperCase().match(/\b(?:\d{1,2})?[A-Z]{1,4}[A-Z0-9-]*\b/g) || [];
+    const tokens = trimmed.match(/\b(?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})\b/g) || [];
     for (const token of tokens) {
       addZoneCode(token, { allowSingleLetter: true });
     }
