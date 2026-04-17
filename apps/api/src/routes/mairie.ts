@@ -1330,6 +1330,7 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   if (!rawText || rawText.trim().length < (options?.zoningLike ? 20 : 80)) return [];
 
   const detected = new Set<string>();
+  const zoneCodePattern = String.raw`(?:\d{1,2}AU[A-Za-z0-9-]{0,4}|[UNA][A-Za-z0-9-]{0,4})`;
   const addZoneCode = (raw: unknown, options?: { allowSingleLetter?: boolean }) => {
     const zoneCode = isLikelyPluZoneCode(raw, options);
     if (zoneCode) detected.add(zoneCode);
@@ -1340,9 +1341,9 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   }
 
   const explicitZonePatterns = [
-    /\br[ée]glement\s+de\s+la\s+zone\s+([A-Za-z0-9-]+)/gi,
-    /\bdispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Za-z0-9-]+)/gi,
-    /\bzone\s+([A-Za-z0-9-]+)/gi,
+    new RegExp(`\\br[èée]glement\\s+de\\s+la\\s+zone\\s+(${zoneCodePattern})\\b`, "gi"),
+    new RegExp(`\\bdispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone\\s+(${zoneCodePattern})\\b`, "gi"),
+    new RegExp(`\\bzone\\s+(${zoneCodePattern})\\b`, "gi"),
   ];
 
   for (const pattern of explicitZonePatterns) {
@@ -1353,7 +1354,7 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
   }
 
   if (options?.zoningLike) {
-    const inlineTokenPattern = /\b(?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})\b/g;
+    const inlineTokenPattern = new RegExp(`\\b${zoneCodePattern}\\b`, "g");
     let inlineMatch: RegExpExecArray | null;
     while ((inlineMatch = inlineTokenPattern.exec(rawText)) !== null) {
       addZoneCode(inlineMatch[0], { allowSingleLetter: true });
@@ -1369,7 +1370,7 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
       && /[\/,;()]/.test(trimmed);
 
     if (looksLikeZoneInventory) {
-      const listedTokens = trimmed.match(/\b(?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})\b/g) || [];
+      const listedTokens = trimmed.match(new RegExp(`\\b${zoneCodePattern}\\b`, "g")) || [];
       for (const token of listedTokens) {
         addZoneCode(token, { allowSingleLetter: true });
       }
@@ -1378,32 +1379,32 @@ function extractCalibrationZoneCodes(rawText: string, options?: { zoningLike?: b
     const maxLineLength = options?.zoningLike ? 96 : 36;
     if (trimmed.length > maxLineLength) continue;
 
-    const headingMatch = trimmed.match(/^(?:r[ée]glement\s+de\s+la\s+zone|dispositions\s+applicables\s+(?:à|a)\s+la\s+zone|zone)\s+([A-Za-z0-9-]+)(?:\s*\([^)]*\))?$/i);
+    const headingMatch = trimmed.match(new RegExp(`^(?:r[èée]glement\\s+de\\s+la\\s+zone|dispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone|zone)\\s+(${zoneCodePattern})(?:\\s*\\([^)]*\\))?$`, "i"));
     if (headingMatch?.[1]) {
       addZoneCode(headingMatch[1], { allowSingleLetter: true });
       continue;
     }
 
-    const prefixedMatch = trimmed.match(/^zone\s+([A-Za-z0-9-]+)(?:\s*\([^)]*\))?$/i);
+    const prefixedMatch = trimmed.match(new RegExp(`^zone\\s+(${zoneCodePattern})(?:\\s*\\([^)]*\\))?$`, "i"));
     if (prefixedMatch?.[1]) {
       addZoneCode(prefixedMatch[1], { allowSingleLetter: true });
       continue;
     }
 
     if (!options?.zoningLike) {
-      const standaloneZoneMatch = trimmed.match(/^((?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})?)(?:\s*\([^)]*\))?$/i);
+      const standaloneZoneMatch = trimmed.match(new RegExp(`^(${zoneCodePattern})(?:\\s*\\([^)]*\\))?$`, "i"));
       if (standaloneZoneMatch?.[1]) {
         addZoneCode(standaloneZoneMatch[1], { allowSingleLetter: true });
       }
       continue;
     }
 
-    const lineLeadMatch = trimmed.match(/^(?:zone\s+)?((?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})?)\b/i);
+    const lineLeadMatch = trimmed.match(new RegExp(`^(?:zone\\s+)?(${zoneCodePattern})\\b`, "i"));
     if (lineLeadMatch?.[1]) {
       addZoneCode(lineLeadMatch[1], { allowSingleLetter: true });
     }
 
-    const tokens = trimmed.match(/\b(?:\d{1,2}AU|[UNA][A-Za-z]?)(?:[A-Za-z0-9-]{0,6})\b/g) || [];
+    const tokens = trimmed.match(new RegExp(`\\b${zoneCodePattern}\\b`, "g")) || [];
     for (const token of tokens) {
       addZoneCode(token, { allowSingleLetter: true });
     }
@@ -2726,7 +2727,7 @@ function autoSuggestClassification(text: string, fileName: string): SuggestedCla
   const firstWindow = content.slice(0, 20000);
 
   const writtenRegulationScore =
-    countPatternMatches(firstWindow, /r[ée]glement\s+de\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
+    countPatternMatches(firstWindow, /r[èée]glement\s+de\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
     countPatternMatches(firstWindow, /dispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+[a-z0-9-]+/gi) * 6 +
     countPatternMatches(firstWindow, /article\s+(?:1|2|3|4|6|7|8|9|10|11|12|13|14)\b/gi) * 2 +
     countPatternMatches(firstWindow, /implantation\s+par\s+rapport\s+aux\s+voies/gi) * 3 +
@@ -2751,7 +2752,7 @@ function autoSuggestClassification(text: string, fileName: string): SuggestedCla
     countPatternMatches(firstWindow, /plan\s+de\s+zonage/gi) * 7 +
     countPatternMatches(firstWindow, /document\s+graphique/gi) * 6 +
     countPatternMatches(firstWindow, /planche\s+de\s+zonage/gi) * 6 +
-    countPatternMatches(firstWindow, /zonage\s+r[ée]glementaire/gi) * 5 +
+    countPatternMatches(firstWindow, /zonage\s+r[èée]glementaire/gi) * 5 +
     countPatternMatches(firstWindow, /l[ée]gende/gi) * 2;
 
   const administrativeActScore =

@@ -30,6 +30,18 @@ type TocZoneEntry = {
   pageNumber: number;
 };
 
+const ZONE_CODE_PATTERN = String.raw`(?:\d{1,2}AU[A-Za-z0-9-]{0,3}|[UNA][A-Za-z0-9-]{0,3}|[UNA])`;
+
+function isLikelyZoneCode(raw: string): boolean {
+  const normalized = normalizeZoneCode(raw);
+  if (!normalized) return false;
+
+  if (/^\d{1,2}AU[A-Z0-9-]{0,3}$/.test(normalized)) return true;
+  if (/^[UNA][A-Z0-9-]{0,3}$/.test(normalized)) return true;
+  if (/^(?:U|A|N)$/.test(normalized)) return true;
+  return false;
+}
+
 function normalizeZoneCode(raw: string): string {
   return raw.replace(/\s+/g, "").trim().toUpperCase();
 }
@@ -118,7 +130,7 @@ function extractPages(rawText: string) {
 }
 
 function extractZoneEntriesFromSummary(rawText: string): TocZoneEntry[] {
-  const summaryPattern = /(^|\n)\s*(r[ée]glement\s+de\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))\s+(\d{1,4})\s*$/gim;
+  const summaryPattern = new RegExp(`(^|\\n)\\s*(r[èée]glement\\s+de\\s+la\\s+zone\\s+(${ZONE_CODE_PATTERN})\\b)\\s+(\\d{1,4})\\s*$`, "gim");
   const entries: TocZoneEntry[] = [];
 
   let match: RegExpExecArray | null;
@@ -198,8 +210,10 @@ function buildSectionsFromSummary(rawText: string): ExtractedZoneSection[] {
 export function extractRegulatoryZoneSections(rawText: string): ExtractedZoneSection[] {
   if (!rawText || rawText.trim().length < 500) return [];
 
-  const headerPattern =
-    /(^|\n)\s*((?:chapitre[^\n]{0,80}\bzone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:dispositions\s+applicables\s+(?:à|a)\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:r[ée]glement\s+de\s+la\s+zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:r[ée]glement\s+du\s+secteur\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:zone\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:secteur\s+([A-Z]{1,4}[A-Za-z0-9-]*))|(?:sous[- ]zone\s+([A-Z]{1,4}[A-Za-z0-9-]*)))[^\n]*/gim;
+  const headerPattern = new RegExp(
+    `(^|\\n)\\s*((?:chapitre[^\\n]{0,80}\\bzone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:dispositions\\s+applicables\\s+(?:à|a)\\s+la\\s+zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:r[èée]glement\\s+de\\s+la\\s+zone\\s+(${ZONE_CODE_PATTERN})\\b)|(?:r[èée]glement\\s+du\\s+secteur\\s+(${ZONE_CODE_PATTERN})\\b)|(?:zone\\s+(${ZONE_CODE_PATTERN})\\b)(?:\\s*\\([^\\n)]*\\))?|(?:secteur\\s+(${ZONE_CODE_PATTERN})\\b)|(?:sous[- ]zone\\s+(${ZONE_CODE_PATTERN})\\b))[^\\n]*`,
+    "gim",
+  );
 
   const matches: Array<{ rawZoneCode: string; zoneCode: string; heading: string; index: number }> = [];
 
@@ -209,7 +223,7 @@ export function extractRegulatoryZoneSections(rawText: string): ExtractedZoneSec
     if (!capturedZone) continue;
     const rawZoneCode = capturedZone.trim();
     const zoneCode = normalizeZoneCode(rawZoneCode);
-    if (!/^[A-Z]{1,4}[A-Z0-9a-z-]*$/.test(zoneCode)) continue;
+    if (!isLikelyZoneCode(zoneCode)) continue;
 
     const index = match.index + (match[1]?.length || 0);
     const heading = match[2].trim();
