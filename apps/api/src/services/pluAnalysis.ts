@@ -1,13 +1,17 @@
 import { z } from "zod";
 import { repairExtractedText } from "./textQualityService.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { zodResponseFormat } from "openai/helpers/zod";
 import { loadPrompt } from "./promptLoader.js";
-import { SYSTEM_PROMPTS, CerfaExtractionSchema, EvidenceBundle, EvidenceChunk, JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
+import { SYSTEM_PROMPTS, JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
 import { logger } from "../utils/logger.js";
 import fs from "fs";
 import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.js";
+import {
+  buildRegulatorySinglePipeContext,
+  loadRegulatorySinglePipePrompt,
+  truncateSinglePipeField,
+} from "./regulatorySinglePipe.js";
 
 function uniqueMunicipalityAliases(cityName?: string, jurisdictionContext?: JurisdictionContext): string[] {
   return Array.from(new Set([
@@ -1094,17 +1098,6 @@ export async function classifyDocument(text: string): Promise<{ document_class: 
   }
 }
 
-/** Map documentType to the appropriate SYSTEM_PROMPTS key */
-const PCMI_PROMPT_MAP: Record<string, string> = {
-  PCMI1: "PCMI1_EXTRACTOR",
-  PCMI2: "PCMI2_EXTRACTOR",
-  PCMI3: "PCMI3_EXTRACTOR",
-  PCMI4: "PCMI4_EXTRACTOR",
-  PCMI5: "PCMI5_EXTRACTOR",
-  cerfa: "CERFA_EXTRACTOR",
-  CERFA: "CERFA_EXTRACTOR",
-};
-
 /**
  * Multi-source Document Extraction.
  * Cross-references current document with dossier context and regulatory KB.
@@ -1112,7 +1105,7 @@ const PCMI_PROMPT_MAP: Record<string, string> = {
 export async function extractDocumentData(
   text: string,
   documentType: string,
-  piecePromptKey: string = "document_extract",
+  _piecePromptKey: string = "document_extract",
   context: {
     dossierDocs?: any[];
     regulatoryRules?: any[];
@@ -1121,53 +1114,36 @@ export async function extractDocumentData(
   } = {}
 ): Promise<EngineResponse<ExtractedDocumentData>> {
   const { dossierDocs = [], regulatoryRules = [], commune = "", zoneCode = "" } = context;
-
-  // Resolve prompt: 1) PCMI/CERFA routing, 2) ai-core prompts, 3) DB/legacy fallback
-  let systemPrompt: string;
-  const pcmiKey = Object.keys(PCMI_PROMPT_MAP).find(k => documentType.toUpperCase().includes(k));
-  if (pcmiKey) {
-    systemPrompt = (SYSTEM_PROMPTS as any)[PCMI_PROMPT_MAP[pcmiKey]];
-  } else if (piecePromptKey in SYSTEM_PROMPTS) {
-    systemPrompt = (SYSTEM_PROMPTS as any)[piecePromptKey];
-  } else {
-    systemPrompt = await loadPrompt(piecePromptKey);
-  }
-  
-  const basePrompt = await loadPrompt("engine_modular_system");
-
-  const dossierSummary = dossierDocs.map(d => 
-    `- ${d.document_code || d.documentType}: ${JSON.stringify(d.extracted_data || d)}`
-  ).join("\n");
-
-  const rulesSummary = regulatoryRules.map(r => 
-    `- Article ${r.articleNumber || r.category || "Rule"}: ${r.content || r.value || r.summary}`
-  ).join("\n");
-
-  const fullSystemPrompt = `${basePrompt}\n\n${systemPrompt}`;
-  
-  const userContent = `
-DOCUMENT CONTENT:
----
-${text.substring(0, 100000)}
----
-
-DOSSIER CONTEXT (Other documents already processed):
-${dossierSummary || "No other documents processed yet."}
-
-REGULATORY CONTEXT (PLU Articles for ${commune} zone ${zoneCode}):
-${rulesSummary || "No specific rules provided in KB."}
-`;
+  const systemPrompt = await loadRegulatorySinglePipePrompt();
+  const userContent = buildRegulatorySinglePipeContext("extract_document_data", {
+    document_type: documentType,
+    context_scope: {
+      commune: commune || null,
+      zone_code: zoneCode || null,
+    },
+    document_text: truncateSinglePipeField(text, 100000),
+    dossier_context: dossierDocs,
+    regulatory_context: regulatoryRules,
+    expected_output: {
+      format: "json_object",
+      primary_contract: "ExtractedDocumentData",
+      required_behavior: [
+        "do_not_invent_articles",
+        "do_not_promote_thematic_blocks_to_canonical_articles",
+        "do_not_use_snippets_as_canonical_sources",
+        "keep_cross_document_references_explicit",
+      ],
+    },
+  });
 
   try {
-    const isCerfa = documentType.toLowerCase().includes("cerfa");
-    
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: fullSystemPrompt },
+        { role: "system", content: systemPrompt },
         { role: "user", content: userContent }
       ],
-      response_format: isCerfa ? zodResponseFormat(CerfaExtractionSchema, "cerfa_extraction") : { type: "json_object" },
+      response_format: { type: "json_object" },
       temperature: 0
     });
 
@@ -1526,129 +1502,42 @@ export async function compareWithPLU(
   } catch (e) {}
 
   const plu = geoContext?.plu ?? {};
-
-  const desc = (extractedData.project_description || "").toLowerCase();
-  const topics: string[] = [];
-  if (desc.includes("clôture") || desc.includes("cloture") || desc.includes("portail")) topics.push("CLÔTURE", "MUR", "PORTAIL", "CLAYETTE");
-  if (desc.includes("piscine") || desc.includes("bassin")) topics.push("PISCINE", "LOCAL TECHNIQUE", "BASSIN");
-  if (desc.includes("abri") || desc.includes("jardin") || desc.includes("carport")) topics.push("ANNEXE", "ABRI", "CARPORT", "GARAGE");
-  if (desc.includes("extension") || desc.includes("surélévation")) topics.push("EXTENSION", "SURÉLÉVATION", "EMPRISE", "HAUTEUR");
-  if (desc.includes("division") || desc.includes("lot")) topics.push("DIVISION", "LOTISSEMENT", "PROVENANCE");
-
-  const articlesSafe = Array.isArray(articles) ? articles : [];
-  const articlesSummary = articlesSafe.map(a =>
-    `Art. ${a.articleNumber} — ${a.title}: ${a.summary ?? ""}`
-  ).join("\n");
-
-  const pluRulesText = [
-    `- CES max : ${plu.rules?.CES_max != null ? Math.round(plu.rules.CES_max * 100) + "%" : "Non spécifié"}`,
-    `- Hauteur max : ${plu.rules?.height_max_m ?? buildability?.maxHeightM ?? "Non spécifié"} m`,
-    `- Recul voie : ${plu.rules?.setback_road_m ?? buildability?.setbackRoadM ?? "Non spécifié"} m`,
-    `- Recul limites séparatives : ${plu.rules?.setback_side_min_m ?? buildability?.setbackBoundaryM ?? "Non spécifié"} m`,
-    `- Stationnement : ${plu.rules?.parking_requirements ?? buildability?.parkingRequirement ?? "Non spécifié"}`,
-    `- Surface parcelle : ${parcel?.parcelSurfaceM2 ?? "N/D"} m²`,
-    `- Emprise restante constructible : ${buildability?.remainingFootprintM2 ?? "N/D"} m²`,
-  ].join("\n");
-
-  const distilledRules = townHallDocumentsText 
-    ? await extractRelevantRules(townHallDocumentsText, { zoneCode, cityName, topics, jurisdictionContext })
-    : "";
-
-  const filenameSignal = (extractedData as any).file_name || (extractedData as any).title || "";
-  const isNoticeDescriptive = (extractedData.document_nature || "").toLowerCase().includes("notice") || 
-                              (extractedData.project_description || "").toLowerCase().includes("notice descriptive") ||
-                              (filenameSignal || "").toLowerCase().includes("notice") ||
-                              (extractedData.expertise_notes || "").toLowerCase().includes("notice");
-  
-  const systemPromptKey = "engine_modular_system";
-  console.log(`[pluAnalysis/compare] Using modular engine for comparison (Signal: ${filenameSignal})`);
-  
-  const schemaInstructions = `
-IMPORTANT : Tu es l'Expert-Urbaniste HEUREKA. Pour chaque point de comparaison, tu DOIS fournir la preuve juridique.
-Structure du champ "data" (ET NON "analysis") :
-{
-  "summary": "Résumé global de la conformité",
-  "global_status": "conforme" | "non_conforme" | "partiellement_conforme" | "indéterminé",
-  "conformities": [
-    { 
-      "category": "Thématique", 
-      "article": "Article X", 
-      "document_value": "Valeur extraite du projet", 
-      "plu_rule": "Règle extraite du PLU", 
-      "texte_source": "Citation intégrale de l'article source",
-      "interpretation": "Interprétation juridique appliquée au cas",
-      "status": "conforme", 
-      "analysis": "Explication du match", 
-      "severity": "ok" 
-    }
-  ],
-  "inconsistencies": [...même structure que conformities...],
-  "points_attention": [...même structure que conformities...],
-  "recommendations": ["Conseil 1"]
-}
-`;
-
-  const systemPrompt = (await loadPrompt(systemPromptKey)) + "\n\n" + schemaInstructions;
-  
-  // 3.8 BUILD EVIDENCE BUNDLES FOR KEY TOPICS
-  logger.info(`[pluAnalysis] Building EvidenceBundles for ${cityName} zone ${zoneCode}...`);
-  const evidenceBundles: EvidenceBundle[] = [];
-
-  for (const topic of topics) {
-    // Determine target article based on common PLU structure
-    const articleIdMap: Record<string, string> = {
-      "HAUTEUR": "10",
-      "EMPRISE": "9",
-      "STATIONNEMENT": "12",
-      "CLÔTURE": "11",
-      "ESPACES VERTS": "13",
-      "PISCINE": "9"
-    };
-    
-    const targetArticle = articleIdMap[topic];
-    const chunks = await queryChunksWithMunicipalityAliases(topic, {
-      cityName,
-      zoneCode,
-      articleId: targetArticle,
-      docTypes: undefined,
-      jurisdictionContext,
-      includeTrace, // PROPAGATE TRACE FLAG
-      limit: 5
-    });
-
-    const supportChunks: EvidenceChunk[] = chunks.map(c => ({
-      id: c.id,
-      content: c.content,
-      similarity: c.similarity,
-      authority_score: (c as any).finalScore || 0,
-      metadata: c.metadata as any
-    }));
-
-    evidenceBundles.push({
-      target_field: topic,
-      authoritative_rule: supportChunks.find(c => c.metadata.source_authority >= 8)?.content,
-      support_chunks: supportChunks,
-      conflicts: [], // Conflict detection could be added here in V2
-      overall_authority_rank: Math.max(...supportChunks.map(c => c.metadata.source_authority), 0),
-      recommendation_manual_review: false
-    });
-  }
-
-  const input = {
-    task: "analyze",
-    document_type: "permit",
-    content: JSON.stringify(extractedData),
-    context: {
-      zoneCode,
-      zoneLabel,
-      pluRules: pluRulesText,
-      articles: articlesSummary,
-      evidence_bundles: evidenceBundles, // THE GROUNDED INPUT
-      customInstructions: townHallCustomPrompt,
-      cityName,
-      territorialContext: (territorialContext || []).join(", ")
-    }
-  };
+  const systemPrompt = await loadRegulatorySinglePipePrompt();
+  const input = buildRegulatorySinglePipeContext("compare_with_plu", {
+    project_document: extractedData,
+    regulatory_context: {
+      zone_code: zoneCode,
+      zone_label: zoneLabel,
+      city_name: cityName || null,
+      buildability,
+      parcel,
+      geo_context: geoContext,
+      articles: Array.isArray(articles) ? articles : [],
+      synthetic_rules: {
+        ces_max: plu.rules?.CES_max ?? null,
+        height_max_m: plu.rules?.height_max_m ?? buildability?.maxHeightM ?? null,
+        setback_road_m: plu.rules?.setback_road_m ?? buildability?.setbackRoadM ?? null,
+        setback_side_min_m: plu.rules?.setback_side_min_m ?? buildability?.setbackBoundaryM ?? null,
+        parking_requirements: plu.rules?.parking_requirements ?? buildability?.parkingRequirement ?? null,
+        remaining_footprint_m2: buildability?.remainingFootprintM2 ?? null,
+      },
+      regulatory_corpus: truncateSinglePipeField(townHallDocumentsText || "", 90000),
+      commune_custom_instructions: townHallCustomPrompt || null,
+      territorial_context: territorialContext || [],
+      jurisdiction_context: jurisdictionContext || null,
+      include_trace: !!includeTrace,
+    },
+    expected_output: {
+      format: "json_object",
+      primary_contract: "ComparisonResult",
+      comparison_status_values: ["compliant", "non_compliant", "uncertain", "not_enough_data"],
+      required_behavior: [
+        "do_not_reinject_snippets_as_canonical_sources",
+        "compare_only_when_project_and_rule_are_both_demonstrated",
+        "surface_missing_or_cross_document_dependency_as_uncertain",
+      ],
+    },
+  });
 
   try {
     const response = await openai.chat.completions.create({
@@ -1656,7 +1545,7 @@ Structure du champ "data" (ET NON "analysis") :
       max_completion_tokens: 4096,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: JSON.stringify(input) }
+        { role: "user", content: input }
       ],
       response_format: { type: "json_object" },
     });

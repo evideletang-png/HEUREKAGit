@@ -2,7 +2,6 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { logger } from "../utils/logger.js";
-import { loadPrompt } from "./promptLoader.js";
 import type {
   RegulatoryAiAdjudication,
   RegulatoryArticleSummary,
@@ -10,6 +9,7 @@ import type {
   RegulatoryEngineOutput,
   RegulatoryTopicAnalysis,
 } from "./regulatoryInterpretationTypes.js";
+import { buildRegulatorySinglePipeContext, loadRegulatorySinglePipePrompt } from "./regulatorySinglePipe.js";
 
 const ConfidenceEnum = z.enum(["high", "medium", "low"]);
 const RuleTypeEnum = z.enum(["textual", "textual_conditional", "graphical", "mixed", "cross_document", "undetermined"]);
@@ -152,11 +152,6 @@ const RegulatoryAiAdjudicationSchema = z.object({
   }),
 });
 
-function truncateJsonPayload(value: unknown, maxChars = 45000) {
-  const text = JSON.stringify(value);
-  return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
-}
-
 function mergeWarnings(base: string[], adjudicated: string[]) {
   return Array.from(new Set([...base, ...adjudicated]));
 }
@@ -203,8 +198,8 @@ export async function adjudicateRegulatoryEngineOutput(args: {
   }>;
 }): Promise<RegulatoryAiAdjudication | null> {
   try {
-    const systemPrompt = await loadPrompt("regulatory_interpretation_orchestrator_system");
-    const payload = {
+    const systemPrompt = await loadRegulatorySinglePipePrompt();
+    const payload = buildRegulatorySinglePipeContext("regulatory_adjudication", {
       commune: args.commune,
       zone: {
         code: args.zoneCode,
@@ -215,23 +210,23 @@ export async function adjudicateRegulatoryEngineOutput(args: {
       thematic_blocks: args.articleOrThemeBlocks,
       cross_effects: args.crossEffects,
       other_documents: args.otherDocuments,
-    };
+      expected_output: {
+        format: "zod_response_format",
+        primary_contract: "RegulatoryAiAdjudicationSchema",
+        required_behavior: [
+          "do_not_invent_articles",
+          "do_not_promote_thematic_blocks_to_canonical_articles",
+          "do_not_discard_cross_document_referrals",
+        ],
+      },
+    });
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       temperature: 0,
       messages: [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            "Tu dois arbitrer la lecture réglementaire finale à partir du graphe structuré fourni.",
-            "N'invente aucune valeur, n'écarte pas un renvoi documentaire, et conserve une posture prudente d'instructeur.",
-            "Tu dois retourner uniquement un JSON valide conforme au schéma demandé.",
-            "",
-            truncateJsonPayload(payload),
-          ].join("\n"),
-        },
+        { role: "user", content: payload.length > 45000 ? `${payload.slice(0, 45000)}...` : payload },
       ],
       response_format: zodResponseFormat(RegulatoryAiAdjudicationSchema, "regulatory_ai_adjudication"),
     });

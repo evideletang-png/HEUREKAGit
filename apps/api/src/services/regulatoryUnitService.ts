@@ -1,15 +1,12 @@
 import { db } from "@workspace/db";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
-  extractComprehensiveRegulatoryRules,
-  extractDeterministicRegulatoryRules,
   buildDeterministicZoneDigest,
   buildZoneCodeAliases,
   deriveZoneHierarchy,
   type ArticleAnalysis,
   type ZoneDigest,
 } from "./pluAnalysis.js";
-import { smartArticleChunking } from "./baseIAIngestion.js";
 import { extractRegulatoryZoneSections } from "./regulatoryZoneSectionService.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 
@@ -218,51 +215,13 @@ function extractArticleBlocksFromZoneText(rawText: string): ArticleAnalysis[] {
   return articles;
 }
 
-function extractThematicParagraphCandidates(rawText: string): ArticleAnalysis[] {
-  const paragraphs = rawText
-    .split(/\n{2,}/)
-    .map((paragraph) => cleanBlockText(paragraph))
-    .filter((paragraph) => paragraph.length >= 120);
-
-  const candidates: ArticleAnalysis[] = [];
-  for (const fallback of THEMATIC_FALLBACKS) {
-    const matched = paragraphs.find((paragraph) => testAnyPattern(fallback.patterns, paragraph));
-    if (!matched) continue;
-    candidates.push({
-      articleNumber: fallback.articleNumber ?? 0,
-      title: fallback.title,
-      sourceText: matched,
-      interpretation: matched.slice(0, 500),
-      summary: matched.slice(0, 500),
-      impactText: "Règle reconstituée depuis un paragraphe thématique de la zone.",
-      vigilanceText: "Bloc thématique sans repérage d'article explicite.",
-      confidence: "medium",
-      structuredData: {
-        extraction_kind: "zone_thematic_paragraph",
-        theme_key: fallback.key,
-      },
-    });
-  }
-
-  return candidates;
-}
-
 function buildArticleCandidates(rawText: string, zoneCode?: string | null): ArticleAnalysis[] {
   const zoneArticleBlocks = extractArticleBlocksFromZoneText(rawText);
-  const thematicParagraphs = extractThematicParagraphCandidates(rawText);
-  const comprehensiveArticles = extractComprehensiveRegulatoryRules(rawText, zoneCode || undefined);
-  const wholeTextArticles = extractDeterministicRegulatoryRules(rawText, zoneCode || undefined);
+  if (zoneArticleBlocks.length === 0) {
+    return [];
+  }
 
-  const chunkArticles = smartArticleChunking(rawText)
-    .flatMap((chunk) => extractDeterministicRegulatoryRules(chunk.content, zoneCode || undefined));
-
-  return dedupeArticles([
-    ...zoneArticleBlocks,
-    ...thematicParagraphs,
-    ...comprehensiveArticles,
-    ...wholeTextArticles,
-    ...chunkArticles,
-  ]);
+  return dedupeArticles(zoneArticleBlocks);
 }
 
 export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryUnitsArgs) {
