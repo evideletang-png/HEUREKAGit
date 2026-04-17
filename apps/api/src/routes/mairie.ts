@@ -4720,8 +4720,9 @@ router.get("/regulatory-calibration/zones/:id/workspace", async (req: AuthReques
       workspaceReady: !!referenceDocumentId,
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     logger.error("[mairie/regulatory-calibration/zone-workspace GET]", err);
-    return res.status(500).json({ error: "INTERNAL_ERROR" });
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: msg });
   }
 });
 
