@@ -128,13 +128,35 @@ async function getCadastreFeaturesByIdu(idus: string[]): Promise<any[]> {
 }
 
 async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
-  const fetchGeom = async (plat: number, plng: number) => {
-    const geom = JSON.stringify({ type: "Point", coordinates: [plng, plat] });
+  const fetchGeom = async (geomObject: object) => {
+    const geom = JSON.stringify(geomObject);
     const url  = `${IGN_APICARTO}/cadastre/parcelle?geom=${encodeURIComponent(geom)}&format=geojson`;
-    const res  = await fetch(url, { signal: signal() });
-    if (!res.ok) return [];
-    const data: any = await res.json();
-    return data.features ?? [];
+    try {
+      const res  = await fetch(url, { signal: signal() });
+      if (!res.ok) return [];
+      const data: any = await res.json();
+      return data.features ?? [];
+    } catch (error) {
+      console.warn("[parcel] Cadastre geom lookup failed:", (error as Error).message);
+      return [];
+    }
+  };
+
+  const fetchPoint = (plat: number, plng: number) => {
+    return fetchGeom({ type: "Point", coordinates: [plng, plat] });
+  };
+
+  const fetchSearchBox = (radiusDegrees: number) => {
+    return fetchGeom({
+      type: "Polygon",
+      coordinates: [[
+        [lng - radiusDegrees, lat - radiusDegrees],
+        [lng + radiusDegrees, lat - radiusDegrees],
+        [lng + radiusDegrees, lat + radiusDegrees],
+        [lng - radiusDegrees, lat + radiusDegrees],
+        [lng - radiusDegrees, lat - radiusDegrees],
+      ]],
+    });
   };
 
   const allFeatures: any[] = [];
@@ -151,21 +173,35 @@ async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
   };
 
   // 1 — Center point
-  addFeatures(await fetchGeom(lat, lng));
+  addFeatures(await fetchPoint(lat, lng));
 
-  // 2 — Surrounding offsets (10m and 20m)
+  // 2 — Surrounding offsets (10m to 40m). BAN address points often fall on the street,
+  // not inside the cadastral polygon, so point-only lookup can legitimately return empty.
   const offsets = [
     [0.0001, 0], [-0.0001, 0], [0, 0.0001], [0, -0.0001],
-    [0.0001, 0.0001], [-0.0001, -0.0001], [0.0002, 0], [-0.0002, 0]
+    [0.0001, 0.0001], [0.0001, -0.0001], [-0.0001, 0.0001], [-0.0001, -0.0001],
+    [0.0002, 0], [-0.0002, 0], [0, 0.0002], [0, -0.0002],
+    [0.0003, 0], [-0.0003, 0], [0, 0.0003], [0, -0.0003],
+    [0.0004, 0], [-0.0004, 0], [0, 0.0004], [0, -0.0004],
   ];
   
   // To avoid too many sequential requests if we already have some features, 
   // we could stop, but for "street-bound" addresses it's safer to check a few more.
   for (const [dLat, dLng] of offsets) {
-    addFeatures(await fetchGeom(lat + dLat, lng + dLng));
+    addFeatures(await fetchPoint(lat + dLat, lng + dLng));
     // If we have at least 3 unique parcels, we probably have enough candidates 
     // for the selection service to pick the right one.
     if (allFeatures.length >= 5) break;
+  }
+
+  // 3 — Polygon search box fallback. This is more reliable for addresses located
+  // exactly on the road axis or on parcel boundaries, and also gives neighbours
+  // for the land assembly selector.
+  if (allFeatures.length < 3) {
+    addFeatures(await fetchSearchBox(0.00035));
+  }
+  if (allFeatures.length < 3) {
+    addFeatures(await fetchSearchBox(0.00055));
   }
 
   return allFeatures;
@@ -302,8 +338,21 @@ async function selectParcel(lat: number, lng: number, banId: string, geocodeLabe
   } catch (err) {
     console.warn(`[parcel] select-parcel failed: ${(err as Error).message}. Using fallback.`);
     if (!cadastreFeatures.length) throw new Error("No parcels found nearby.");
-    // Fallback: use first feature from IGN
-    const first = cadastreFeatures[0];
+    // Fallback: use the parcel whose geometry is closest to the address point.
+    const addressPoint = turf.point([lng, lat]);
+    const first = cadastreFeatures
+      .map((feature) => {
+        try {
+          const turfFeature = toTurfFeature(feature);
+          const containsPoint = turf.booleanPointInPolygon(addressPoint, turfFeature as any);
+          const centroid = turf.centroid(turfFeature as any);
+          const distanceKm = containsPoint ? 0 : turf.distance(addressPoint, centroid, { units: "kilometers" });
+          return { feature, distanceKm };
+        } catch {
+          return { feature, distanceKm: Number.POSITIVE_INFINITY };
+        }
+      })
+      .sort((a, b) => a.distanceKm - b.distanceKm)[0]?.feature || cadastreFeatures[0];
     return {
       ok: true,
       selected_idu: first.properties?.idu || "UNKNOWN",
