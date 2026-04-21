@@ -8,6 +8,7 @@ import {
   type ZoneDigest,
 } from "./pluAnalysis.js";
 import { extractRegulatoryZoneSections } from "./regulatoryZoneSectionService.js";
+import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "./municipalityAliasService.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 
 type PersistRegulatoryUnitsArgs = {
@@ -301,7 +302,8 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
 }
 
 export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promise<CanonicalRegulatoryUnit[]> {
-  const aliases = Array.from(new Set([args.municipalityId, args.communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const resolved = await resolveMunicipalityAliases(args.municipalityId, args.communeName);
+  const aliases = uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, args.municipalityId, args.communeName]);
   const zoneAliases = buildZoneCodeAliases(args.zoneCode);
   if (aliases.length === 0) return [];
   const zoneFilter = args.zoneCode
@@ -323,8 +325,7 @@ export async function loadRegulatoryUnits(args: LoadRegulatoryUnitsArgs): Promis
   const rows = await db.select().from(regulatoryUnitsTable)
     .where(and(
       or(
-        inArray(regulatoryUnitsTable.municipalityId, aliases),
-        ...aliases.map((alias) => sql`lower(${regulatoryUnitsTable.municipalityId}) = lower(${alias})`)
+        buildMunicipalityTextFilter(regulatoryUnitsTable.municipalityId, aliases)
       ),
       zoneFilter,
       typeof args.minAuthority === "number"

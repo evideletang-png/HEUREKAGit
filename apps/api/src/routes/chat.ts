@@ -16,13 +16,14 @@ import {
   documentReviewsTable,
   townHallDocumentsTable,
 } from "@workspace/db";
-import { eq, and, asc, or, sql } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { authenticate, type AuthRequest } from "../middlewares/authenticate.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { loadPrompt } from "../services/promptLoader.js";
 import { queryRelevantChunks } from "../services/embeddingService.js";
 import { resolveJurisdictionContext } from "../services/orchestrator.js";
 import { getTerritorialPattern, recordInteractionSignal, type TerritorialPattern } from "../services/learningService.js";
+import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "../services/municipalityAliasService.js";
 
 const router: IRouter = Router();
 
@@ -103,30 +104,29 @@ function dedupeSources(sources: RetrievedSource[]): RetrievedSource[] {
   return deduped;
 }
 
-function getCommuneSignals(analysis: any, geoContext: any, zoneAnalysis: any): { communeKey: string; communeAliases: string[]; zoneCode: string } {
+async function getCommuneSignals(analysis: any, geoContext: any, zoneAnalysis: any): Promise<{ communeKey: string; communeAliases: string[]; communeName: string | null; zoneCode: string }> {
   const municipality = normalizeText(geoContext?.municipality);
   const city = normalizeText(analysis.city);
+  const sourceLockInsee = normalizeText(geoContext?.source_lock?.inseeCode);
+  const sourceLockCity = normalizeText(geoContext?.source_lock?.city);
+  const parcelInsee = normalizeText(geoContext?.parcel?.insee_code);
   const zoneCode = normalizeText(zoneAnalysis?.zoneCode) || normalizeText(analysis.zoneCode);
 
-  const communeAliases = Array.from(new Set(
-    [city, municipality]
-      .map(value => value.trim())
-      .filter(Boolean)
-  ));
+  const resolved = await resolveMunicipalityAliases(
+    sourceLockInsee || parcelInsee || municipality || city,
+    sourceLockCity || city || municipality,
+  );
 
   return {
-    communeKey: municipality || city,
-    communeAliases,
+    communeKey: resolved.municipalityId || municipality || city,
+    communeAliases: uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, city, municipality, sourceLockCity, sourceLockInsee, parcelInsee]),
+    communeName: resolved.communeName || sourceLockCity || city || municipality || null,
     zoneCode,
   };
 }
 
 async function collectTownHallSources(communeAliases: string[], question: string): Promise<RetrievedSource[]> {
   if (communeAliases.length === 0) return [];
-
-  const loweredAliases = communeAliases.map(alias => alias.toLowerCase());
-  const whereClause = or(...loweredAliases.map(alias => eq(sql`lower(${townHallDocumentsTable.commune})`, alias)));
-  if (!whereClause) return [];
 
   const docs = await db.select({
     id: townHallDocumentsTable.id,
@@ -135,7 +135,9 @@ async function collectTownHallSources(communeAliases: string[], question: string
     documentType: townHallDocumentsTable.documentType,
     category: townHallDocumentsTable.category,
     rawText: townHallDocumentsTable.rawText,
-  }).from(townHallDocumentsTable).where(whereClause);
+  })
+    .from(townHallDocumentsTable)
+    .where(buildMunicipalityTextFilter(townHallDocumentsTable.commune, communeAliases));
 
   return docs
     .map((doc, index) => {
@@ -209,21 +211,33 @@ function collectArticleSources(articles: any[], question: string): RetrievedSour
     .slice(0, 6);
 }
 
-async function collectBaseIASources(communeKey: string, zoneCode: string, question: string): Promise<RetrievedSource[]> {
-  if (!communeKey) return [];
+async function collectBaseIASources(communeKey: string, communeAliases: string[], communeName: string | null, zoneCode: string, question: string): Promise<RetrievedSource[]> {
+  const searchMunicipalities = uniqueNonEmpty([communeKey, ...communeAliases]);
+  if (searchMunicipalities.length === 0) return [];
 
   try {
-    const jurisdictionContext = /^\d{5}$/.test(communeKey)
-      ? await resolveJurisdictionContext(communeKey)
-      : undefined;
-
     const query = [question, zoneCode ? `zone ${zoneCode}` : ""].filter(Boolean).join(" ");
-    const chunks = await queryRelevantChunks(query, {
-      municipalityId: communeKey,
-      zoneCode: zoneCode || undefined,
-      jurisdictionContext,
-      limit: 8,
-    });
+    const chunks = [];
+    const seen = new Set<string>();
+
+    for (const municipalityId of searchMunicipalities) {
+      const jurisdictionContext = /^\d{5}$/.test(municipalityId)
+        ? await resolveJurisdictionContext(municipalityId, communeName || undefined)
+        : undefined;
+      const results = await queryRelevantChunks(query, {
+        municipalityId,
+        zoneCode: zoneCode || undefined,
+        jurisdictionContext,
+        limit: 8,
+      });
+      for (const chunk of results) {
+        if (seen.has(chunk.id)) continue;
+        seen.add(chunk.id);
+        chunks.push(chunk);
+        if (chunks.length >= 8) break;
+      }
+      if (chunks.length >= 8) break;
+    }
 
     return chunks.map((chunk, index) => {
       const metadata = (chunk.metadata || {}) as Record<string, any>;
@@ -275,13 +289,13 @@ async function collectRetrievedSources(args: {
   question: string;
 }): Promise<RetrievedSource[]> {
   const { analysisId, analysis, zoneAnalysis, articles, geoContext, question } = args;
-  const { communeKey, communeAliases, zoneCode } = getCommuneSignals(analysis, geoContext, zoneAnalysis);
+  const { communeKey, communeAliases, communeName, zoneCode } = await getCommuneSignals(analysis, geoContext, zoneAnalysis);
   const pattern = communeKey ? await getTerritorialPattern(communeKey) : null;
 
   const [dossierSources, townHallSources, baseIASources] = await Promise.all([
     collectDossierSources(analysisId, question),
     collectTownHallSources(communeAliases, `${question} ${zoneCode}`),
-    collectBaseIASources(communeKey, zoneCode, question),
+    collectBaseIASources(communeKey, communeAliases, communeName, zoneCode, question),
   ]);
 
   const articleSources = collectArticleSources(articles, `${question} ${zoneCode}`);
@@ -530,7 +544,7 @@ router.post("/:id/chat", authenticate, async (req: AuthRequest, res) => {
       ? (() => { try { return JSON.parse(analysis.geoContextJson as string); } catch { return null; } })()
       : null;
 
-    const { communeKey } = getCommuneSignals(analysis, geoContext, zoneData);
+    const { communeKey } = await getCommuneSignals(analysis, geoContext, zoneData);
     if (communeKey) {
       await recordInteractionSignal(communeKey, message);
     }

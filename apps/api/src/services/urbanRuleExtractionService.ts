@@ -17,6 +17,7 @@ import {
   inferUrbanRuleDescriptor,
 } from "./urbanRuleCatalog.js";
 import { buildZoneCodeAliases } from "./pluAnalysis.js";
+import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "./municipalityAliasService.js";
 
 type PersistUrbanRulesForDocumentArgs = {
   baseIADocumentId?: string | null;
@@ -745,7 +746,8 @@ export async function persistUrbanRulesForDocument(args: PersistUrbanRulesForDoc
 }
 
 export async function loadUrbanRules(args: LoadUrbanRulesArgs): Promise<CanonicalUrbanRule[]> {
-  const aliases = Array.from(new Set([args.municipalityId, args.communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const resolved = await resolveMunicipalityAliases(args.municipalityId, args.communeName);
+  const aliases = uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, args.municipalityId, args.communeName]);
   if (aliases.length === 0) return [];
 
   const zoneAliases = buildZoneCodeAliases(args.zoneCode);
@@ -776,8 +778,7 @@ export async function loadUrbanRules(args: LoadUrbanRulesArgs): Promise<Canonica
   const rows = await db.select().from(urbanRulesTable)
     .where(and(
       or(
-        inArray(urbanRulesTable.municipalityId, aliases),
-        ...aliases.map((alias) => sql`lower(${urbanRulesTable.municipalityId}) = lower(${alias})`)
+        buildMunicipalityTextFilter(urbanRulesTable.municipalityId, aliases)
       ),
       zoneFilter,
       typeof args.minAuthority === "number"
@@ -809,7 +810,8 @@ export async function loadUrbanRules(args: LoadUrbanRulesArgs): Promise<Canonica
 }
 
 export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promise<PublishedIndexedRule[]> {
-  const aliases = Array.from(new Set([args.municipalityId, args.communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const resolved = await resolveMunicipalityAliases(args.municipalityId, args.communeName);
+  const aliases = uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, args.municipalityId, args.communeName]);
   if (aliases.length === 0) return [];
 
   const zoneAliases = buildZoneCodeAliases(args.zoneCode);
@@ -872,8 +874,7 @@ export async function loadPublishedIndexedRules(args: LoadUrbanRulesArgs): Promi
     .leftJoin(townHallDocumentsTable, eq(indexedRegulatoryRulesTable.documentId, townHallDocumentsTable.id))
     .where(and(
       or(
-        inArray(indexedRegulatoryRulesTable.communeId, aliases),
-        ...aliases.map((alias) => sql`lower(${indexedRegulatoryRulesTable.communeId}) = lower(${alias})`)
+        buildMunicipalityTextFilter(indexedRegulatoryRulesTable.communeId, aliases)
       ),
       zoneFilter,
       eq(indexedRegulatoryRulesTable.status, "published"),

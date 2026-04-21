@@ -1,4 +1,4 @@
-import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, communesTable, municipalitySettingsTable, regulatoryZoneSectionsTable } from "@workspace/db";
+import { db, baseIADocumentsTable, rulesTable, townHallDocumentsTable, regulatoryZoneSectionsTable } from "@workspace/db";
 import { eq, and, sql, or, inArray } from "drizzle-orm";
 import { JurisdictionContext, GLOBAL_POOL_ID } from "@workspace/ai-core";
 import { queryRelevantChunks } from "./embeddingService.js";
@@ -6,6 +6,7 @@ import { autoFetchPLU } from "./pluAutoFetch.js";
 import { hasUsableExtractedText } from "./textQualityService.js";
 import { buildZoneCodeAliases } from "./pluAnalysis.js";
 import { loadZoneSearchKeywords } from "./regulatoryCalibrationZoneHintsService.js";
+import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "./municipalityAliasService.js";
 
 export interface AnalysisContext {
   commune: string;
@@ -22,7 +23,8 @@ async function collectPrioritizedRegulatoryChunks(
   jurisdictionContext: JurisdictionContext,
   limit = 30
 ) {
-  const aliases = Array.from(new Set([commune, communeName].filter((value): value is string => !!value && value.trim().length > 0)));
+  const resolved = await resolveMunicipalityAliases(commune, communeName);
+  const aliases = uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, commune, communeName]);
   const zoneAliases = buildZoneCodeAliases(zoneCode);
   const searchKeywords = await loadZoneSearchKeywords({ municipalityAliases: aliases, zoneCode });
   const query = [
@@ -81,16 +83,11 @@ export async function buildAnalysisContext(
 
   // 1. Resolve Commune Name (Mismatch fix for town_hall_documents)
   let communeName = "";
+  let municipalityAliases = [commune];
   try {
-    const [c] = await db.select().from(communesTable).where(eq(communesTable.inseeCode, commune)).limit(1);
-    if (c) communeName = c.name;
-    if (!communeName) {
-      const [settings] = await db.select({ commune: municipalitySettingsTable.commune })
-        .from(municipalitySettingsTable)
-        .where(eq(municipalitySettingsTable.inseeCode, commune))
-        .limit(1);
-      if (settings?.commune) communeName = settings.commune;
-    }
+    const resolved = await resolveMunicipalityAliases(commune, jurisdictionContext.name);
+    communeName = resolved.communeName || jurisdictionContext.name || "";
+    municipalityAliases = uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, commune, communeName]);
     console.log(`[ContextBuilder] Resolved INSEE ${commune} to name: ${communeName}`);
   } catch (e) {
     console.warn(`[ContextBuilder] Failed to resolve commune name for ${commune}`);
@@ -103,15 +100,13 @@ export async function buildAnalysisContext(
     .where(
       and(
         or(
-          eq(baseIADocumentsTable.municipalityId, commune),
-          communeName ? sql`lower(${baseIADocumentsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`,
+          buildMunicipalityTextFilter(baseIADocumentsTable.municipalityId, municipalityAliases),
           inArray(baseIADocumentsTable.municipalityId, [GLOBAL_POOL_ID, "NATIONAL"])
         ),
         eq(baseIADocumentsTable.status, "indexed")
       )
     );
 
-  const municipalityAliases = [commune, communeName].filter((value): value is string => !!value && value.trim().length > 0);
   let zoneSections: typeof regulatoryZoneSectionsTable.$inferSelect[] = [];
   if (zoneAliases.length > 0 && municipalityAliases.length > 0) {
     try {
@@ -119,8 +114,7 @@ export async function buildAnalysisContext(
         .where(
           and(
             or(
-              inArray(regulatoryZoneSectionsTable.municipalityId, municipalityAliases),
-              communeName ? sql`lower(${regulatoryZoneSectionsTable.municipalityId}) = lower(${communeName})` : sql`FALSE`
+              buildMunicipalityTextFilter(regulatoryZoneSectionsTable.municipalityId, municipalityAliases)
             ),
             inArray(regulatoryZoneSectionsTable.zoneCode, zoneAliases),
             eq(regulatoryZoneSectionsTable.isOpposable, true)
@@ -141,8 +135,7 @@ export async function buildAnalysisContext(
     .where(
       and(
         or(
-          eq(townHallDocumentsTable.commune, commune),
-          communeName ? sql`lower(${townHallDocumentsTable.commune}) = lower(${communeName})` : sql`FALSE`,
+          buildMunicipalityTextFilter(townHallDocumentsTable.commune, municipalityAliases),
           // Zone-specific matches if pre-filtered in DB
           zoneAliases.length > 0
             ? inArray(townHallDocumentsTable.zone, zoneAliases)
@@ -251,8 +244,7 @@ export async function buildAnalysisContext(
     .where(
       and(
         or(
-          eq(rulesTable.commune, commune),
-          communeName ? eq(rulesTable.commune, communeName) : sql`FALSE`
+          buildMunicipalityTextFilter(rulesTable.commune, municipalityAliases)
         ),
         zoneAliases.length > 0
           ? inArray(rulesTable.zoneCode, zoneAliases)

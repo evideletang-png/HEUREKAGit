@@ -50,6 +50,7 @@ import {
   type ConsolidatedMarkdownLogicalDocument,
   type ParsedConsolidatedMarkdownKnowledge,
 } from "../services/consolidatedMarkdownKnowledgeService.js";
+import { buildMunicipalityTextFilter, normalizeMunicipalityName } from "../services/municipalityAliasService.js";
 import {
   REGULATORY_ARTICLE_REFERENCE,
   REGULATORY_NORMATIVE_EFFECTS,
@@ -159,8 +160,9 @@ function parseCommunes(raw: string | null): string[] {
 
 function canAccessCommune(role: string | null | undefined, assignedCommunes: string[], commune: string | null | undefined): boolean {
   if (role === "admin" || role === "super_admin") return true;
-  const normalized = (commune || "").toLowerCase().trim();
-  return !!normalized && assignedCommunes.includes(normalized);
+  const normalized = normalizeMunicipalityName(commune);
+  const assignedNormalized = assignedCommunes.map(normalizeMunicipalityName);
+  return !!normalized && assignedNormalized.includes(normalized);
 }
 
 function parseDocumentTags(raw: unknown): string[] {
@@ -186,11 +188,7 @@ function authorityForCanonicalType(canonicalType: string): number {
 }
 
 function buildMunicipalityAliasFilter(column: any, aliases: string[]) {
-  if (aliases.length === 0) return sql`FALSE`;
-  return or(
-    inArray(column, aliases),
-    ...aliases.map((alias) => sql`lower(${column}) = lower(${alias})`),
-  )!;
+  return buildMunicipalityTextFilter(column, aliases);
 }
 
 function buildDeleteScopeFilter(clauses: Array<any>) {
@@ -1717,11 +1715,21 @@ async function resolveInseeCode(commune: string): Promise<string | null> {
 
   const [settings] = await db.select({ inseeCode: municipalitySettingsTable.inseeCode })
     .from(municipalitySettingsTable)
-    .where(or(
-      eq(municipalitySettingsTable.commune, value),
-      eq(sql`lower(${municipalitySettingsTable.commune})`, value.toLowerCase())
-    )).limit(1);
+    .where(buildMunicipalityAliasFilter(municipalitySettingsTable.commune, [value]))
+    .limit(1);
   if (settings?.inseeCode) return settings.inseeCode;
+
+  const [markdownDoc] = await db.select({
+    inseeCode: sql<string | null>`${townHallDocumentsTable.structuredContent}->'consolidatedMarkdownMetadata'->>'inseeCode'`,
+  })
+    .from(townHallDocumentsTable)
+    .where(buildMunicipalityAliasFilter(
+      sql`${townHallDocumentsTable.structuredContent}->'consolidatedMarkdownMetadata'->>'commune'`,
+      [value],
+    ))
+    .limit(1);
+  if (markdownDoc?.inseeCode) return markdownDoc.inseeCode;
+
   return null;
 }
 
@@ -1742,7 +1750,11 @@ async function resolveAuthorizedTownHallCommune(userId: string, requestedCommune
     };
   }
 
-  if (currentUser?.role !== "admin" && currentUser?.role !== "super_admin" && !assignedCommunes.some(c => c.toLowerCase() === targetCommune.toLowerCase())) {
+  if (
+    currentUser?.role !== "admin"
+    && currentUser?.role !== "super_admin"
+    && !assignedCommunes.some(c => normalizeMunicipalityName(c) === normalizeMunicipalityName(targetCommune))
+  ) {
     return {
       ok: false as const,
       status: 403,
@@ -1969,7 +1981,7 @@ async function upsertConsolidatedMarkdownPrompt(args: {
       content: townHallPromptsTable.content,
     })
       .from(townHallPromptsTable)
-      .where(eq(sql`lower(${townHallPromptsTable.commune})`, commune.toLowerCase()))
+      .where(buildMunicipalityAliasFilter(townHallPromptsTable.commune, [commune]))
       .limit(1);
 
     if (existing) {
@@ -1985,6 +1997,40 @@ async function upsertConsolidatedMarkdownPrompt(args: {
       commune,
       content: wrappedBlock,
     });
+  }
+}
+
+async function ensureMarkdownMunicipalitySettings(parsed: ParsedConsolidatedMarkdownKnowledge) {
+  const commune = parsed.metadata.commune?.trim();
+  const inseeCode = parsed.metadata.inseeCode?.trim();
+  if (!commune && !inseeCode) return;
+
+  const aliases = [commune, inseeCode].filter((value): value is string => !!value);
+  const [existing] = await db.select({
+    id: municipalitySettingsTable.id,
+    inseeCode: municipalitySettingsTable.inseeCode,
+  })
+    .from(municipalitySettingsTable)
+    .where(or(
+      buildMunicipalityAliasFilter(municipalitySettingsTable.commune, aliases),
+      inseeCode ? eq(municipalitySettingsTable.inseeCode, inseeCode) : sql`FALSE`,
+    ))
+    .limit(1);
+
+  if (existing) {
+    if (inseeCode && existing.inseeCode !== inseeCode) {
+      await db.update(municipalitySettingsTable)
+        .set({ inseeCode, updatedAt: new Date() })
+        .where(eq(municipalitySettingsTable.id, existing.id));
+    }
+    return;
+  }
+
+  if (commune) {
+    await db.insert(municipalitySettingsTable).values({
+      commune,
+      inseeCode: inseeCode || null,
+    }).onConflictDoNothing();
   }
 }
 
@@ -2200,7 +2246,7 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
       structuredContent: townHallDocumentsTable.structuredContent,
       createdAt: townHallDocumentsTable.createdAt,
     }).from(townHallDocumentsTable)
-      .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
+      .where(buildMunicipalityAliasFilter(townHallDocumentsTable.commune, municipalityAliases))
       .orderBy(desc(townHallDocumentsTable.createdAt));
 
     let profiles = await db.select().from(documentKnowledgeProfilesTable)
@@ -2436,12 +2482,13 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
 
     // Filter logic
     const filtered = dossiers.filter(d => {
-      const city = (d.commune || "").toLowerCase().trim();
+      const city = normalizeMunicipalityName(d.commune);
+      const requestedKey = normalizeMunicipalityName(requestedCommune);
       const role = currentUser[0]?.role;
 
       if (role === "admin" || role === "super_admin") {
         if (requestedCommune && requestedCommune !== "all") {
-          return city === requestedCommune.toLowerCase().trim();
+          return city === requestedKey;
         }
         return true;
       }
@@ -2458,12 +2505,12 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
 
       // Mairie role filtering
       if (requestedCommune) {
-        const canAccess = communes.some(c => c.toLowerCase().trim() === requestedCommune.toLowerCase().trim());
+        const canAccess = communes.some(c => normalizeMunicipalityName(c) === requestedKey);
         if (!canAccess) return false;
-        return city === requestedCommune.toLowerCase().trim();
+        return city === requestedKey;
       }
       
-      return communes.some(c => c.toLowerCase().trim() === city);
+      return communes.some(c => normalizeMunicipalityName(c) === city);
     });
 
     const enrichedDossiers = filtered.map(d => {
@@ -2823,7 +2870,7 @@ router.get("/dossiers/:id/summary", async (req: AuthRequest, res) => {
 
     if (pluContext.cityName) {
       const [prompt] = await db.select().from(townHallPromptsTable)
-        .where(eq(sql`lower(${townHallPromptsTable.commune})`, pluContext.cityName.toLowerCase())).limit(1);
+        .where(buildMunicipalityAliasFilter(townHallPromptsTable.commune, [pluContext.cityName])).limit(1);
       if (prompt) pluContext.townHallCustomPrompt = prompt.content;
     }
 
@@ -3700,6 +3747,7 @@ async function queueTownHallDocumentIndexing(args: {
         ? parseConsolidatedMarkdownKnowledge(rawText, args.originalName)
         : null;
       if (parsedMarkdown) {
+        await ensureMarkdownMunicipalitySettings(parsedMarkdown);
         const resolvedInseeCode = await resolveInseeCode(args.targetCommune || parsedMarkdown.metadata.commune || "");
         const municipalityKey = parsedMarkdown.metadata.inseeCode || resolvedInseeCode || args.targetCommune || parsedMarkdown.metadata.commune || "";
         if (!municipalityKey) {
@@ -4168,16 +4216,17 @@ router.get("/documents", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     const role = currentUser[0]?.role;
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
 
     const docs = await db.select().from(townHallDocumentsTable).orderBy(desc(townHallDocumentsTable.createdAt));
     const filteredByAccess = docs.filter((d) => {
-      const docCommune = (d.commune || "").toLowerCase().trim();
+      const docCommune = normalizeMunicipalityName(d.commune);
       if (role === "admin" || role === "super_admin") return true;
       return !!docCommune && assignedCommunes.includes(docCommune);
     });
+    const requestedCommuneKey = normalizeMunicipalityName(requestedCommune);
     const docsForCommune = requestedCommune
-      ? filteredByAccess.filter(d => (d.commune || "").toLowerCase().trim() === requestedCommune.toLowerCase().trim())
+      ? filteredByAccess.filter(d => normalizeMunicipalityName(d.commune) === requestedCommuneKey)
       : filteredByAccess;
     
     const filteredDocs = await Promise.all(docsForCommune.map(async (d) => {
@@ -6570,7 +6619,7 @@ router.post("/regulatory-calibration/rules/:id/relations", async (req: AuthReque
 
     if (targetDocumentId) {
       const [targetDocument] = await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, targetDocumentId)).limit(1);
-      if (!targetDocument || !communeAliases.some((alias) => alias.trim().toLowerCase() === String(targetDocument.commune || "").trim().toLowerCase())) {
+      if (!targetDocument || !communeAliases.some((alias) => normalizeMunicipalityName(alias) === normalizeMunicipalityName(targetDocument.commune))) {
         return res.status(400).json({ error: "BAD_REQUEST", message: "Document cible invalide pour cette commune." });
       }
     }
@@ -6645,7 +6694,7 @@ router.patch("/regulatory-calibration/rule-relations/:id", async (req: AuthReque
     if (typeof req.body.targetDocumentId === "string" && req.body.targetDocumentId.trim()) {
       const requestedTargetDocumentId = req.body.targetDocumentId.trim();
       const [targetDocument] = await db.select().from(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, requestedTargetDocumentId)).limit(1);
-      if (!targetDocument || !communeAliases.some((alias) => alias.trim().toLowerCase() === String(targetDocument.commune || "").trim().toLowerCase())) {
+      if (!targetDocument || !communeAliases.some((alias) => normalizeMunicipalityName(alias) === normalizeMunicipalityName(targetDocument.commune))) {
         return res.status(400).json({ error: "BAD_REQUEST", message: "Document cible invalide pour cette commune." });
       }
       nextTargetDocumentId = requestedTargetDocumentId;
@@ -7983,8 +8032,8 @@ router.delete("/documents", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     const role = currentUser[0]?.role;
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
-    const requestedLower = requestedCommune.toLowerCase().trim();
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
+    const requestedLower = normalizeMunicipalityName(requestedCommune);
 
     if (role !== "admin" && role !== "super_admin" && !assignedCommunes.includes(requestedLower)) {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
@@ -8037,7 +8086,7 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     const role = currentUser[0]?.role;
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
 
     const [doc] = await db.select({
       id: townHallDocumentsTable.id,
@@ -8097,7 +8146,7 @@ router.get("/documents/:id/view", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     const role = currentUser[0]?.role;
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
 
     // 1. Fetch document record to get the actual fileName
     const [doc] = await db.select({
@@ -8157,7 +8206,7 @@ router.patch("/documents/:id/metadata", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     const role = currentUser[0]?.role;
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
 
     const [doc] = await db.select({ commune: townHallDocumentsTable.commune })
       .from(townHallDocumentsTable)
@@ -8185,7 +8234,7 @@ router.post("/documents/:id/resegment", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
     const role = currentUser[0]?.role;
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(c => c.toLowerCase().trim());
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
 
     const [doc] = await db.select({
       id: townHallDocumentsTable.id,
@@ -8310,13 +8359,13 @@ router.get("/prompts/:commune", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
       
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-    if (currentUser[0]?.role !== "admin" && !assignedCommunes.some(c => c.toLowerCase() === commune.toLowerCase())) {
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
+    if (currentUser[0]?.role !== "admin" && !assignedCommunes.includes(normalizeMunicipalityName(commune))) {
       res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé" });
       return;
     }
     
-    const rows = await db.select().from(townHallPromptsTable).where(eq(sql`lower(${townHallPromptsTable.commune})`, commune.toLowerCase())).limit(1) as any;
+    const rows = await db.select().from(townHallPromptsTable).where(buildMunicipalityAliasFilter(townHallPromptsTable.commune, [commune])).limit(1) as any;
     
     res.json({ prompt: rows.length > 0 ? rows[0] : null });
   } catch(err) {
@@ -8338,14 +8387,14 @@ router.post("/prompts/:commune", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
       
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-    if (currentUser[0]?.role !== "admin" && !assignedCommunes.some(c => c.toLowerCase() === commune.toLowerCase())) {
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
+    if (currentUser[0]?.role !== "admin" && !assignedCommunes.includes(normalizeMunicipalityName(commune))) {
       res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé" });
       return;
     }
     
     // Upsert equivalent since we want one prompt per commune
-    const existing = await db.select({ id: townHallPromptsTable.id }).from(townHallPromptsTable).where(eq(sql`lower(${townHallPromptsTable.commune})`, commune.toLowerCase())).limit(1);
+    const existing = await db.select({ id: townHallPromptsTable.id }).from(townHallPromptsTable).where(buildMunicipalityAliasFilter(townHallPromptsTable.commune, [commune])).limit(1);
     
     let prompt;
     if (existing.length > 0) {
@@ -8374,14 +8423,14 @@ router.get("/settings/:commune", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
       
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-    if (currentUser[0]?.role !== "admin" && !assignedCommunes.some(c => c.toLowerCase() === commune.toLowerCase())) {
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
+    if (currentUser[0]?.role !== "admin" && !assignedCommunes.includes(normalizeMunicipalityName(commune))) {
       res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé" });
       return;
     }
     
     const [settings] = await db.select().from(municipalitySettingsTable)
-      .where(eq(sql`lower(${municipalitySettingsTable.commune})`, commune.toLowerCase())).limit(1);
+      .where(buildMunicipalityAliasFilter(municipalitySettingsTable.commune, [commune])).limit(1);
     
     res.json({ settings: settings || null });
   } catch(err) {
@@ -8405,14 +8454,14 @@ router.post("/settings/:commune", async (req: AuthRequest, res) => {
     const currentUser = await db.select({ role: usersTable.role, communes: usersTable.communes })
       .from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
       
-    const assignedCommunes = parseCommunes(currentUser[0]?.communes);
-    if (currentUser[0]?.role !== "admin" && !assignedCommunes.some(c => c.toLowerCase() === commune.toLowerCase())) {
+    const assignedCommunes = parseCommunes(currentUser[0]?.communes).map(normalizeMunicipalityName);
+    if (currentUser[0]?.role !== "admin" && !assignedCommunes.includes(normalizeMunicipalityName(commune))) {
       res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé" });
       return;
     }
     
     const [existing] = await db.select().from(municipalitySettingsTable)
-      .where(eq(sql`lower(${municipalitySettingsTable.commune})`, commune.toLowerCase())).limit(1);
+      .where(buildMunicipalityAliasFilter(municipalitySettingsTable.commune, [commune])).limit(1);
     
     let result;
     const values = {
