@@ -1166,10 +1166,9 @@ export async function orchestrateDossierAnalysis(
       const boundarySetback = selections.boundarySetback;
       const parkingReq = selections.parkingRequirement;
       const greenSpaceRatio = selections.greenSpaceRatio;
-      const greenSpaceReq = selections.landscapingRequirement
-        ?? (greenSpaceRatio != null
-          ? `${Math.round(greenSpaceRatio * 100)}% de pleine terre minimum`
-          : null);
+      const greenSpaceReq = greenSpaceRatio != null
+        ? `${Math.round(greenSpaceRatio * 100)}% de pleine terre minimum`
+        : selections.landscapingRequirement;
       const assumptions = [
         ...(calculations.blocking_constraints ?? []),
         ...(calculations.uncertainties ?? []),

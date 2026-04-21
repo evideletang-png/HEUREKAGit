@@ -34,7 +34,7 @@ export function summarizeRuleTexts(values: string[] | null | undefined, emptyLab
   );
   if (normalized.length === 0) return emptyLabel;
   const summary = normalized.join("; ");
-  return summary.length > 700 ? `${summary.slice(0, 697)}...` : summary;
+  return summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
 }
 
 export function resolveNormalizedBuildabilitySelections(normalizedRules: CalculationParameters) {
@@ -82,7 +82,7 @@ function extractDistanceValues(text: string) {
     text.matchAll(/(?:\b(?:recul|retrait|distance|implantation|au moins|minimum|min\.)[^.\n:;]{0,40}?)?(\d+(?:[.,]\d+)?)\s*(?:m(?:\b|[èe]tre(?:s)?\b))/gi),
   )
     .map((match) => Number.parseFloat(String(match[1] || "").replace(",", ".")))
-    .filter((value) => Number.isFinite(value));
+    .filter((value) => Number.isFinite(value) && value >= 0);
 }
 
 function extractPercentageValues(text: string) {
@@ -96,6 +96,9 @@ function deriveComparableFieldValue(rule: StructuredUrbanRuleSource, field: Buil
   const explicitUpper = getRuleUpperBoundValue(rule);
   const explicitLower = getRuleLowerBoundValue(rule);
   if (field === "footprint" || field === "remainingFootprint" || field === "height") {
+    if (field === "height" && explicitUpper != null && !isPlausibleBuildingHeight(explicitUpper, getRuleTextBlob(rule))) {
+      return null;
+    }
     if (explicitUpper != null) return explicitUpper;
   } else if (field === "setbackRoad" || field === "setbackBoundary" || field === "greenSpace") {
     if (explicitLower != null) return explicitLower;
@@ -105,7 +108,7 @@ function deriveComparableFieldValue(rule: StructuredUrbanRuleSource, field: Buil
   if (!text) return null;
 
   if (field === "height") {
-    const values = extractDistanceValues(text);
+    const values = extractDistanceValues(text).filter((value) => isPlausibleBuildingHeight(value, text));
     return values.length > 0 ? Math.max(...values) : null;
   }
 
@@ -134,6 +137,13 @@ function deriveComparableFieldValue(rule: StructuredUrbanRuleSource, field: Buil
   }
 
   return null;
+}
+
+function isPlausibleBuildingHeight(value: number, text: string) {
+  if (!Number.isFinite(value)) return false;
+  if (value <= 0 || value > 80) return false;
+  if (value >= 1900 && value <= 2099) return false;
+  return !/\bngf\b|altitude|cote altim[eé]trique/i.test(text);
 }
 
 function getSourcePageWeight(rule: StructuredUrbanRuleSource) {

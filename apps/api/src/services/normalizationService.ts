@@ -371,6 +371,10 @@ export class NormalizationService {
     },
     text: string,
   ): number | null {
+    if (this.isLinearDistanceUnit(structured.unit)) {
+      return this.pickLegacyFootprintValue(text);
+    }
+
     const exact = this.normalizeFootprintOrRatio(structured.valueExact, structured.unit);
     const max = this.normalizeFootprintOrRatio(structured.valueMax, structured.unit);
     const min = this.normalizeFootprintOrRatio(structured.valueMin, structured.unit);
@@ -393,13 +397,18 @@ export class NormalizationService {
     },
     text: string,
   ): number | null {
+    if (String(structured.unit || "").trim() === "%") return this.pickLegacyHeightValue(text);
+
     const exact = this.normalizeValueUnit(structured.valueExact, structured.unit);
     const max = this.normalizeValueUnit(structured.valueMax, structured.unit);
     const min = this.normalizeValueUnit(structured.valueMin, structured.unit);
 
-    if (exact != null) return exact;
-    if (max != null) return max;
-    if (min != null && max != null) return Math.max(min, max);
+    if (exact != null && this.isPlausibleBuildingHeight(exact, text)) return exact;
+    if (max != null && this.isPlausibleBuildingHeight(max, text)) return max;
+    if (min != null && max != null) {
+      const upper = Math.max(min, max);
+      if (this.isPlausibleBuildingHeight(upper, text)) return upper;
+    }
 
     return this.pickLegacyHeightValue(text);
   }
@@ -443,11 +452,14 @@ export class NormalizationService {
   private static pickLegacyFootprintValue(text?: string | null): number | null {
     const values = this.extractFootprintValues(text);
     if (values.length === 0) return null;
-    return Math.min(...values.filter((value) => value > 0));
+    const positiveValues = values.filter((value) => value > 0);
+    if (positiveValues.length === 0) return null;
+    return Math.min(...positiveValues);
   }
 
   private static pickLegacyHeightValue(text?: string | null): number | null {
-    const values = this.extractNumbers(text);
+    const values = this.extractDistanceValues(text)
+      .filter((value) => this.isPlausibleBuildingHeight(value, text || ""));
     if (values.length === 0) return null;
     return Math.max(...values);
   }
@@ -468,15 +480,19 @@ export class NormalizationService {
     text: string,
     ratio: number | null,
   ): string {
-    if (text.trim().length > 0) return this.pickRuleTextSummary(structured.label, text);
     if (ratio != null) return `Pleine terre / espaces verts : minimum ${Math.round(ratio * 100)}%.`;
+    if (text.trim().length > 0) return this.pickRuleTextSummary(structured.label, text);
     return structured.label || "Espaces verts & pleine terre";
   }
 
   private static pickRuleTextSummary(label: string | null | undefined, text: string): string {
-    const normalized = text.replace(/\s+/g, " ").trim();
+    const normalized = text
+      .replace(/\*\*/g, "")
+      .replace(/\|/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (normalized.length === 0) return String(label || "").trim();
-    return normalized.length > 320 ? `${normalized.slice(0, 317)}...` : normalized;
+    return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
   }
 
   private static normalizeValueUnit(value: number | null | undefined, unit: string | null | undefined): number | null {
@@ -533,19 +549,43 @@ export class NormalizationService {
     if (matches.length === 0) return [];
     return matches
       .map((match) => Number.parseFloat(String(match[1] || "").replace(",", ".")))
-      .filter((value) => Number.isFinite(value));
+      .filter((value) => Number.isFinite(value) && value >= 0);
   }
 
   private static extractFootprintValues(text?: string | null): number[] {
+    if (!text) return [];
     const values = this.extractNumbers(text);
-    if (!text) return values;
     const normalized = text.toLowerCase();
     const isPercentageRule = normalized.includes("%")
       || normalized.includes("pourcent")
       || normalized.includes("ces")
       || normalized.includes("coefficient d'emprise");
 
-    if (!isPercentageRule) return values;
-    return values.map((value) => (value > 1 ? value / 100 : value));
+    if (isPercentageRule) {
+      return Array.from(text.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:%|pour\s*cent)/gi))
+        .map((match) => Number.parseFloat(String(match[1] || "").replace(",", ".")))
+        .filter((value) => Number.isFinite(value) && value >= 0 && value <= 100)
+        .map((value) => (value > 1 ? value / 100 : value));
+    }
+
+    if (/\bemprise\b/.test(normalized) && /\b(?:m²|m2|mètres carrés|metres carres)\b/.test(normalized)) {
+      return values.filter((value) => Number.isFinite(value) && value > 0 && value < 100000);
+    }
+
+    return [];
+  }
+
+  private static isLinearDistanceUnit(unit: string | null | undefined) {
+    const normalized = String(unit || "").trim().toLowerCase();
+    return normalized === "m" || normalized === "metre" || normalized === "mètre" || normalized === "metres" || normalized === "mètres";
+  }
+
+  private static isPlausibleBuildingHeight(value: number, text: string) {
+    if (!Number.isFinite(value)) return false;
+    if (value <= 0 || value > 80) return false;
+    if (value >= 1900 && value <= 2099) return false;
+    const normalized = text.toLowerCase();
+    if (/\bngf\b|altitude|cote altim[eé]trique/.test(normalized)) return false;
+    return true;
   }
 }

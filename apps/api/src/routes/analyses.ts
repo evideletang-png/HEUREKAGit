@@ -12,8 +12,9 @@ import {
   eventLogsTable,
   municipalitySettingsTable,
   globalConfigsTable,
+  baseIAEmbeddingsTable,
 } from "@workspace/db";
-import { eq, desc, and, count, sql } from "drizzle-orm";
+import { eq, desc, and, count, sql, or, ilike, inArray } from "drizzle-orm";
 import { authenticate, type AuthRequest } from "../middlewares/authenticate.js";
 import { geocodeAddress } from "../services/geocoding.js";
 import {
@@ -28,6 +29,7 @@ import { getZoningByCoords } from "../services/planning.js";
 import { extractDeterministicRegulatoryRules } from "../services/pluAnalysis.js";
 import { loadRegulatoryUnits, buildArticlesFromRegulatoryUnits } from "../services/regulatoryUnitService.js";
 import { buildArticlesFromUrbanRules, loadStructuredRulesForAnalysis } from "../services/urbanRuleExtractionService.js";
+import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "../services/municipalityAliasService.js";
 
 const router: IRouter = Router();
 
@@ -44,6 +46,112 @@ function synthesizeEvidenceFromSourceExcerpt(zoneAnalysisId: string, sourceExcer
     confidence: article.confidence,
     structuredJson: JSON.stringify(article.structuredData || { fallback: "source_excerpt" }),
   }));
+}
+
+async function synthesizeEvidenceFromBaseIAChunks(args: {
+  municipalityId: string;
+  communeName?: string | null;
+  zoneCode?: string | null;
+  zoneAnalysisId: string;
+}) {
+  const resolved = await resolveMunicipalityAliases(args.municipalityId, args.communeName);
+  const aliases = uniqueNonEmpty([resolved.municipalityId, ...resolved.aliases, args.municipalityId, args.communeName]);
+  if (aliases.length === 0) return [];
+
+  const zoneCode = String(args.zoneCode || "").trim();
+  const zoneNeedles = zoneCode
+    ? [
+        `%zone ${zoneCode}%`,
+        `%${zoneCode} - article%`,
+        `%${zoneCode}-article%`,
+        `%${zoneCode} article%`,
+        `%dispositions applicables%${zoneCode}%`,
+      ]
+    : [];
+
+  const baseConditions = [
+    buildMunicipalityTextFilter(baseIAEmbeddingsTable.municipalityId, aliases),
+    sql`${baseIAEmbeddingsTable.metadata}->>'status' = 'active'`,
+    inArray(sql`${baseIAEmbeddingsTable.metadata}->>'document_type'`, ["plu_reglement", "plu_annexe"]),
+  ];
+
+  const zoneClause = zoneNeedles.length > 0
+    ? or(...zoneNeedles.map((needle) => ilike(baseIAEmbeddingsTable.content, needle)))
+    : undefined;
+
+  let chunks = await db.select({
+    id: baseIAEmbeddingsTable.id,
+    content: baseIAEmbeddingsTable.content,
+    pageNumber: baseIAEmbeddingsTable.pageNumber,
+    metadata: baseIAEmbeddingsTable.metadata,
+  })
+    .from(baseIAEmbeddingsTable)
+    .where(and(...baseConditions, zoneClause))
+    .orderBy(desc(sql`COALESCE((${baseIAEmbeddingsTable.metadata}->>'source_authority')::numeric, 0)`), baseIAEmbeddingsTable.chunkIndex)
+    .limit(12);
+
+  if (chunks.length === 0 && zoneCode) {
+    chunks = await db.select({
+      id: baseIAEmbeddingsTable.id,
+      content: baseIAEmbeddingsTable.content,
+      pageNumber: baseIAEmbeddingsTable.pageNumber,
+      metadata: baseIAEmbeddingsTable.metadata,
+    })
+      .from(baseIAEmbeddingsTable)
+      .where(and(...baseConditions))
+      .orderBy(desc(sql`COALESCE((${baseIAEmbeddingsTable.metadata}->>'source_authority')::numeric, 0)`), baseIAEmbeddingsTable.chunkIndex)
+      .limit(8);
+  }
+
+  if (chunks.length === 0) return [];
+
+  const deterministicArticles = extractDeterministicRegulatoryRules(chunks.map((chunk) => chunk.content).join("\n\n---\n\n"));
+  if (deterministicArticles.length > 0) {
+    return deterministicArticles.slice(0, 12).map((article, index) => ({
+      id: `base-ia-deterministic-${index}`,
+      zoneAnalysisId: args.zoneAnalysisId,
+      articleNumber: article.articleNumber,
+      title: article.title,
+      sourceText: article.sourceText,
+      summary: article.summary,
+      impactText: article.impactText,
+      vigilanceText: article.vigilanceText,
+      confidence: article.confidence,
+      structuredJson: JSON.stringify({
+        structured_source: "base_ia_chunks",
+        relevanceScore: 70,
+        relevanceReason: "Preuve reconstituée depuis les chunks Base IA indexés pour la commune.",
+      }),
+    }));
+  }
+
+  return chunks.map((chunk, index) => {
+    const metadata = (chunk.metadata || {}) as Record<string, any>;
+    const articleRaw = metadata.article_id || metadata.article || null;
+    const articleDigits = articleRaw ? String(articleRaw).replace(/[^0-9]/g, "") : "";
+    const articleNumber = articleDigits ? Number(articleDigits) : index + 1;
+    const content = String(chunk.content || "").trim();
+    return {
+      id: `base-ia-chunk-${chunk.id}`,
+      zoneAnalysisId: args.zoneAnalysisId,
+      articleNumber,
+      title: metadata.section_title || (articleRaw ? `Article ${articleRaw}` : `Source Base IA ${index + 1}`),
+      sourceText: content,
+      summary: content.slice(0, 600),
+      impactText: "",
+      vigilanceText: zoneCode && !content.toLowerCase().includes(zoneCode.toLowerCase())
+        ? `Source communale opposable retrouvée, mais le rattachement exact à la zone ${zoneCode} reste à confirmer.`
+        : "",
+      confidence: "medium",
+      structuredJson: JSON.stringify({
+        structured_source: "base_ia_chunks",
+        source_page: chunk.pageNumber,
+        document_type: metadata.document_type,
+        relevanceScore: zoneCode && content.toLowerCase().includes(zoneCode.toLowerCase()) ? 68 : 45,
+        relevanceReason: "Preuve reconstituée depuis les chunks Base IA indexés pour la commune.",
+      }),
+    };
+  });
 }
 
 type SelectedParcelPayload = {
@@ -384,6 +492,7 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
     const buildings = await db.select().from(buildingsTable).where(eq(buildingsTable.analysisId, idStr));
     const zoneData = (await db.select().from(zoneAnalysesTable).where(eq(zoneAnalysesTable.analysisId, idStr)).limit(1))[0];
     let articles = zoneData ? await db.select().from(ruleArticlesTable).where(eq(ruleArticlesTable.zoneAnalysisId, zoneData.id)) : [];
+    let effectiveZoneIssuesJson = zoneData?.issuesJson || null;
     if (zoneData && articles.length === 0) {
       const geoContext = analysis.geoContextJson
         ? (typeof analysis.geoContextJson === "string" ? JSON.parse(analysis.geoContextJson) : analysis.geoContextJson)
@@ -427,8 +536,48 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
             ...(article.structuredData || {}),
           }),
         }));
+        try {
+          const existingIssues = zoneData.issuesJson
+            ? (typeof zoneData.issuesJson === "string" ? JSON.parse(zoneData.issuesJson) : zoneData.issuesJson)
+            : [];
+          if (Array.isArray(existingIssues)) {
+            effectiveZoneIssuesJson = JSON.stringify(existingIssues.filter((issue: any) =>
+              issue?.type !== "NO_PLU_DATA"
+              && issue?.code !== "NO_PLU_DATA"
+              && issue?.type !== "PLU_ZONE_READ_INSUFFICIENT"
+              && issue?.code !== "PLU_ZONE_READ_INSUFFICIENT"
+            ));
+          }
+        } catch {
+          effectiveZoneIssuesJson = zoneData.issuesJson;
+        }
       } else {
-        articles = synthesizeEvidenceFromSourceExcerpt(zoneData.id, zoneData.sourceExcerpt);
+        articles = municipalityId
+          ? await synthesizeEvidenceFromBaseIAChunks({
+              municipalityId,
+              communeName,
+              zoneCode: zoneData.zoneCode || analysis.zoneCode || undefined,
+              zoneAnalysisId: zoneData.id,
+            })
+          : [];
+        if (articles.length === 0) {
+          articles = synthesizeEvidenceFromSourceExcerpt(zoneData.id, zoneData.sourceExcerpt);
+        }
+      }
+    }
+    if (zoneData && articles.length > 0 && effectiveZoneIssuesJson) {
+      try {
+        const existingIssues = typeof effectiveZoneIssuesJson === "string" ? JSON.parse(effectiveZoneIssuesJson) : effectiveZoneIssuesJson;
+        if (Array.isArray(existingIssues)) {
+          effectiveZoneIssuesJson = JSON.stringify(existingIssues.filter((issue: any) =>
+            issue?.type !== "NO_PLU_DATA"
+            && issue?.code !== "NO_PLU_DATA"
+            && issue?.type !== "PLU_ZONE_READ_INSUFFICIENT"
+            && issue?.code !== "PLU_ZONE_READ_INSUFFICIENT"
+          ));
+        }
+      } catch {
+        // Keep the persisted issues as-is if an older row contains unexpected JSON.
       }
     }
     const buildability = (await db.select().from(buildabilityResultsTable).where(eq(buildabilityResultsTable.analysisId, idStr)).limit(1))[0] || null;
@@ -444,7 +593,7 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
       },
       parcel,
       buildings,
-      zoneAnalysis: zoneData ? { ...zoneData, articles } : null,
+      zoneAnalysis: zoneData ? { ...zoneData, issuesJson: effectiveZoneIssuesJson, articles } : null,
       buildability,
       constraints,
       report,

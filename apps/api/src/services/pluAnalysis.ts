@@ -15,13 +15,20 @@ import {
   REGULATORY_SINGLE_PIPE_TIMEOUT_MS,
   truncateSinglePipeField,
 } from "./regulatorySinglePipe.js";
+import { resolveMunicipalityAliases, uniqueNonEmpty } from "./municipalityAliasService.js";
 
-function uniqueMunicipalityAliases(cityName?: string, jurisdictionContext?: JurisdictionContext): string[] {
-  return Array.from(new Set([
+async function uniqueMunicipalityAliases(cityName?: string, jurisdictionContext?: JurisdictionContext): Promise<string[]> {
+  const resolved = await resolveMunicipalityAliases(
+    jurisdictionContext?.commune_insee || cityName,
+    jurisdictionContext?.name || cityName,
+  );
+  return uniqueNonEmpty([
+    resolved.municipalityId,
+    ...resolved.aliases,
     jurisdictionContext?.commune_insee,
     cityName,
     jurisdictionContext?.name,
-  ].filter((value): value is string => !!value && value.trim().length > 0)));
+  ]);
 }
 
 async function queryChunksWithMunicipalityAliases(
@@ -38,7 +45,7 @@ async function queryChunksWithMunicipalityAliases(
     strictZone?: boolean;
   }
 ) {
-  const aliases = uniqueMunicipalityAliases(options.cityName, options.jurisdictionContext);
+  const aliases = await uniqueMunicipalityAliases(options.cityName, options.jurisdictionContext);
   const limit = options.limit || 15;
   const resultsById = new Map<string, any>();
 

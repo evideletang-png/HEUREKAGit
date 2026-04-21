@@ -212,6 +212,23 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isPlausibleBuildabilityHeight(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0 && value <= 80 && !(value >= 1900 && value <= 2099);
+}
+
+function formatSafeGreenSpaceRequirement(value: unknown) {
+  const text = String(value || "").replace(/\*\*/g, "").replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return "Non déterminé";
+  const percentMatch = text.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (percentMatch?.[1]) {
+    return `${percentMatch[1].replace(",", ".")}% de pleine terre minimum`;
+  }
+  if (text.length > 90 || /(?:article\s+\d+\s*,\s*\d+|opération groupée|quota lls)/i.test(text)) {
+    return "Non déterminé";
+  }
+  return text;
+}
+
 function buildEvidenceState({
   value,
   formattedValue,
@@ -812,17 +829,18 @@ export default function AnalysisDetailPage() {
   });
 
   const heightEvidence = buildEvidenceState({
-    value: buildability?.maxHeightM ?? null,
-    formattedValue: buildability?.maxHeightM != null ? `${buildability.maxHeightM} m` : "Non déterminé",
-    explicitRuleFound: isFiniteNumber(calcVariables.maxHeightM),
+    value: isPlausibleBuildabilityHeight(buildability?.maxHeightM) ? buildability?.maxHeightM : null,
+    formattedValue: isPlausibleBuildabilityHeight(buildability?.maxHeightM) ? `${buildability.maxHeightM} m` : "Non déterminé",
+    explicitRuleFound: isPlausibleBuildabilityHeight(calcVariables.maxHeightM),
     defaultApplied: assumptionFlags.heightDefault,
     sourceDetail: buildabilitySourceDetails.height ?? null,
     explicitHelper: "Hauteur maximale issue d'une règle opposable retrouvée pour la zone.",
   });
 
+  const safeGreenSpaceRequirement = formatSafeGreenSpaceRequirement(buildability?.greenSpaceRequirement);
   const greenSpaceEvidence = buildEvidenceState({
-    value: buildability?.greenSpaceRequirement ?? null,
-    formattedValue: buildability?.greenSpaceRequirement || "Non déterminé",
+    value: safeGreenSpaceRequirement !== "Non déterminé" ? safeGreenSpaceRequirement : null,
+    formattedValue: safeGreenSpaceRequirement,
     explicitRuleFound: isFiniteNumber(calcVariables.greenSpaceRatio),
     defaultApplied: assumptionFlags.greenDefault,
     sourceDetail: buildabilitySourceDetails.greenSpace ?? null,

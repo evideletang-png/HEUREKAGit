@@ -225,6 +225,196 @@ function buildArticleCandidates(rawText: string, zoneCode?: string | null): Arti
   return dedupeArticles(zoneArticleBlocks);
 }
 
+function cleanMarkdownCell(raw: string | null | undefined) {
+  return String(raw || "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitMarkdownRow(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return [];
+  return trimmed.slice(1, -1).split("|").map(cleanMarkdownCell);
+}
+
+function isMarkdownSeparatorRow(cells: string[]) {
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+}
+
+function hasSubstantiveRuleCell(value: string | null | undefined) {
+  const normalized = cleanMarkdownCell(value).toLowerCase();
+  if (!normalized || normalized === "—" || normalized === "-" || normalized === "n/a") return false;
+  return true;
+}
+
+function buildSynthesisArticle(args: {
+  zoneCode: string;
+  articleNumber: number;
+  title: string;
+  value: string;
+  sourceLabel: string;
+}) {
+  const sourceText = cleanBlockText([
+    `Zone ${args.zoneCode} — Article ${args.articleNumber} — ${args.title}`,
+    `${args.sourceLabel} : ${args.value}`,
+  ].join("\n"));
+
+  return {
+    articleNumber: args.articleNumber,
+    title: args.title,
+    sourceText,
+    interpretation: sourceText,
+    summary: sourceText,
+    impactText: "Règle issue d'un tableau de synthèse réglementaire consolidé par zone.",
+    vigilanceText: "Source consolidée : la règle est exploitable, mais le détail article complet doit rester consultable dans le document d'origine si nécessaire.",
+    confidence: "medium" as const,
+    structuredData: {
+      extraction_kind: "markdown_zone_synthesis_table",
+      source_label: args.sourceLabel,
+      zone_code: args.zoneCode,
+    },
+  };
+}
+
+function extractMarkdownZoneSynthesisArticles(rawText: string): ArticleAnalysis[] {
+  if (!/tableau de synth[eè]se des r[eè]gles opposables par zone/i.test(rawText)) return [];
+
+  const lines = rawText.replace(/\r\n?/g, "\n").split("\n");
+  const tableStart = lines.findIndex((line) => /\|\s*Zone\s*\|\s*Vocation dominante\s*\|\s*Emprise max/i.test(line));
+  if (tableStart < 0) return [];
+
+  const articles: ArticleAnalysis[] = [];
+  for (let index = tableStart + 1; index < lines.length; index++) {
+    const cells = splitMarkdownRow(lines[index] || "");
+    if (cells.length === 0) break;
+    if (isMarkdownSeparatorRow(cells)) continue;
+    if (cells.length < 7) continue;
+
+    const zoneCode = cleanMarkdownCell(cells[0]).toUpperCase();
+    if (!zoneCode || !/^(?:\d{1,2}AU[A-Z0-9-]*|[UNA][A-Z0-9-]*|[UNA])$/.test(zoneCode)) continue;
+
+    const [, , footprint, height, greenSpace, socialHousing, roadSetback] = cells;
+
+    if (hasSubstantiveRuleCell(footprint)) {
+      articles.push(buildSynthesisArticle({
+        zoneCode,
+        articleNumber: 9,
+        title: ARTICLE_THEME_LABELS[9],
+        value: footprint,
+        sourceLabel: "Emprise maximale",
+      }));
+    }
+
+    if (hasSubstantiveRuleCell(height)) {
+      articles.push(buildSynthesisArticle({
+        zoneCode,
+        articleNumber: 10,
+        title: ARTICLE_THEME_LABELS[10],
+        value: height,
+        sourceLabel: "Hauteur maximale",
+      }));
+    }
+
+    if (hasSubstantiveRuleCell(greenSpace)) {
+      articles.push(buildSynthesisArticle({
+        zoneCode,
+        articleNumber: 13,
+        title: ARTICLE_THEME_LABELS[13],
+        value: greenSpace,
+        sourceLabel: "Pleine terre",
+      }));
+    }
+
+    if (hasSubstantiveRuleCell(socialHousing)) {
+      articles.push(buildSynthesisArticle({
+        zoneCode,
+        articleNumber: 2,
+        title: "Conditions particulières & mixité sociale",
+        value: socialHousing,
+        sourceLabel: "Logements locatifs sociaux",
+      }));
+    }
+
+    if (hasSubstantiveRuleCell(roadSetback)) {
+      articles.push(buildSynthesisArticle({
+        zoneCode,
+        articleNumber: 6,
+        title: ARTICLE_THEME_LABELS[6],
+        value: roadSetback,
+        sourceLabel: "Recul par rapport aux voies",
+      }));
+    }
+  }
+
+  return dedupeArticles(articles);
+}
+
+function extractMarkdownCommonRuleBlock(rawText: string, headingPattern: RegExp): string | null {
+  const match = headingPattern.exec(rawText);
+  if (!match || typeof match.index !== "number") return null;
+  const start = match.index;
+  const rest = rawText.slice(start);
+  const nextHeading = rest.slice(1).search(/\n\*\*[^*\n]+\*\*/i);
+  const end = nextHeading >= 0 ? start + 1 + nextHeading : rawText.length;
+  return cleanBlockText(rawText.slice(start, end));
+}
+
+function extractMarkdownCommonArticles(rawText: string, synthesisArticles: ArticleAnalysis[]): ArticleAnalysis[] {
+  const zoneCodes = Array.from(new Set(synthesisArticles.map((article) => {
+    const zoneCode = String(article.structuredData?.zone_code || "").trim();
+    return zoneCode || null;
+  }).filter((value): value is string => !!value)));
+  if (zoneCodes.length === 0) return [];
+
+  const articles: ArticleAnalysis[] = [];
+  const parkingBlock = extractMarkdownCommonRuleBlock(rawText, /\*\*Stationnement\s*\(art\.\s*12\)[^*\n]*\*\*/i);
+  if (parkingBlock) {
+    for (const zoneCode of zoneCodes.filter((code) => ["UA", "UB", "UC"].includes(code))) {
+      articles.push({
+        articleNumber: 12,
+        title: ARTICLE_THEME_LABELS[12],
+        sourceText: cleanBlockText(`Zone ${zoneCode} — Article 12 — ${ARTICLE_THEME_LABELS[12]}\n${parkingBlock}`),
+        interpretation: parkingBlock,
+        summary: parkingBlock,
+        impactText: "Règle commune de stationnement issue du règlement consolidé.",
+        vigilanceText: "Règle commune : vérifier les exceptions éventuelles propres à la zone ou au projet.",
+        confidence: "medium",
+        structuredData: {
+          extraction_kind: "markdown_common_rule_block",
+          zone_code: zoneCode,
+          source_label: "Stationnement commun UA/UB/UC",
+        },
+      });
+    }
+  }
+
+  const greenBlock = extractMarkdownCommonRuleBlock(rawText, /\*\*Espaces libres\s*\(art\.\s*13\)[^*\n]*\*\*/i);
+  if (greenBlock) {
+    for (const zoneCode of zoneCodes.filter((code) => /^U/.test(code) || /^1AU/.test(code))) {
+      articles.push({
+        articleNumber: 13,
+        title: ARTICLE_THEME_LABELS[13],
+        sourceText: cleanBlockText(`Zone ${zoneCode} — Article 13 — ${ARTICLE_THEME_LABELS[13]} — dispositions communes\n${greenBlock}`),
+        interpretation: greenBlock,
+        summary: greenBlock,
+        impactText: "Complément commun aux règles d'espaces libres / plantations.",
+        vigilanceText: "Complément transversal : il ne remplace pas le taux de pleine terre propre à la zone.",
+        confidence: "medium",
+        structuredData: {
+          extraction_kind: "markdown_common_rule_block",
+          zone_code: zoneCode,
+          source_label: "Espaces libres communs",
+        },
+      });
+    }
+  }
+
+  return dedupeArticles(articles);
+}
+
 export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryUnitsArgs) {
   if (!args.documentType || !["plu_reglement", "plu_annexe", "oap"].includes(args.documentType)) {
     if (args.baseIADocumentId) {
@@ -262,7 +452,11 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
     return [];
   })();
 
-  const unitsToPersist = zoneScopedSources.flatMap((section) => {
+  const markdownSynthesisArticles = extractMarkdownZoneSynthesisArticles(args.rawText);
+  const markdownCommonArticles = extractMarkdownCommonArticles(args.rawText, markdownSynthesisArticles);
+  const markdownArticles = [...markdownSynthesisArticles, ...markdownCommonArticles];
+
+  const unitsFromZoneSections = zoneScopedSources.flatMap((section) => {
     const articles = buildArticleCandidates(section.sourceText, section.zoneCode);
     return articles.map((article) => ({
       baseIADocumentId: args.baseIADocumentId || null,
@@ -291,6 +485,39 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
       updatedAt: new Date(),
     }));
   });
+
+  const unitsFromMarkdownSynthesis = markdownArticles.map((article) => {
+    const zoneCode = String(article.structuredData?.zone_code || "").trim() || null;
+    const hierarchy = zoneCode ? deriveZoneHierarchy(zoneCode) : null;
+    return {
+      baseIADocumentId: args.baseIADocumentId || null,
+      townHallDocumentId: args.townHallDocumentId || null,
+      municipalityId: args.municipalityId,
+      zoneCode,
+      documentType: args.documentType || null,
+      theme: article.title,
+      articleNumber: article.articleNumber,
+      title: article.title,
+      sourceText: article.sourceText,
+      parsedValues: {
+        ...parseValuesFromArticle(article),
+        structuredData: article.structuredData || {},
+        zone_code: zoneCode,
+        parent_zone_code: hierarchy && hierarchy.baseZone !== hierarchy.zoneCodeUpper ? hierarchy.baseZone : null,
+        section_heading: `Zone ${zoneCode}`,
+        start_page: null,
+        end_page: null,
+        extraction_scope: article.structuredData?.extraction_kind || "markdown_synthesis",
+      },
+      confidence: article.confidence,
+      sourceAuthority: args.sourceAuthority ?? 0,
+      isOpposable: args.isOpposable ?? true,
+      parserVersion: "v3-markdown-synthesis",
+      updatedAt: new Date(),
+    };
+  });
+
+  const unitsToPersist = [...unitsFromZoneSections, ...unitsFromMarkdownSynthesis];
 
   if (unitsToPersist.length === 0) {
     return { created: 0 };

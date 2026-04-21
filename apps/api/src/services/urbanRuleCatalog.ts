@@ -51,6 +51,13 @@ function extractSentence(text: string, pattern: RegExp): string | null {
   return sentence.length > 0 ? sentence : null;
 }
 
+function isPlausibleBuildingHeight(value: number | null, text: string) {
+  if (value == null || !Number.isFinite(value)) return false;
+  if (value <= 0 || value > 80) return false;
+  if (value >= 1900 && value <= 2099) return false;
+  return !/\bngf\b|altitude|cote altim[eé]trique/i.test(text);
+}
+
 export function confidenceToScore(level: string | null | undefined): number {
   switch ((level || "").toLowerCase()) {
     case "high":
@@ -184,8 +191,14 @@ export function extractRuleValues(sourceText: string, descriptor: UrbanRuleDescr
     }
     unit = value != null ? "%" : null;
   } else if (meterMatches.length > 0) {
-    const first = parseNumber(meterMatches[0]?.[1]);
-    const second = parseNumber(meterMatches[1]?.[1]);
+    const meterValues = meterMatches
+      .map((meterMatch) => parseNumber(meterMatch?.[1]))
+      .filter((value): value is number => value != null);
+    const plausibleHeightValues = descriptor.family === "height"
+      ? meterValues.filter((value) => isPlausibleBuildingHeight(value, text))
+      : meterValues;
+    const first = plausibleHeightValues[0] ?? null;
+    const second = plausibleHeightValues[1] ?? null;
     if (/(entre|compris entre|de .* à)/i.test(text) && first != null && second != null) {
       valueMin = Math.min(first, second);
       valueMax = Math.max(first, second);
@@ -196,9 +209,11 @@ export function extractRuleValues(sourceText: string, descriptor: UrbanRuleDescr
       valueType = first != null ? "min" : null;
       unit = first != null ? "m" : null;
     } else if (/(au plus|maxim|maximum|inf[eé]rieur ou [ée]gal|ne peut exc[eé]der)/i.test(text)) {
-      valueMax = first;
-      valueType = first != null ? "max" : null;
-      unit = first != null ? "m" : null;
+      valueMax = descriptor.family === "height" && plausibleHeightValues.length > 1
+        ? Math.max(...plausibleHeightValues)
+        : first;
+      valueType = valueMax != null ? "max" : null;
+      unit = valueMax != null ? "m" : null;
     } else {
       valueExact = first;
       valueType = first != null ? "exact" : null;
