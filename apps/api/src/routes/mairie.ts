@@ -44,6 +44,13 @@ import { extractRegulatoryZoneSections, persistRegulatoryZoneSectionsForDocument
 import { persistDocumentKnowledgeProfile } from "../services/documentKnowledgeService.js";
 import { persistUrbanRulesForDocument } from "../services/urbanRuleExtractionService.js";
 import {
+  buildLogicalMarkdownFileName,
+  isMarkdownUpload,
+  parseConsolidatedMarkdownKnowledge,
+  type ConsolidatedMarkdownLogicalDocument,
+  type ParsedConsolidatedMarkdownKnowledge,
+} from "../services/consolidatedMarkdownKnowledgeService.js";
+import {
   REGULATORY_ARTICLE_REFERENCE,
   REGULATORY_NORMATIVE_EFFECTS,
   REGULATORY_OVERLAY_TYPES,
@@ -478,6 +485,13 @@ async function purgeMunicipalityStructuredKnowledge(args: {
 }
 
 async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
+  const [sourceDoc] = await db.select({ structuredContent: townHallDocumentsTable.structuredContent })
+    .from(townHallDocumentsTable)
+    .where(eq(townHallDocumentsTable.id, docId))
+    .limit(1);
+  const structuredBaseDocId = typeof (sourceDoc?.structuredContent as any)?.baseIADocumentId === "string"
+    ? (sourceDoc?.structuredContent as any).baseIADocumentId as string
+    : null;
   const relatedProfileDocs = await db.select({ baseIADocumentId: documentKnowledgeProfilesTable.baseIADocumentId })
     .from(documentKnowledgeProfilesTable)
     .where(eq(documentKnowledgeProfilesTable.townHallDocumentId, docId));
@@ -492,11 +506,12 @@ async function purgeTownHallDocumentStructuredKnowledge(docId: string) {
     .where(eq(urbanRulesTable.townHallDocumentId, docId));
 
   const baseDocIds = Array.from(new Set([
+    structuredBaseDocId,
     ...relatedProfileDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
     ...relatedSectionDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
     ...relatedUnitDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
     ...relatedRuleDocs.map((row) => row.baseIADocumentId).filter((value): value is string => !!value),
-  ]));
+  ].filter((value): value is string => !!value)));
 
   return db.transaction(async (tx) => {
     const deletedOverlayBindings = await tx.delete(overlayDocumentBindingsTable)
@@ -1884,6 +1899,280 @@ async function persistStructuredKnowledgeForDocument(args: {
   });
 }
 
+function buildConsolidatedMarkdownStructuredContent(args: {
+  parsed: ParsedConsolidatedMarkdownKnowledge;
+  parentDocumentId?: string | null;
+  parentBaseIADocumentId?: string | null;
+  baseIADocumentId?: string | null;
+  logicalDocument?: ConsolidatedMarkdownLogicalDocument | null;
+  sourceFileName: string;
+}) {
+  const base = {
+    sourceFormat: "consolidated_markdown",
+    sourceMarkdownFileName: args.sourceFileName,
+    authoritativeCommuneContext: args.parsed.promptBlock,
+    consolidatedMarkdownMetadata: args.parsed.metadata,
+  };
+
+  if (!args.logicalDocument) {
+    return {
+      ...base,
+      isConsolidatedMarkdownParent: true,
+      baseIADocumentId: args.baseIADocumentId || null,
+      logicalDocuments: args.parsed.documents.map((document) => ({
+        logicalDocumentIndex: document.logicalDocumentIndex,
+        sourceMarkdownHeading: document.sourceMarkdownHeading,
+        title: document.title,
+        canonicalType: document.canonicalType,
+        documentType: document.documentType,
+        sourceAuthority: document.sourceAuthority,
+        isOpposable: document.isOpposable,
+      })),
+    };
+  }
+
+  return {
+    ...base,
+    isConsolidatedMarkdownPart: true,
+    parentDocumentId: args.parentDocumentId || null,
+    parentBaseIADocumentId: args.parentBaseIADocumentId || null,
+    baseIADocumentId: args.baseIADocumentId || null,
+    logicalDocumentIndex: args.logicalDocument.logicalDocumentIndex,
+    sourceMarkdownHeading: args.logicalDocument.sourceMarkdownHeading,
+    canonicalType: args.logicalDocument.canonicalType,
+    sourceAuthority: args.logicalDocument.sourceAuthority,
+  };
+}
+
+async function upsertConsolidatedMarkdownPrompt(args: {
+  communeAliases: string[];
+  promptBlock: string | null;
+  sourceName: string;
+}) {
+  const promptBlock = args.promptBlock?.trim();
+  if (!promptBlock) return;
+
+  const markerStart = "<!-- HEUREKA_CONSOLIDATED_MARKDOWN_PROMPT_START -->";
+  const markerEnd = "<!-- HEUREKA_CONSOLIDATED_MARKDOWN_PROMPT_END -->";
+  const wrappedBlock = [
+    markerStart,
+    `Source: ${args.sourceName}`,
+    promptBlock,
+    markerEnd,
+  ].join("\n");
+  const generatedBlockRegex = new RegExp(`${markerStart}[\\s\\S]*?${markerEnd}`, "g");
+
+  for (const commune of args.communeAliases) {
+    if (!commune?.trim()) continue;
+    const [existing] = await db.select({
+      id: townHallPromptsTable.id,
+      content: townHallPromptsTable.content,
+    })
+      .from(townHallPromptsTable)
+      .where(eq(sql`lower(${townHallPromptsTable.commune})`, commune.toLowerCase()))
+      .limit(1);
+
+    if (existing) {
+      const manualContent = String(existing.content || "").replace(generatedBlockRegex, "").trim();
+      const content = [manualContent, wrappedBlock].filter(Boolean).join("\n\n");
+      await db.update(townHallPromptsTable)
+        .set({ content, updatedAt: new Date() })
+        .where(eq(townHallPromptsTable.id, existing.id));
+      continue;
+    }
+
+    await db.insert(townHallPromptsTable).values({
+      commune,
+      content: wrappedBlock,
+    });
+  }
+}
+
+async function processKnowledgeDocumentThroughPipeline(args: {
+  baseIADocumentId: string;
+  townHallDocumentId: string;
+  municipalityKey: string;
+  communeAliases: string[];
+  rawText: string;
+  canonicalType: string;
+  documentSubtype: string | null;
+  sourceName: string;
+  sourceAuthority: number;
+  isOpposable: boolean;
+  zoneCode?: string | null;
+  userId?: string | null;
+  rawClassification: Record<string, unknown>;
+}) {
+  await processDocumentForRAG(args.baseIADocumentId, args.municipalityKey, args.rawText, {
+    document_id: args.baseIADocumentId,
+    document_type: args.canonicalType,
+    pool_id: `${args.municipalityKey}-PLU-ACTIVE`,
+    status: "active",
+    commune: args.municipalityKey,
+    zone: args.zoneCode || undefined,
+    source_authority: args.sourceAuthority,
+    provenance: "base_ia_plu",
+  } as any);
+
+  await persistRegulatoryUnitsForDocument({
+    baseIADocumentId: args.baseIADocumentId,
+    townHallDocumentId: args.townHallDocumentId,
+    municipalityId: args.municipalityKey,
+    zoneCode: args.zoneCode || null,
+    documentType: args.canonicalType,
+    sourceAuthority: args.sourceAuthority,
+    isOpposable: args.isOpposable,
+    rawText: args.rawText,
+  });
+
+  await persistRegulatoryZoneSectionsForDocument({
+    baseIADocumentId: args.baseIADocumentId,
+    townHallDocumentId: args.townHallDocumentId,
+    municipalityId: args.municipalityKey,
+    documentType: args.canonicalType,
+    sourceAuthority: args.sourceAuthority,
+    isOpposable: args.isOpposable,
+    rawText: args.rawText,
+  });
+
+  await ensureCalibrationZonesForCommune({
+    communeKey: args.municipalityKey,
+    communeAliases: args.communeAliases,
+    rawText: args.rawText,
+    sourceName: args.sourceName,
+    sourceType: args.documentSubtype,
+    referenceDocumentId: args.townHallDocumentId,
+    userId: args.userId || null,
+  });
+
+  await persistStructuredKnowledgeForDocument({
+    baseIADocumentId: args.baseIADocumentId,
+    townHallDocumentId: args.townHallDocumentId,
+    municipalityId: args.municipalityKey,
+    documentType: args.canonicalType,
+    documentSubtype: args.documentSubtype,
+    sourceName: args.sourceName,
+    sourceAuthority: args.sourceAuthority,
+    opposable: args.isOpposable,
+    rawText: args.rawText,
+    rawClassification: args.rawClassification,
+  });
+}
+
+async function materializeConsolidatedMarkdownDocuments(args: {
+  parsed: ParsedConsolidatedMarkdownKnowledge;
+  parentTownHallDocumentId: string;
+  parentBaseIADocumentId: string;
+  sourceFileName: string;
+  uploadBatchId: string;
+  municipalityKey: string;
+  communeAliases: string[];
+  targetCommune: string;
+  userId?: string | null;
+  zoneCode?: string | null;
+}) {
+  const createdDocuments = [];
+
+  for (const logicalDocument of args.parsed.documents) {
+    const logicalFileName = buildLogicalMarkdownFileName(args.sourceFileName, logicalDocument.logicalDocumentIndex);
+    const logicalHash = createHash("sha256")
+      .update(`${args.parentBaseIADocumentId}:${logicalDocument.logicalDocumentIndex}:${logicalDocument.rawText}`)
+      .digest("hex");
+    const canonicalType = logicalDocument.canonicalType === "contextual" ? "other" : logicalDocument.canonicalType;
+
+    const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+      batchId: args.uploadBatchId,
+      municipalityId: args.municipalityKey,
+      zoneCode: args.zoneCode || null,
+      category: logicalDocument.category,
+      subCategory: logicalDocument.subCategory,
+      tags: logicalDocument.tags,
+      type: mapCanonicalTypeToBaseIAType(canonicalType),
+      fileName: logicalFileName,
+      fileHash: logicalHash,
+      status: "parsing",
+      rawText: logicalDocument.rawText,
+    }).returning();
+
+    const structuredContent = buildConsolidatedMarkdownStructuredContent({
+      parsed: args.parsed,
+      parentDocumentId: args.parentTownHallDocumentId,
+      parentBaseIADocumentId: args.parentBaseIADocumentId,
+      baseIADocumentId: baseIADoc.id,
+      logicalDocument,
+      sourceFileName: args.sourceFileName,
+    });
+
+    const [townHallDoc] = await db.insert(townHallDocumentsTable).values({
+      userId: args.userId || null,
+      commune: args.targetCommune,
+      title: logicalDocument.title,
+      fileName: logicalFileName,
+      mimeType: "text/markdown",
+      fileSize: Buffer.byteLength(logicalDocument.rawText, "utf-8"),
+      hasStoredBlob: false,
+      rawText: logicalDocument.rawText,
+      category: logicalDocument.category,
+      subCategory: logicalDocument.subCategory,
+      documentType: logicalDocument.documentType,
+      isRegulatory: true,
+      isOpposable: logicalDocument.isOpposable,
+      tags: logicalDocument.tags,
+      zone: args.zoneCode || null,
+      structuredContent,
+    }).returning({ id: townHallDocumentsTable.id });
+
+    try {
+      await processKnowledgeDocumentThroughPipeline({
+        baseIADocumentId: baseIADoc.id,
+        townHallDocumentId: townHallDoc.id,
+        municipalityKey: args.municipalityKey,
+        communeAliases: args.communeAliases,
+        rawText: logicalDocument.rawText,
+        canonicalType,
+        documentSubtype: logicalDocument.documentType,
+        sourceName: logicalDocument.title,
+        sourceAuthority: logicalDocument.sourceAuthority,
+        isOpposable: logicalDocument.isOpposable,
+        zoneCode: args.zoneCode || null,
+        userId: args.userId || null,
+        rawClassification: {
+          category: logicalDocument.category,
+          subCategory: logicalDocument.subCategory,
+          resolvedDocumentType: logicalDocument.documentType,
+          source: "consolidated_markdown_logical_document",
+          parentTownHallDocumentId: args.parentTownHallDocumentId,
+          parentBaseIADocumentId: args.parentBaseIADocumentId,
+          logicalDocumentIndex: logicalDocument.logicalDocumentIndex,
+          sourceMarkdownHeading: logicalDocument.sourceMarkdownHeading,
+        },
+      });
+
+      await db.update(baseIADocumentsTable)
+        .set({ status: "indexed" })
+        .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+    } catch (err) {
+      logger.error("[mairie/markdown] Logical document indexing failed", err, {
+        parentTownHallDocumentId: args.parentTownHallDocumentId,
+        logicalDocumentIndex: logicalDocument.logicalDocumentIndex,
+      });
+      await db.update(baseIADocumentsTable)
+        .set({ status: "vectorization_failed" })
+        .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+    }
+
+    createdDocuments.push({
+      townHallDocumentId: townHallDoc.id,
+      baseIADocumentId: baseIADoc.id,
+      logicalDocumentIndex: logicalDocument.logicalDocumentIndex,
+      title: logicalDocument.title,
+      sourceMarkdownHeading: logicalDocument.sourceMarkdownHeading,
+    });
+  }
+
+  return createdDocuments;
+}
+
 router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
   try {
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.query.commune as string | undefined);
@@ -1899,6 +2188,7 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
       id: townHallDocumentsTable.id,
       title: townHallDocumentsTable.title,
       fileName: townHallDocumentsTable.fileName,
+      mimeType: townHallDocumentsTable.mimeType,
       hasStoredBlob: townHallDocumentsTable.hasStoredBlob,
       commune: townHallDocumentsTable.commune,
       rawText: townHallDocumentsTable.rawText,
@@ -1906,6 +2196,8 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
       subCategory: townHallDocumentsTable.subCategory,
       documentType: townHallDocumentsTable.documentType,
       isOpposable: townHallDocumentsTable.isOpposable,
+      isRegulatory: townHallDocumentsTable.isRegulatory,
+      structuredContent: townHallDocumentsTable.structuredContent,
       createdAt: townHallDocumentsTable.createdAt,
     }).from(townHallDocumentsTable)
       .where(eq(sql`lower(${townHallDocumentsTable.commune})`, targetCommune.toLowerCase()))
@@ -2026,8 +2318,14 @@ router.get("/plu-knowledge-summary", async (req: AuthRequest, res) => {
         id: doc.id,
         title: doc.title,
         fileName: doc.fileName,
+        mimeType: doc.mimeType,
         documentType: classification.resolved.documentType,
-        opposable: isCanonicalTypeOpposable(classification.canonicalType),
+        opposable: !!doc.isOpposable || isCanonicalTypeOpposable(classification.canonicalType),
+        structuredContent: doc.structuredContent,
+        isConsolidatedMarkdownParent: !!(doc.structuredContent as any)?.isConsolidatedMarkdownParent,
+        isConsolidatedMarkdownPart: !!(doc.structuredContent as any)?.isConsolidatedMarkdownPart,
+        parentDocumentId: (doc.structuredContent as any)?.parentDocumentId || null,
+        sourceMarkdownHeading: (doc.structuredContent as any)?.sourceMarkdownHeading || null,
         hasStoredFile: availability.hasStoredFile,
         availabilityStatus: availability.availabilityStatus,
         availabilityMessage: availability.availabilityMessage,
@@ -2956,6 +3254,10 @@ function shouldRunRegulatoryVision(context: TownHallExtractionContext, currentTe
 }
 
 async function extractTextFromFile(filePath: string, mimetype: string, context: TownHallExtractionContext = {}): Promise<string> {
+  if (isMarkdownUpload(context.originalName || filePath, mimetype)) {
+    return fs.readFileSync(filePath, "utf-8");
+  }
+
   if (mimetype === "application/pdf") {
     const pickBestText = (...candidates: string[]) => {
       const normalizedCandidates = candidates
@@ -3173,11 +3475,28 @@ function getTownHallDocumentAvailability(doc: {
   documentType?: string | null;
   hasVisionAnalysis?: boolean | null;
   hasStoredBlob?: boolean | null;
+  structuredContent?: unknown;
 }) {
   const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
   const hasStoredFile = !!filePath || !!doc.hasStoredBlob;
   const hasExtractedText = hasUsableTownHallText(doc.rawText);
   const textQuality = assessExtractedTextQuality(doc.rawText);
+  if ((doc.structuredContent as any)?.isConsolidatedMarkdownPart) {
+    return {
+      filePath: null,
+      hasStoredFile: false,
+      hasExtractedText,
+      availabilityStatus: hasExtractedText ? "indexed" as const : "processing" as const,
+      availabilityMessage: hasExtractedText
+        ? "Pièce logique extraite du Markdown consolidé et exploitable par l'analyse."
+        : "Pièce logique Markdown créée, indexation texte en cours.",
+      textQualityScore: Math.round(textQuality.score * 100),
+      textQualityLabel: textQuality.label,
+      textQualityMessage: textQuality.message,
+      extractionHint: "written_regulation",
+      hasVisualRegulatoryAnalysis: false,
+    };
+  }
   const lowerType = String(doc.documentType || "").toLowerCase();
   const hasVisualRegulatoryAnalysis = !!doc.hasVisionAnalysis || String(doc.rawText || "").includes("--- ANALYSE VISUELLE REGLEMENTAIRE ---");
   const extractionHint = hasVisualRegulatoryAnalysis
@@ -3243,6 +3562,7 @@ async function resolveTownHallDocumentAvailability(doc: {
   documentType?: string | null;
   hasVisionAnalysis?: boolean | null;
   hasStoredBlob?: boolean | null;
+  structuredContent?: unknown;
 }) {
   const syncAvailability = getTownHallDocumentAvailability(doc);
   if (syncAvailability.hasStoredFile) {
@@ -3269,7 +3589,33 @@ async function maybeSyncTownHallDocumentClassification(doc: {
   subCategory?: string | null;
   documentType?: string | null;
   tags?: unknown;
+  structuredContent?: unknown;
+  isRegulatory?: boolean | null;
+  isOpposable?: boolean | null;
 }) {
+  const structuredContent = doc.structuredContent as Record<string, unknown> | null | undefined;
+  if (structuredContent?.isConsolidatedMarkdownParent || structuredContent?.isConsolidatedMarkdownPart) {
+    const category = doc.category || (structuredContent?.isConsolidatedMarkdownParent ? "CONSOLIDATED" : "REGULATORY");
+    const subCategory = doc.subCategory || (structuredContent?.isConsolidatedMarkdownParent ? "MARKDOWN" : "PLU");
+    const documentType = doc.documentType || (structuredContent?.isConsolidatedMarkdownParent ? "Consolidated Markdown PLU" : "Consolidated Markdown section");
+    const tags = parseDocumentTags(doc.tags);
+    const canonicalType = inferCanonicalDocumentType(documentType, category, subCategory);
+    return {
+      resolved: {
+        category,
+        subCategory,
+        documentType,
+        tags,
+      },
+      canonicalType,
+      isRegulatory: !!doc.isRegulatory || structuredContent?.isConsolidatedMarkdownParent === true || structuredContent?.isConsolidatedMarkdownPart === true,
+      isOpposable: !!doc.isOpposable,
+      autoCorrected: false,
+      suggestionConfidence: "high",
+      suggestionReason: "Classification conservee depuis le Markdown consolide.",
+    };
+  }
+
   const resolved = resolveTownHallClassification({
     rawText: doc.rawText || "",
     fileName: doc.title || doc.fileName || "document",
@@ -3349,6 +3695,97 @@ async function queueTownHallDocumentIndexing(args: {
       const canonicalType = inferCanonicalDocumentType(documentType, category, subCategory);
       const isOpposable = isCanonicalTypeOpposable(canonicalType);
       const isRegulatory = isRegulatoryLikeDocument(documentType, category, subCategory);
+
+      const parsedMarkdown = isMarkdownUpload(args.originalName, args.mimeType)
+        ? parseConsolidatedMarkdownKnowledge(rawText, args.originalName)
+        : null;
+      if (parsedMarkdown) {
+        const resolvedInseeCode = await resolveInseeCode(args.targetCommune || parsedMarkdown.metadata.commune || "");
+        const municipalityKey = parsedMarkdown.metadata.inseeCode || resolvedInseeCode || args.targetCommune || parsedMarkdown.metadata.commune || "";
+        if (!municipalityKey) {
+          throw new Error("Impossible de rattacher le Markdown consolide a une commune.");
+        }
+        const targetCommune = parsedMarkdown.metadata.commune || args.targetCommune || municipalityKey;
+        const communeAliases = Array.from(new Set([
+          targetCommune,
+          parsedMarkdown.metadata.commune || parsedMarkdown.metadata.inseeCode ? null : args.targetCommune,
+          parsedMarkdown.metadata.commune,
+          parsedMarkdown.metadata.inseeCode,
+          resolvedInseeCode,
+        ].filter((value): value is string => !!value)));
+        const uploadBatchId = crypto.randomUUID();
+        const fileHash = createHash("sha256").update(rawText).digest("hex");
+        const [parentBaseIADoc] = await db.insert(baseIADocumentsTable).values({
+          batchId: uploadBatchId,
+          municipalityId: municipalityKey,
+          zoneCode: args.zone || null,
+          category: "CONSOLIDATED",
+          subCategory: "MARKDOWN",
+          tags: Array.from(new Set([...tags, "markdown-consolide", "source-parent"])),
+          type: "other",
+          fileName: path.basename(args.persistentPath),
+          fileHash,
+          status: "indexed",
+          rawText,
+        }).returning();
+
+        const structuredContent = buildConsolidatedMarkdownStructuredContent({
+          parsed: parsedMarkdown,
+          baseIADocumentId: parentBaseIADoc.id,
+          sourceFileName: args.originalName,
+        });
+
+        await db.update(townHallDocumentsTable)
+          .set({
+            rawText,
+            commune: targetCommune,
+            category: "CONSOLIDATED",
+            subCategory: "MARKDOWN",
+            documentType: "Consolidated Markdown PLU",
+            tags: Array.from(new Set([...tags, "markdown-consolide", "source-parent"])),
+            isRegulatory: true,
+            isOpposable: false,
+            structuredContent,
+            updatedAt: new Date(),
+          })
+          .where(eq(townHallDocumentsTable.id, args.docId));
+
+        await upsertConsolidatedMarkdownPrompt({
+          communeAliases,
+          promptBlock: parsedMarkdown.promptBlock,
+          sourceName: args.originalName,
+        });
+
+        const children = await materializeConsolidatedMarkdownDocuments({
+          parsed: parsedMarkdown,
+          parentTownHallDocumentId: args.docId,
+          parentBaseIADocumentId: parentBaseIADoc.id,
+          sourceFileName: args.originalName,
+          uploadBatchId,
+          municipalityKey,
+          communeAliases,
+          targetCommune,
+          userId: args.userId || null,
+          zoneCode: args.zone || null,
+        });
+
+        await db.update(townHallDocumentsTable)
+          .set({
+            structuredContent: {
+              ...structuredContent,
+              extractedLogicalDocuments: children,
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(townHallDocumentsTable.id, args.docId));
+
+        logger.info("[mairie/markdown] Consolidated Markdown indexed", {
+          docId: args.docId,
+          logicalDocumentCount: children.length,
+          municipalityKey,
+        });
+        return;
+      }
 
       await db.update(townHallDocumentsTable)
         .set({
@@ -3752,11 +4189,17 @@ router.get("/documents", async (req: AuthRequest, res) => {
         fileName: d.fileName,
         createdAt: d.createdAt,
         commune: d.commune,
+        mimeType: d.mimeType,
         category: classification.resolved.category,
         subCategory: classification.resolved.subCategory,
         documentType: classification.resolved.documentType,
         explanatoryNote: d.explanatoryNote,
         tags: d.tags,
+        structuredContent: d.structuredContent,
+        isConsolidatedMarkdownParent: !!(d.structuredContent as any)?.isConsolidatedMarkdownParent,
+        isConsolidatedMarkdownPart: !!(d.structuredContent as any)?.isConsolidatedMarkdownPart,
+        parentDocumentId: (d.structuredContent as any)?.parentDocumentId || null,
+        sourceMarkdownHeading: (d.structuredContent as any)?.sourceMarkdownHeading || null,
         hasStoredFile: availability.hasStoredFile,
         hasExtractedText: availability.hasExtractedText,
         availabilityStatus: availability.availabilityStatus,
@@ -7255,6 +7698,52 @@ router.post("/documents/batch", upload.array("files", 10), async (req: AuthReque
             continue;
           }
 
+          if (isMarkdownUpload(file.originalname, file.mimetype)) {
+            const requestedTags = req.body.tags ? JSON.parse(req.body.tags) : [];
+            const [townHallDoc] = await db.insert(townHallDocumentsTable).values({
+              userId: req.user!.userId,
+              commune: targetCommune || null,
+              title: req.body.title || file.originalname,
+              fileName: storedFileName,
+              mimeType: file.mimetype || "text/markdown",
+              fileSize: content.length,
+              hasStoredBlob: true,
+              rawText: "",
+              category: req.body.category || null,
+              subCategory: req.body.subCategory || null,
+              documentType: req.body.documentType || null,
+              isRegulatory: true,
+              isOpposable: false,
+              tags: requestedTags,
+              zone: req.body.zone || null,
+            }).returning({ id: townHallDocumentsTable.id });
+
+            await db.insert(townHallDocumentFilesTable).values({
+              documentId: townHallDoc.id,
+              mimeType: file.mimetype || "text/markdown",
+              fileSize: content.length,
+              fileBase64: content.toString("base64"),
+            });
+
+            await queueTownHallDocumentIndexing({
+              docId: townHallDoc.id,
+              persistentPath,
+              mimeType: file.mimetype || "text/markdown",
+              originalName: file.originalname,
+              targetCommune: targetCommune || "",
+              userId: req.user!.userId,
+              category: req.body.category || null,
+              subCategory: req.body.subCategory || null,
+              documentType: req.body.documentType || null,
+              requestedTags,
+              zone: req.body.zone || null,
+            });
+
+            results.push({ fileName: file.originalname, status: "processing", id: townHallDoc.id });
+            try { fs.unlinkSync(file.path); } catch {}
+            continue;
+          }
+
           const rawText = await extractTextFromFile(persistentPath, file.mimetype, {
             originalName: file.originalname,
             documentType: req.body.documentType || null,
@@ -7561,15 +8050,33 @@ router.delete("/documents/:id", async (req: AuthRequest, res) => {
       return res.status(403).json({ error: "FORBIDDEN", message: "Accès refusé pour cette commune." });
     }
 
-    const cleanupSummary = await purgeTownHallDocumentStructuredKnowledge(doc.id);
-    await db.delete(townHallDocumentsTable).where(eq(townHallDocumentsTable.id, id));
+    const childDocs = await db.select({
+      id: townHallDocumentsTable.id,
+      fileName: townHallDocumentsTable.fileName,
+    })
+      .from(townHallDocumentsTable)
+      .where(sql`${townHallDocumentsTable.structuredContent}->>'parentDocumentId' = ${doc.id}`);
+    const docsToDelete = [
+      ...childDocs,
+      doc,
+    ];
+    const docIdsToDelete = Array.from(new Set(docsToDelete.map((item) => item.id)));
 
-    const filePath = resolveTownHallDocumentPath(doc.id, doc.fileName);
-    if (filePath && fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch {}
+    const cleanupSummaries = [];
+    for (const docId of docIdsToDelete) {
+      cleanupSummaries.push(await purgeTownHallDocumentStructuredKnowledge(docId));
     }
 
-    return res.json({ success: true, cleanupSummary });
+    await db.delete(townHallDocumentsTable).where(inArray(townHallDocumentsTable.id, docIdsToDelete));
+
+    for (const fileDoc of docsToDelete) {
+      const filePath = resolveTownHallDocumentPath(fileDoc.id, fileDoc.fileName);
+      if (filePath && fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch {}
+      }
+    }
+
+    return res.json({ success: true, deletedDocuments: docIdsToDelete.length, cleanupSummary: cleanupSummaries });
   } catch(err) {
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }

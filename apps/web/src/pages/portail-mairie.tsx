@@ -1198,6 +1198,15 @@ function formatUploadBytes(bytes: number) {
   return `${bytes} o`;
 }
 
+function isMarkdownDocumentName(fileName: string | null | undefined) {
+  return /\.(md|markdown)$/i.test(fileName || "");
+}
+
+function inferTownHallUploadMimeType(file: File) {
+  if (isMarkdownDocumentName(file.name)) return file.type || "text/markdown";
+  return file.type || "application/pdf";
+}
+
 function BaseIASection({ currentCommune }: { currentCommune: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1381,13 +1390,14 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
 
   const startUpload = async ({ files, category, subCategory, docType }: { files: File[], category?: string, subCategory?: string, docType?: string }) => {
     for (const file of files) {
+      const mimeType = inferTownHallUploadMimeType(file);
       const initResponse = await fetch("/api/mairie/documents/uploads/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileName: file.name,
           fileSize: file.size,
-          mimeType: file.type || "application/pdf",
+          mimeType,
           category,
           subCategory,
           documentType: docType,
@@ -1403,7 +1413,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         sessionId: initData.sessionId,
         fileName: file.name,
         fileSize: file.size,
-        mimeType: file.type || "application/pdf",
+        mimeType,
         commune: initData.targetCommune || currentCommune,
         category,
         subCategory,
@@ -1689,7 +1699,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         type="file"
         className="hidden"
         multiple
-        accept=".pdf"
+        accept=".pdf,.md,.markdown,application/pdf,text/markdown,text/x-markdown"
         onChange={(e) => {
           const files = e.target.files;
           if (!files || files.length === 0) return;
@@ -1707,7 +1717,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             Base de Connaissances Urbanisme
           </h2>
           <p className="text-muted-foreground">
-            Structurez les documents réglementaires pour {currentCommune === "all" ? "tous les territoires" : `la commune de ${currentCommune}`}.
+            Importez des PDF ou Markdown consolidés pour enrichir automatiquement la connaissance de {currentCommune === "all" ? "tous les territoires" : `la commune de ${currentCommune}`}.
           </p>
         </div>
         
@@ -1719,7 +1729,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
             disabled={hasRunningUploads || currentCommune === "all"}
           >
             <UploadCloud className="w-4 h-4 text-primary" />
-            Importer des documents
+            Importer PDF ou Markdown
           </Button>
 
           <Button
@@ -2496,6 +2506,11 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   <p className="text-[11px] text-muted-foreground truncate">
                     {doc.category} / {doc.subCategory} / {doc.documentType}
                   </p>
+                  {(doc.isConsolidatedMarkdownParent || doc.isConsolidatedMarkdownPart) && (
+                    <p className="text-[10px] text-primary font-medium truncate">
+                      {doc.isConsolidatedMarkdownParent ? "Markdown consolidé source" : `Pièce extraite · ${doc.sourceMarkdownHeading || "Document logique"}`}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {doc.textQualityLabel && (
@@ -2590,6 +2605,11 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                                       </div>
                                       <div className="flex flex-col min-w-0">
                                         <span className="text-[11px] truncate font-bold text-foreground/90">{doc.title}</span>
+                                        {(doc.isConsolidatedMarkdownParent || doc.isConsolidatedMarkdownPart) && (
+                                          <span className="text-[9px] truncate text-primary font-semibold">
+                                            {doc.isConsolidatedMarkdownParent ? "Markdown consolidé" : "Pièce Markdown extraite"}
+                                          </span>
+                                        )}
                                         {doc.explanatoryNote && (
                                           <p className="text-[9px] text-muted-foreground truncate italic">{doc.explanatoryNote}</p>
                                         )}
@@ -2657,7 +2677,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                   size="sm"
                   className="h-8 gap-2"
                   onClick={() => window.open(`/api/mairie/documents/${selectedDoc?.id}/view`, '_blank')}
-                  disabled={selectedDoc?.hasStoredFile === false}
+                  disabled={selectedDoc?.hasStoredFile === false || selectedDoc?.isConsolidatedMarkdownPart}
                 >
                   <Zap className="w-3.5 h-3.5" /> Ouvrir plein écran
                 </Button>
@@ -2682,7 +2702,23 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           <div className="flex-1 flex overflow-hidden">
             {/* GAUCHE: PDF PREVIEW */}
             <div className="flex-1 bg-muted/30 relative">
-              {selectedDoc?.hasStoredFile === false ? (
+              {selectedDoc?.isConsolidatedMarkdownPart ? (
+                <div className="absolute inset-0 overflow-auto p-8">
+                  <div className="mx-auto max-w-4xl rounded-2xl border bg-background shadow-sm">
+                    <div className="border-b px-5 py-3">
+                      <p className="text-sm font-semibold">Pièce virtuelle issue du Markdown consolidé</p>
+                      <p className="text-xs text-muted-foreground">
+                        Cette pièce n'a pas de PDF séparé : elle est indexée depuis le document parent et enrichit la Base IA comme source logique.
+                      </p>
+                    </div>
+                    <div className="max-h-[78vh] overflow-auto px-5 py-4">
+                      <pre className="whitespace-pre-wrap text-xs leading-6 text-foreground/90">
+                        {selectedDoc.rawTextPreview || "Aucun extrait texte disponible."}
+                      </pre>
+                    </div>
+                  </div>
+                </div>
+              ) : selectedDoc?.hasStoredFile === false ? (
                 <div className="absolute inset-0 overflow-auto p-8">
                   <div className="mx-auto flex h-full max-w-4xl flex-col gap-6">
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800 shadow-sm">
@@ -2712,6 +2748,22 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                         Aucun extrait texte n'est disponible pour ce document. Une réimportation du fichier est recommandée.
                       </div>
                     )}
+                  </div>
+                </div>
+              ) : selectedDoc && (selectedDoc.mimeType?.includes("markdown") || isMarkdownDocumentName(selectedDoc.fileName)) ? (
+                <div className="absolute inset-0 overflow-auto p-8">
+                  <div className="mx-auto max-w-4xl rounded-2xl border bg-background shadow-sm">
+                    <div className="border-b px-5 py-3">
+                      <p className="text-sm font-semibold">Markdown consolidé source</p>
+                      <p className="text-xs text-muted-foreground">
+                        Les pièces logiques extraites de ce fichier alimentent automatiquement les zones, articles, OAP, annexes et renvois.
+                      </p>
+                    </div>
+                    <div className="max-h-[78vh] overflow-auto px-5 py-4">
+                      <pre className="whitespace-pre-wrap text-xs leading-6 text-foreground/90">
+                        {selectedDoc.rawTextPreview || "Chargement de l'extrait Markdown..."}
+                      </pre>
+                    </div>
                   </div>
                 </div>
               ) : selectedDoc ? (
