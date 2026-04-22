@@ -212,8 +212,20 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isPlausibleBuildabilityHeight(value: unknown): value is number {
-  return isFiniteNumber(value) && value > 0 && value <= 80 && !(value >= 1900 && value <= 2099);
+function isPlausibleBuildabilityHeight(value: unknown, sourceDetail?: BuildabilitySourceDetail | null): value is number {
+  if (!isFiniteNumber(value) || value <= 0 || value > 80 || (value >= 1900 && value <= 2099)) return false;
+  const sourceText = [
+    sourceDetail?.sourceExcerpt,
+    sourceDetail?.ruleLabel,
+    sourceDetail?.ruleTopic,
+  ].map((part) => String(part || "")).join(" ");
+  if (
+    /cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/i.test(sourceText)
+    && !/construction(?:s)?|b[aâ]timent(?:s)?|fa[iî]tage|[ée]gout|acrot[eè]re|toiture/i.test(sourceText)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function formatSafeGreenSpaceRequirement(value: unknown) {
@@ -828,12 +840,13 @@ export default function AnalysisDetailPage() {
     derivedHelper: "Potentiel calculé, mais au moins une variable réglementaire reste partielle.",
   });
 
+  const heightSourceDetail = buildabilitySourceDetails.height ?? null;
   const heightEvidence = buildEvidenceState({
-    value: isPlausibleBuildabilityHeight(buildability?.maxHeightM) ? buildability?.maxHeightM : null,
-    formattedValue: isPlausibleBuildabilityHeight(buildability?.maxHeightM) ? `${buildability.maxHeightM} m` : "Non déterminé",
+    value: isPlausibleBuildabilityHeight(buildability?.maxHeightM, heightSourceDetail) ? buildability?.maxHeightM : null,
+    formattedValue: isPlausibleBuildabilityHeight(buildability?.maxHeightM, heightSourceDetail) ? `${buildability.maxHeightM} m` : "Non déterminé",
     explicitRuleFound: isPlausibleBuildabilityHeight(calcVariables.maxHeightM),
     defaultApplied: assumptionFlags.heightDefault,
-    sourceDetail: buildabilitySourceDetails.height ?? null,
+    sourceDetail: heightSourceDetail,
     explicitHelper: "Hauteur maximale issue d'une règle opposable retrouvée pour la zone.",
   });
 

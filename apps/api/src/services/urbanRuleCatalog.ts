@@ -55,7 +55,18 @@ function isPlausibleBuildingHeight(value: number | null, text: string) {
   if (value == null || !Number.isFinite(value)) return false;
   if (value <= 0 || value > 80) return false;
   if (value >= 1900 && value <= 2099) return false;
-  return !/\bngf\b|altitude|cote altim[eé]trique/i.test(text);
+  if (/\bngf\b|altitude|cote altim[eé]trique/i.test(text)) return false;
+  if (isSecondaryObjectHeightContext(text)) return false;
+  return true;
+}
+
+function isSecondaryObjectHeightContext(text: string) {
+  const normalized = text.toLowerCase();
+  const hasSecondaryObject = /cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/.test(normalized);
+  if (!hasSecondaryObject) return false;
+
+  // Keep genuine building-height rules even if they mention fences elsewhere.
+  return !/construction(?:s)?|b[aâ]timent(?:s)?|fa[iî]tage|[ée]gout|acrot[eè]re|toiture/.test(normalized);
 }
 
 export function confidenceToScore(level: string | null | undefined): number {
@@ -127,6 +138,9 @@ export function inferUrbanRuleDescriptor(args: {
       return { family: "green_space", topic: "green_space", label: "Espaces verts & pleine terre", priority: 90 };
   }
 
+  if (/cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/.test(haystack)) {
+    return { family: "facade_roof_aspect", topic: "facade_roof_aspect", label: "Aspect extérieur", priority: 65 };
+  }
   if (/hauteur|gabarit|fa[iî]tage|acrot[eè]re|[ée]gout/.test(haystack)) {
     return { family: "height", topic: "height", label: "Hauteur", priority: 95 };
   }
@@ -199,7 +213,16 @@ export function extractRuleValues(sourceText: string, descriptor: UrbanRuleDescr
       : meterValues;
     const first = plausibleHeightValues[0] ?? null;
     const second = plausibleHeightValues[1] ?? null;
-    if (/(entre|compris entre|de .* à)/i.test(text) && first != null && second != null) {
+    if (
+      descriptor.family === "height"
+      && plausibleHeightValues.length > 1
+      && /\/|fa[iî]tage|[ée]gout|acrot[eè]re/i.test(text)
+    ) {
+      valueMin = Math.min(...plausibleHeightValues);
+      valueMax = Math.max(...plausibleHeightValues);
+      valueType = "range";
+      unit = "m";
+    } else if (/(entre|compris entre|de .* à)/i.test(text) && first != null && second != null) {
       valueMin = Math.min(first, second);
       valueMax = Math.max(first, second);
       valueType = "range";

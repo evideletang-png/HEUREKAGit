@@ -143,7 +143,14 @@ function isPlausibleBuildingHeight(value: number, text: string) {
   if (!Number.isFinite(value)) return false;
   if (value <= 0 || value > 80) return false;
   if (value >= 1900 && value <= 2099) return false;
-  return !/\bngf\b|altitude|cote altim[eé]trique/i.test(text);
+  if (/\bngf\b|altitude|cote altim[eé]trique/i.test(text)) return false;
+  if (
+    /cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/i.test(text)
+    && !/construction(?:s)?|b[aâ]timent(?:s)?|fa[iî]tage|[ée]gout|acrot[eè]re|toiture/i.test(text)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function getSourcePageWeight(rule: StructuredUrbanRuleSource) {

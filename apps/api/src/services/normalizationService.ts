@@ -586,6 +586,12 @@ export class NormalizationService {
     if (value >= 1900 && value <= 2099) return false;
     const normalized = text.toLowerCase();
     if (/\bngf\b|altitude|cote altim[eé]trique/.test(normalized)) return false;
+    if (
+      /cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/.test(normalized)
+      && !/construction(?:s)?|b[aâ]timent(?:s)?|fa[iî]tage|[ée]gout|acrot[eè]re|toiture/.test(normalized)
+    ) {
+      return false;
+    }
     return true;
   }
 }
