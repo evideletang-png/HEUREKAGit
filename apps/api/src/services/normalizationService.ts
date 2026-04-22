@@ -44,6 +44,7 @@ type StructuredUrbanRuleLike = {
   ruleUnit?: string | null;
   ruleCondition?: string | null;
   ruleException?: string | null;
+  rawMetadata?: unknown;
 };
 
 /**
@@ -149,6 +150,12 @@ export class NormalizationService {
       if (!family) continue;
 
       const rawText = String(rule.ruleTextRaw ?? rule.ruleSummary ?? "").trim();
+      const rawMetadata = rule.rawMetadata && typeof rule.rawMetadata === "object"
+        ? rule.rawMetadata as Record<string, unknown>
+        : {};
+      if (rawMetadata.excluded_from_buildability === true) {
+        continue;
+      }
       const applied = this.applyStructuredRule(params, family, rawText, {
         valueType: rule.ruleValueType,
         valueMin: rule.ruleValueMin,

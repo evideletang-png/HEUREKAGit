@@ -171,20 +171,28 @@ function getSourcePageWeight(rule: StructuredUrbanRuleSource) {
 }
 
 function getCandidateRules(rules: StructuredUrbanRuleSource[], field: BuildabilityFieldKey) {
+  const usableRules = rules.filter((rule) => {
+    const rawMetadata = (rule as { rawMetadata?: unknown }).rawMetadata;
+    const metadata = rawMetadata && typeof rawMetadata === "object"
+      ? rawMetadata as Record<string, unknown>
+      : {};
+    return metadata.excluded_from_buildability !== true;
+  });
+
   switch (field) {
     case "footprint":
     case "remainingFootprint":
-      return rules.filter((rule) => rule.ruleFamily === "footprint");
+      return usableRules.filter((rule) => rule.ruleFamily === "footprint");
     case "height":
-      return rules.filter((rule) => rule.ruleFamily === "height");
+      return usableRules.filter((rule) => rule.ruleFamily === "height");
     case "setbackRoad":
-      return rules.filter((rule) => rule.ruleFamily === "setback_public");
+      return usableRules.filter((rule) => rule.ruleFamily === "setback_public");
     case "setbackBoundary":
-      return rules.filter((rule) => rule.ruleFamily === "setback_side" || rule.ruleFamily === "setback_rear");
+      return usableRules.filter((rule) => rule.ruleFamily === "setback_side" || rule.ruleFamily === "setback_rear");
     case "parking":
-      return rules.filter((rule) => rule.ruleFamily === "parking");
+      return usableRules.filter((rule) => rule.ruleFamily === "parking");
     case "greenSpace":
-      return rules.filter((rule) => rule.ruleFamily === "green_space");
+      return usableRules.filter((rule) => rule.ruleFamily === "green_space");
     default:
       return [];
   }

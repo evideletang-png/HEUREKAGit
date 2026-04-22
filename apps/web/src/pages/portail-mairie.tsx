@@ -1202,8 +1202,13 @@ function isMarkdownDocumentName(fileName: string | null | undefined) {
   return /\.(md|markdown)$/i.test(fileName || "");
 }
 
+function isJsonDocumentName(fileName: string | null | undefined) {
+  return /\.json$/i.test(fileName || "");
+}
+
 function inferTownHallUploadMimeType(file: File) {
   if (isMarkdownDocumentName(file.name)) return file.type || "text/markdown";
+  if (isJsonDocumentName(file.name)) return file.type || "application/json";
   return file.type || "application/pdf";
 }
 
@@ -1699,7 +1704,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         type="file"
         className="hidden"
         multiple
-        accept=".pdf,.md,.markdown,application/pdf,text/markdown,text/x-markdown"
+        accept=".pdf,.md,.markdown,.json,application/pdf,text/markdown,text/x-markdown,application/json"
         onChange={(e) => {
           const files = e.target.files;
           if (!files || files.length === 0) return;
@@ -2748,6 +2753,22 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                         Aucun extrait texte n'est disponible pour ce document. Une réimportation du fichier est recommandée.
                       </div>
                     )}
+                  </div>
+                </div>
+              ) : selectedDoc && (selectedDoc.mimeType?.includes("json") || isJsonDocumentName(selectedDoc.fileName)) ? (
+                <div className="absolute inset-0 overflow-auto p-8">
+                  <div className="mx-auto max-w-4xl rounded-2xl border bg-background shadow-sm">
+                    <div className="border-b px-5 py-3">
+                      <p className="text-sm font-semibold">PLU structure source</p>
+                      <p className="text-xs text-muted-foreground">
+                        Les articles complets et les règles normalisées alimentent automatiquement Règles & preuves, Constructibilité et l'assistant.
+                      </p>
+                    </div>
+                    <div className="max-h-[78vh] overflow-auto px-5 py-4">
+                      <pre className="whitespace-pre-wrap text-xs leading-6 text-foreground/90">
+                        {selectedDoc.rawTextPreview || "Chargement de l'extrait JSON..."}
+                      </pre>
+                    </div>
                   </div>
                 </div>
               ) : selectedDoc && (selectedDoc.mimeType?.includes("markdown") || isMarkdownDocumentName(selectedDoc.fileName)) ? (

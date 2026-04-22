@@ -18,6 +18,7 @@ import {
 } from "./urbanRuleCatalog.js";
 import { buildZoneCodeAliases } from "./pluAnalysis.js";
 import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "./municipalityAliasService.js";
+import type { StructuredPluRule } from "./structuredPluBundleService.js";
 
 type PersistUrbanRulesForDocumentArgs = {
   baseIADocumentId?: string | null;
@@ -580,6 +581,163 @@ function getSourceExcerpt(text: string) {
   return `${normalized.slice(0, 517)}...`;
 }
 
+function getStructuredParsedRules(parsedValues: unknown): StructuredPluRule[] {
+  if (!parsedValues || typeof parsedValues !== "object") return [];
+  const rules = (parsedValues as Record<string, unknown>).parsed_rules;
+  return Array.isArray(rules) ? rules.filter((rule): rule is StructuredPluRule => !!rule && typeof rule === "object") : [];
+}
+
+const STRUCTURED_TOPIC_TO_FAMILY: Record<string, string> = {
+  max_footprint: "footprint",
+  building_height: "height",
+  fence_height: "facade_roof_aspect",
+  wall_height: "facade_roof_aspect",
+  hedge_height: "facade_roof_aspect",
+  portal_height: "facade_roof_aspect",
+  road_setback: "setback_public",
+  boundary_setback: "setback_side",
+  rear_setback: "setback_rear",
+  internal_spacing: "setback_between_buildings",
+  pool_boundary_setback: "setback_side",
+  green_space: "green_space",
+  tree_planting: "green_space",
+  parking: "parking",
+  access: "access_roads",
+  network: "networks",
+  usage: "land_use_restrictions",
+  condition: "land_use_restrictions",
+  risk: "risk_restrictions",
+  overlay: "risk_restrictions",
+  article_status: "specific_zone_rules",
+};
+
+const STRUCTURED_TOPIC_PRIORITY: Record<string, number> = {
+  max_footprint: 95,
+  building_height: 95,
+  road_setback: 92,
+  boundary_setback: 92,
+  rear_setback: 90,
+  internal_spacing: 88,
+  green_space: 90,
+  parking: 82,
+  fence_height: 45,
+  wall_height: 45,
+  hedge_height: 45,
+  portal_height: 45,
+  tree_planting: 42,
+  pool_boundary_setback: 40,
+};
+
+function valueTypeForStructuredRule(rule: StructuredPluRule) {
+  if (rule.status === "non_reglemente" || rule.status === "not_found" || rule.status === "non_applicable") return null;
+  if (rule.alternatives.length > 0 && rule.value == null) return "alternatives";
+  if (rule.value == null) return rule.source_text ? "text" : null;
+  if (["building_height", "fence_height", "wall_height", "hedge_height", "portal_height", "max_footprint"].includes(rule.topic)) return "max";
+  if (["green_space", "road_setback", "boundary_setback", "rear_setback", "internal_spacing", "pool_boundary_setback"].includes(rule.topic)) return "min";
+  return "exact";
+}
+
+function numericFieldsForStructuredRule(rule: StructuredPluRule) {
+  const valueType = valueTypeForStructuredRule(rule);
+  if (rule.value == null || valueType === null || valueType === "text" || valueType === "alternatives") {
+    return { valueType, valueMin: null, valueMax: null, valueExact: null };
+  }
+
+  if (valueType === "max") {
+    return { valueType, valueMin: null, valueMax: rule.value, valueExact: null };
+  }
+  if (valueType === "min") {
+    return { valueType, valueMin: rule.value, valueMax: null, valueExact: null };
+  }
+  return { valueType, valueMin: null, valueMax: null, valueExact: rule.value };
+}
+
+function structuredRuleSummary(rule: StructuredPluRule) {
+  if (rule.value_components.length > 0) {
+    return rule.value_components
+      .map((component) => `${component.label}: ${String(component.value).replace(".", ",")} ${component.unit}`)
+      .join(" / ");
+  }
+  if (rule.alternatives.length > 0) {
+    return rule.alternatives
+      .map((alternative) => String(alternative.display || alternative.type || "alternative"))
+      .filter(Boolean)
+      .join(" OU ");
+  }
+  if (rule.value != null) return `${String(rule.value).replace(".", ",")} ${rule.unit || ""}`.trim();
+  if (rule.status === "non_reglemente") return "Non réglementé";
+  return truncateSourceExcerpt(rule.source_text) || rule.label;
+}
+
+function buildUrbanRuleFromStructuredRule(args: {
+  rule: StructuredPluRule;
+  unit: typeof regulatoryUnitsTable.$inferSelect;
+  persistenceArgs: PersistUrbanRulesForDocumentArgs;
+  sourceIdentity: ReturnType<typeof extractSourceDocumentIdentity>;
+}): typeof urbanRulesTable.$inferInsert {
+  const { rule, unit, persistenceArgs, sourceIdentity } = args;
+  const parentZoneCode = rule.parent_zone_code || getParentZoneFromParsedValues(unit.parsedValues);
+  const exactZoneCode = rule.zone_code || unit.zoneCode?.trim() || null;
+  const isSubZone = !!parentZoneCode && exactZoneCode && parentZoneCode !== exactZoneCode;
+  const confidenceScore = confidenceToScore(rule.confidence || unit.confidence);
+  const values = numericFieldsForStructuredRule(rule);
+  const requiresManualValidation =
+    rule.confidence === "low"
+    || rule.status === "unknown"
+    || rule.status === "cross_document_required"
+    || !exactZoneCode;
+
+  return {
+    baseIADocumentId: persistenceArgs.baseIADocumentId || null,
+    townHallDocumentId: persistenceArgs.townHallDocumentId || null,
+    sourceDocumentId: sourceIdentity.sourceDocumentId,
+    sourceDocumentKind: sourceIdentity.sourceDocumentKind,
+    municipalityId: persistenceArgs.municipalityId,
+    zoneCode: exactZoneCode,
+    subzoneCode: isSubZone ? exactZoneCode : null,
+    sectorCode: null,
+    ruleFamily: STRUCTURED_TOPIC_TO_FAMILY[rule.topic] || "specific_zone_rules",
+    ruleTopic: rule.topic,
+    ruleLabel: rule.label,
+    ruleTextRaw: rule.source_text || unit.sourceText,
+    ruleSummary: structuredRuleSummary(rule),
+    ruleValueType: values.valueType,
+    ruleValueMin: values.valueMin,
+    ruleValueMax: values.valueMax,
+    ruleValueExact: values.valueExact,
+    ruleUnit: rule.unit,
+    ruleCondition: rule.condition,
+    ruleException: rule.exception,
+    rulePriority: STRUCTURED_TOPIC_PRIORITY[rule.topic] ?? 70,
+    sourcePage: getSourcePageFromParsedValues(unit.parsedValues),
+    sourceArticle: `Article ${rule.article_code}`,
+    sourceExcerpt: getSourceExcerpt(rule.source_text || unit.sourceText),
+    sourceAuthority: persistenceArgs.sourceAuthority ?? unit.sourceAuthority,
+    isOpposable: persistenceArgs.isOpposable ?? unit.isOpposable,
+    confidenceScore,
+    extractionMode: persistenceArgs.extractionMode || "structured_plu_parsed_rule",
+    requiresManualValidation,
+    reviewStatus: unit.reviewStatus,
+    validatedByUser: unit.reviewedBy || null,
+    validationNote: unit.reviewNotes || null,
+    rawMetadata: {
+      regulatory_unit_id: unit.id,
+      unit_theme: unit.theme,
+      article_number: unit.articleNumber,
+      parent_zone_code: parentZoneCode,
+      document_type: persistenceArgs.documentType || unit.documentType,
+      parsed_values: unit.parsedValues || {},
+      parsed_rule: rule,
+      excluded_from_buildability: rule.excluded_from_buildability,
+      applies_to: rule.applies_to,
+      alternatives: rule.alternatives,
+      value_components: rule.value_components,
+      rule_status: rule.status,
+    },
+    updatedAt: new Date(),
+  };
+}
+
 function valuesConflict(left: typeof urbanRulesTable.$inferSelect, right: typeof urbanRulesTable.$inferSelect) {
   const exactLeft = left.ruleValueExact;
   const exactRight = right.ruleValueExact;
@@ -618,7 +776,17 @@ export async function persistUrbanRulesForDocument(args: PersistUrbanRulesForDoc
 
   const sourceIdentity = extractSourceDocumentIdentity(args);
 
-  const records = units.map((unit) => {
+  const records: Array<typeof urbanRulesTable.$inferInsert> = units.flatMap((unit): Array<typeof urbanRulesTable.$inferInsert> => {
+    const structuredRules = getStructuredParsedRules(unit.parsedValues);
+    if (structuredRules.length > 0) {
+      return structuredRules.map((rule) => buildUrbanRuleFromStructuredRule({
+        rule,
+        unit,
+        persistenceArgs: args,
+        sourceIdentity,
+      }));
+    }
+
     const descriptor = inferUrbanRuleDescriptor(unit);
     const values = extractRuleValues(unit.sourceText, descriptor);
     const parentZoneCode = getParentZoneFromParsedValues(unit.parsedValues);
@@ -631,7 +799,7 @@ export async function persistUrbanRulesForDocument(args: PersistUrbanRulesForDoc
       || !exactZoneCode
       || descriptor.family === "specific_zone_rules";
 
-    return {
+    return [{
       baseIADocumentId: args.baseIADocumentId || null,
       townHallDocumentId: args.townHallDocumentId || null,
       sourceDocumentId: sourceIdentity.sourceDocumentId,
@@ -673,7 +841,7 @@ export async function persistUrbanRulesForDocument(args: PersistUrbanRulesForDoc
         parsed_values: unit.parsedValues || {},
       },
       updatedAt: new Date(),
-    };
+    }];
   });
 
   const inserted = await db.insert(urbanRulesTable).values(records).returning();
@@ -707,6 +875,11 @@ export async function persistUrbanRulesForDocument(args: PersistUrbanRulesForDoc
       if (left.id === right.id) continue;
       if (!left.zoneCode || !right.zoneCode || left.zoneCode !== right.zoneCode) continue;
       if (left.ruleFamily !== right.ruleFamily || left.ruleTopic !== right.ruleTopic) continue;
+      if (left.extractionMode === "structured_plu_parsed_rule" || right.extractionMode === "structured_plu_parsed_rule") {
+        // The structured PLU bundle is the canonical layer; keep it visible and let ordering prefer it
+        // over older snippet-based rules instead of hiding both as conflicts.
+        continue;
+      }
       if (!valuesConflict(left, right)) continue;
 
       const ordered = [left.id, right.id].sort();

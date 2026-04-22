@@ -50,6 +50,13 @@ import {
   type ConsolidatedMarkdownLogicalDocument,
   type ParsedConsolidatedMarkdownKnowledge,
 } from "../services/consolidatedMarkdownKnowledgeService.js";
+import {
+  buildStructuredPluBundleStructuredContent,
+  isStructuredPluJsonUpload,
+  parseStructuredPluBundle,
+  renderStructuredPluBundleText,
+  type StructuredPluBundle,
+} from "../services/structuredPluBundleService.js";
 import { buildMunicipalityTextFilter, normalizeMunicipalityName } from "../services/municipalityAliasService.js";
 import {
   REGULATORY_ARTICLE_REFERENCE,
@@ -2034,6 +2041,40 @@ async function ensureMarkdownMunicipalitySettings(parsed: ParsedConsolidatedMark
   }
 }
 
+async function ensureStructuredPluMunicipalitySettings(bundle: StructuredPluBundle) {
+  const commune = bundle.commune?.trim();
+  const inseeCode = bundle.insee_code?.trim();
+  if (!commune && !inseeCode) return;
+
+  const aliases = [commune, inseeCode].filter((value): value is string => !!value);
+  const [existing] = await db.select({
+    id: municipalitySettingsTable.id,
+    inseeCode: municipalitySettingsTable.inseeCode,
+  })
+    .from(municipalitySettingsTable)
+    .where(or(
+      aliases.length > 0 ? buildMunicipalityAliasFilter(municipalitySettingsTable.commune, aliases) : sql`FALSE`,
+      inseeCode ? eq(municipalitySettingsTable.inseeCode, inseeCode) : sql`FALSE`,
+    ))
+    .limit(1);
+
+  if (existing) {
+    if (inseeCode && existing.inseeCode !== inseeCode) {
+      await db.update(municipalitySettingsTable)
+        .set({ inseeCode, updatedAt: new Date() })
+        .where(eq(municipalitySettingsTable.id, existing.id));
+    }
+    return;
+  }
+
+  if (commune) {
+    await db.insert(municipalitySettingsTable).values({
+      commune,
+      inseeCode: inseeCode || null,
+    }).onConflictDoNothing();
+  }
+}
+
 async function processKnowledgeDocumentThroughPipeline(args: {
   baseIADocumentId: string;
   townHallDocumentId: string;
@@ -3301,6 +3342,10 @@ function shouldRunRegulatoryVision(context: TownHallExtractionContext, currentTe
 }
 
 async function extractTextFromFile(filePath: string, mimetype: string, context: TownHallExtractionContext = {}): Promise<string> {
+  if (isStructuredPluJsonUpload(context.originalName || filePath, mimetype)) {
+    return fs.readFileSync(filePath, "utf-8");
+  }
+
   if (isMarkdownUpload(context.originalName || filePath, mimetype)) {
     return fs.readFileSync(filePath, "utf-8");
   }
@@ -3641,6 +3686,23 @@ async function maybeSyncTownHallDocumentClassification(doc: {
   isOpposable?: boolean | null;
 }) {
   const structuredContent = doc.structuredContent as Record<string, unknown> | null | undefined;
+  if (structuredContent?.sourceFormat === "structured_plu_json") {
+    return {
+      resolved: {
+        category: doc.category || "REGULATORY",
+        subCategory: doc.subCategory || "PLU",
+        documentType: doc.documentType || "Structured PLU regulation",
+        tags: parseDocumentTags(doc.tags),
+      },
+      canonicalType: "plu_reglement",
+      isRegulatory: true,
+      isOpposable: true,
+      autoCorrected: false,
+      suggestionConfidence: "high",
+      suggestionReason: "Classification conservee depuis le PLU JSON structure.",
+    };
+  }
+
   if (structuredContent?.isConsolidatedMarkdownParent || structuredContent?.isConsolidatedMarkdownPart) {
     const category = doc.category || (structuredContent?.isConsolidatedMarkdownParent ? "CONSOLIDATED" : "REGULATORY");
     const subCategory = doc.subCategory || (structuredContent?.isConsolidatedMarkdownParent ? "MARKDOWN" : "PLU");
@@ -3727,6 +3789,142 @@ async function queueTownHallDocumentIndexing(args: {
         category: args.category,
         subCategory: args.subCategory,
       });
+
+      const parsedStructuredPlu = isStructuredPluJsonUpload(args.originalName, args.mimeType)
+        ? parseStructuredPluBundle(rawText, args.originalName)
+        : null;
+      if (parsedStructuredPlu) {
+        await ensureStructuredPluMunicipalitySettings(parsedStructuredPlu);
+        const resolvedInseeCode = await resolveInseeCode(args.targetCommune || parsedStructuredPlu.commune || "");
+        const municipalityKey = parsedStructuredPlu.insee_code || resolvedInseeCode || args.targetCommune || parsedStructuredPlu.commune || "";
+        if (!municipalityKey) {
+          throw new Error("Impossible de rattacher le PLU structure a une commune.");
+        }
+
+        const renderedText = renderStructuredPluBundleText(parsedStructuredPlu);
+        const targetCommune = parsedStructuredPlu.commune || args.targetCommune || municipalityKey;
+        const communeAliases = Array.from(new Set([
+          targetCommune,
+          args.targetCommune,
+          parsedStructuredPlu.commune,
+          parsedStructuredPlu.insee_code,
+          resolvedInseeCode,
+        ].filter((value): value is string => !!value)));
+        const uploadBatchId = crypto.randomUUID();
+        const fileHash = createHash("sha256").update(rawText).digest("hex");
+        const canonicalType = "plu_reglement";
+        const sourceAuthority = authorityForCanonicalType(canonicalType);
+        const tags = Array.from(new Set([...args.requestedTags, "structured-plu", "json-canonique"]));
+        const [baseIADoc] = await db.insert(baseIADocumentsTable).values({
+          batchId: uploadBatchId,
+          municipalityId: municipalityKey,
+          zoneCode: args.zone || null,
+          category: "REGULATORY",
+          subCategory: "PLU",
+          tags,
+          type: mapCanonicalTypeToBaseIAType(canonicalType),
+          fileName: args.originalName,
+          fileHash,
+          status: "parsing",
+          rawText: renderedText,
+        }).returning();
+
+        const structuredContent = {
+          ...buildStructuredPluBundleStructuredContent(parsedStructuredPlu, args.originalName),
+          baseIADocumentId: baseIADoc.id,
+        };
+
+        await db.update(townHallDocumentsTable)
+          .set({
+            rawText,
+            commune: targetCommune,
+            category: "REGULATORY",
+            subCategory: "PLU",
+            documentType: "Structured PLU regulation",
+            tags,
+            isRegulatory: true,
+            isOpposable: true,
+            structuredContent,
+            updatedAt: new Date(),
+          })
+          .where(eq(townHallDocumentsTable.id, args.docId));
+
+        await processDocumentForRAG(baseIADoc.id, municipalityKey, renderedText, {
+          document_id: baseIADoc.id,
+          document_type: canonicalType,
+          pool_id: `${municipalityKey}-PLU-ACTIVE`,
+          status: "active",
+          commune: municipalityKey,
+          zone: args.zone || undefined,
+          source_authority: sourceAuthority,
+          provenance: "base_ia_plu_structured_json",
+        } as any);
+
+        await persistRegulatoryUnitsForDocument({
+          baseIADocumentId: baseIADoc.id,
+          townHallDocumentId: args.docId,
+          municipalityId: municipalityKey,
+          zoneCode: args.zone || null,
+          documentType: canonicalType,
+          sourceAuthority,
+          isOpposable: true,
+          rawText,
+        });
+
+        await persistRegulatoryZoneSectionsForDocument({
+          baseIADocumentId: baseIADoc.id,
+          townHallDocumentId: args.docId,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          sourceAuthority,
+          isOpposable: true,
+          rawText: renderedText,
+        });
+
+        await ensureCalibrationZonesForCommune({
+          communeKey: municipalityKey,
+          communeAliases,
+          rawText: renderedText,
+          sourceName: args.originalName,
+          sourceType: "Structured PLU regulation",
+          referenceDocumentId: args.docId,
+          userId: args.userId || null,
+        });
+
+        await persistStructuredKnowledgeForDocument({
+          baseIADocumentId: baseIADoc.id,
+          townHallDocumentId: args.docId,
+          municipalityId: municipalityKey,
+          documentType: canonicalType,
+          documentSubtype: "structured_plu_json",
+          sourceName: args.originalName,
+          sourceAuthority,
+          opposable: true,
+          rawText: renderedText,
+          rawClassification: {
+            source: "structured_plu_json",
+            category: "REGULATORY",
+            subCategory: "PLU",
+            resolvedDocumentType: "Structured PLU regulation",
+            zoneCount: parsedStructuredPlu.zones.length,
+            articleCount: parsedStructuredPlu.zones.reduce((sum, zone) => sum + zone.articles.length, 0),
+            parsedRuleCount: parsedStructuredPlu.effective_zone_rules.length,
+          },
+        });
+
+        await db.update(baseIADocumentsTable)
+          .set({ status: "indexed" })
+          .where(eq(baseIADocumentsTable.id, baseIADoc.id));
+
+        logger.info("[mairie/structured-plu] Structured PLU JSON indexed", {
+          docId: args.docId,
+          municipalityKey,
+          zoneCount: parsedStructuredPlu.zones.length,
+          parsedRuleCount: parsedStructuredPlu.effective_zone_rules.length,
+        });
+        return;
+      }
+
       const classification = resolveTownHallClassification({
         rawText,
         fileName: args.originalName,

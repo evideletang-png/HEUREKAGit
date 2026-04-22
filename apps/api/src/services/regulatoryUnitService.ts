@@ -10,6 +10,7 @@ import {
 import { extractRegulatoryZoneSections } from "./regulatoryZoneSectionService.js";
 import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "./municipalityAliasService.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
+import { parseStructuredPluBundle } from "./structuredPluBundleService.js";
 
 type PersistRegulatoryUnitsArgs = {
   baseIADocumentId?: string | null;
@@ -429,6 +430,54 @@ export async function persistRegulatoryUnitsForDocument(args: PersistRegulatoryU
     await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.baseIADocumentId, args.baseIADocumentId));
   } else if (args.townHallDocumentId) {
     await db.delete(regulatoryUnitsTable).where(eq(regulatoryUnitsTable.townHallDocumentId, args.townHallDocumentId));
+  }
+
+  const structuredPluBundle = parseStructuredPluBundle(args.rawText);
+  if (structuredPluBundle) {
+    const unitsToPersist = structuredPluBundle.zones.flatMap((zone) => {
+      return zone.articles.map((article) => ({
+        baseIADocumentId: args.baseIADocumentId || null,
+        townHallDocumentId: args.townHallDocumentId || null,
+        municipalityId: args.municipalityId,
+        zoneCode: zone.code,
+        documentType: args.documentType || null,
+        theme: ARTICLE_THEME_LABELS[Number(article.numero)] || article.titre,
+        articleNumber: Number.parseInt(article.numero, 10) || null,
+        title: article.titre,
+        sourceText: article.texte,
+        parsedValues: {
+          structured_plu_bundle: true,
+          source_format: "structured_plu_json",
+          source_document_id: structuredPluBundle.source,
+          source_locator: article.source_locator,
+          status: article.status,
+          non_reglemente: article.non_reglemente,
+          parsed_rules: article.parsed_rules,
+          structuredData: {
+            extraction_kind: "structured_plu_article",
+            source: structuredPluBundle.source,
+          },
+          zone_code: zone.code,
+          parent_zone_code: zone.parent_zone_code,
+          section_heading: `Zone ${zone.code}`,
+          start_page: null,
+          end_page: null,
+          extraction_scope: "structured_plu_bundle",
+        },
+        confidence: "high",
+        sourceAuthority: args.sourceAuthority ?? 100,
+        isOpposable: args.isOpposable ?? true,
+        parserVersion: "v4-structured-plu",
+        updatedAt: new Date(),
+      }));
+    });
+
+    if (unitsToPersist.length === 0) {
+      return { created: 0 };
+    }
+
+    await db.insert(regulatoryUnitsTable).values(unitsToPersist);
+    return { created: unitsToPersist.length };
   }
 
   const zoneScopedSources = (() => {
