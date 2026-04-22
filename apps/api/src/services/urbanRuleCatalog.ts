@@ -128,6 +128,9 @@ export function inferUrbanRuleDescriptor(args: {
     case 10:
       return { family: "height", topic: "height", label: "Hauteur", priority: 100 };
     case 11:
+      if (/cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/.test(haystack)) {
+        return { family: "facade_roof_aspect", topic: "fence_height", label: "Clôtures & limites", priority: 82 };
+      }
       if (/mat[eé]riaux|bardage|enduit|teinte|couleur/.test(haystack)) {
         return { family: "materials", topic: "materials", label: "Matériaux & teintes", priority: 70 };
       }
@@ -139,7 +142,7 @@ export function inferUrbanRuleDescriptor(args: {
   }
 
   if (/cl[oô]ture|muret|mur de cl[oô]ture|haie|portail|portillon|garde[- ]corps/.test(haystack)) {
-    return { family: "facade_roof_aspect", topic: "facade_roof_aspect", label: "Aspect extérieur", priority: 65 };
+    return { family: "facade_roof_aspect", topic: "fence_height", label: "Clôtures & limites", priority: 82 };
   }
   if (/hauteur|gabarit|fa[iî]tage|acrot[eè]re|[ée]gout/.test(haystack)) {
     return { family: "height", topic: "height", label: "Hauteur", priority: 95 };
