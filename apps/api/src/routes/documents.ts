@@ -25,8 +25,28 @@ import { getParcelByCoords } from "../services/parcel.js";
 import { extractDocumentData, compareWithPLU, type ExtractedDocumentData, type ComparisonResult } from "../services/pluAnalysis.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { logger } from "../utils/logger.js";
+import { ConversationService } from "../services/conversationService.js";
 
 const router: IRouter = Router();
+
+function toLegacyMessage(message: {
+  id: string;
+  authorId: string;
+  authorActorType: string;
+  body: string;
+  parentMessageId?: string | null;
+  createdAt: Date;
+}) {
+  return {
+    id: message.id,
+    fromUserId: message.authorId,
+    fromRole: message.authorActorType.toLowerCase(),
+    content: message.body,
+    parentId: message.parentMessageId || null,
+    mentions: [],
+    createdAt: message.createdAt,
+  };
+}
 
 // Multer config — accept PDF and images, store in temp
 const upload = multer({
@@ -841,6 +861,17 @@ router.get("/:id/messages", authenticate, async (req: AuthRequest, res) => {
 
   if (!hasAccess) { res.status(403).json({ error: "FORBIDDEN" }); return; }
 
+  if (doc.dossierId) {
+    try {
+      const { conversation } = await ConversationService.ensureDefaultConversation(doc.dossierId, userId);
+      const messages = await ConversationService.getMessages(conversation.id, userId);
+      res.json({ messages: messages.map(toLegacyMessage) });
+      return;
+    } catch (error) {
+      console.warn("[documents/messages] transversal messaging fallback", error);
+    }
+  }
+
   const messages = await db.select().from(dossierMessagesTable)
     .where(eq(dossierMessagesTable.dossierId, id as string))
     .orderBy(dossierMessagesTable.createdAt);
@@ -871,6 +902,26 @@ router.post("/:id/messages", authenticate, async (req: AuthRequest, res) => {
   }
 
   if (!hasAccess) { res.status(403).json({ error: "FORBIDDEN" }); return; }
+
+  if (doc.dossierId) {
+    try {
+      const { conversation } = await ConversationService.ensureDefaultConversation(doc.dossierId, userId);
+      const message = await ConversationService.sendMessage({
+        conversationId: conversation.id,
+        userId,
+        body: content,
+        visibility: senderRole === "citoyen" || senderRole === "user" ? "PUBLIC" : undefined,
+      });
+      res.status(201).json({ message: toLegacyMessage(message) });
+      return;
+    } catch (error) {
+      if (error instanceof Error && ["FORBIDDEN", "INVALID_MENTION_VISIBILITY"].includes(error.message)) {
+        res.status(error.message === "FORBIDDEN" ? 403 : 400).json({ error: error.message });
+        return;
+      }
+      console.warn("[documents/messages POST] transversal messaging fallback", error);
+    }
+  }
 
   const [msg] = await db.insert(dossierMessagesTable).values({
     dossierId: id as string,

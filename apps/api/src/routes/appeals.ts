@@ -287,6 +287,12 @@ router.get("/", authenticate, async (req: AuthRequest, res) => {
     const documents = appeals.length > 0
       ? await db.select().from(appealDocumentsTable).where(inArray(appealDocumentsTable.appealId, appeals.map((appeal) => appeal.id)))
       : [];
+    const documentAnalyses = appeals.length > 0
+      ? await db.select().from(appealDocumentAnalysesTable).where(inArray(appealDocumentAnalysesTable.appealId, appeals.map((appeal) => appeal.id)))
+      : [];
+    const groundSuggestions = appeals.length > 0
+      ? await db.select().from(appealGroundSuggestionsTable).where(inArray(appealGroundSuggestionsTable.appealId, appeals.map((appeal) => appeal.id)))
+      : [];
 
     const now = new Date();
     const enriched = appeals.map((appeal) => {
@@ -294,12 +300,21 @@ router.get("/", authenticate, async (req: AuthRequest, res) => {
       const nextDeadline = appealDeadlines
         .slice()
         .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0];
+      const appealAnalyses = documentAnalyses.filter((item) => item.appealId === appeal.id);
+      const latestAnalysis = appealAnalyses
+        .slice()
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      const appealSuggestions = groundSuggestions.filter((item) => item.appealId === appeal.id);
 
       return {
         ...appeal,
         dossier: appeal.linkedUrbanismCaseId ? dossierMap.get(appeal.linkedUrbanismCaseId) || null : null,
         groundsCount: grounds.filter((item) => item.appealId === appeal.id).length,
         documentsCount: documents.filter((item) => item.appealId === appeal.id).length,
+        documentAnalysesCount: appealAnalyses.length,
+        latestAnalysisStatus: latestAnalysis?.status || null,
+        groundSuggestionsCount: appealSuggestions.length,
+        pendingGroundSuggestionsCount: appealSuggestions.filter((item) => item.status === "suggested").length,
         nextDeadline,
         deadlineState: nextDeadline
           ? (new Date(nextDeadline.dueDate).getTime() < now.getTime() ? "depasse" : (new Date(nextDeadline.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24) <= 7 ? "proche" : "ok")

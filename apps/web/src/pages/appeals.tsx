@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, Gavel, Loader2, Plus, ShieldAlert } from "lucide-react";
+import { ArrowRight, BrainCircuit, FileSearch, Gavel, Loader2, Plus, ShieldAlert, Sparkles } from "lucide-react";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -54,6 +54,10 @@ type AppealListItem = {
   dossier?: DossierOption | null;
   groundsCount: number;
   documentsCount: number;
+  documentAnalysesCount?: number;
+  latestAnalysisStatus?: string | null;
+  groundSuggestionsCount?: number;
+  pendingGroundSuggestionsCount?: number;
   nextDeadline?: { label: string; dueDate: string } | null;
   deadlineState?: string;
 };
@@ -73,6 +77,12 @@ const STATUS_LABELS: Record<string, string> = {
   contentieux: "Contentieux",
   regularisation: "Régularisation",
   clos: "Clos",
+};
+
+const ANALYSIS_STATUS_LABELS: Record<string, string> = {
+  processing: "Analyse en cours",
+  completed: "Analyse IA terminée",
+  failed: "Analyse échouée",
 };
 
 function scoreTone(score?: number | null) {
@@ -240,6 +250,40 @@ export default function AppealsPage() {
 
         <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-6">
+            <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-background to-amber-50/60">
+              <CardHeader>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <BrainCircuit className="w-5 h-5 text-primary" />
+                      Analyse automatique des recours PDF
+                    </CardTitle>
+                    <CardDescription className="mt-2">
+                      Ouvre un recours, dépose le PDF dans l’onglet Pièces, puis Heuréka extrait les moyens point par point avec une recevabilité prudente.
+                    </CardDescription>
+                  </div>
+                  <Badge className="w-fit bg-primary text-primary-foreground border-0">
+                    <Sparkles className="w-3 h-3 mr-1" />
+                    Disponible
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-3 text-sm">
+                <div className="rounded-xl border bg-background/80 p-3">
+                  <p className="font-medium">1. Déposer le PDF</p>
+                  <p className="text-muted-foreground mt-1">Catégorie recours, requête ou mémoire : l’analyse démarre automatiquement.</p>
+                </div>
+                <div className="rounded-xl border bg-background/80 p-3">
+                  <p className="font-medium">2. Points détectés</p>
+                  <p className="text-muted-foreground mt-1">Procédure, affichage, intérêt à agir, pièces, fond PLU et autres moyens.</p>
+                </div>
+                <div className="rounded-xl border bg-background/80 p-3">
+                  <p className="font-medium">3. Suggestions validables</p>
+                  <p className="text-muted-foreground mt-1">Chaque point peut être converti en grief ou écarté, sans création automatique.</p>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>Index des recours</CardTitle>
@@ -318,12 +362,29 @@ export default function AppealsPage() {
                               <span>Dossier lié: {appeal.dossier?.dossierNumber || appeal.decisionReference || "N/A"}</span>
                               <span>{appeal.groundsCount} grief(s)</span>
                               <span>{appeal.documentsCount} pièce(s)</span>
+                              <span>{appeal.groundSuggestionsCount || 0} suggestion(s) IA</span>
                               {appeal.nextDeadline && <span>Prochaine échéance: {new Date(appeal.nextDeadline.dueDate).toLocaleDateString("fr-FR")}</span>}
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="outline" className={scoreTone(appeal.admissibilityScore)}>Recevabilité {appeal.admissibilityScore ?? "N/A"}</Badge>
                             <Badge variant="outline" className={scoreTone(appeal.urbanRiskScore)}>Risque urb. {appeal.urbanRiskScore ?? "N/A"}</Badge>
+                            {appeal.latestAnalysisStatus ? (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-100">
+                                <FileSearch className="w-3 h-3 mr-1" />
+                                {ANALYSIS_STATUS_LABELS[appeal.latestAnalysisStatus] || appeal.latestAnalysisStatus}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-muted text-muted-foreground">
+                                <FileSearch className="w-3 h-3 mr-1" />
+                                PDF non analysé
+                              </Badge>
+                            )}
+                            {(appeal.pendingGroundSuggestionsCount || 0) > 0 && (
+                              <Badge className="bg-primary text-primary-foreground border-0">
+                                {appeal.pendingGroundSuggestionsCount} à valider
+                              </Badge>
+                            )}
                             {appeal.deadlineState === "depasse" && <Badge className="bg-red-600 text-white border-0">Délai dépassé</Badge>}
                             {appeal.deadlineState === "proche" && <Badge className="bg-amber-500 text-white border-0">Délai proche</Badge>}
                           </div>
@@ -590,14 +651,14 @@ export default function AppealsPage() {
 
         <Card className="border-dashed">
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-primary" /> Extensions IA prévues</CardTitle>
-            <CardDescription>Le MVP prépare déjà les points d’extension pour l’aide à la recevabilité, l’analyse urbanistique et les brouillons de réponse.</CardDescription>
+            <CardTitle className="text-base flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-primary" /> Socle IA Recours actif</CardTitle>
+            <CardDescription>Le module sait maintenant analyser un PDF de recours et produire des suggestions prudentes, validables par un humain.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-4 text-sm">
-            <div className="rounded-xl border p-3"><p className="font-medium">Score de recevabilité</p><p className="text-muted-foreground mt-1">Base livrée via `admissibilityScore`, à enrichir ensuite par règles procédurales.</p></div>
-            <div className="rounded-xl border p-3"><p className="font-medium">Risque urbanistique</p><p className="text-muted-foreground mt-1">Base livrée via `urbanRiskScore`, à croiser avec l’analyse IA du dossier.</p></div>
-            <div className="rounded-xl border p-3"><p className="font-medium">Suggestion de griefs</p><p className="text-muted-foreground mt-1">Structure prête via liens vers article PLU, pièce et métrique extraite.</p></div>
-            <div className="rounded-xl border p-3"><p className="font-medium">Réponse mairie</p><p className="text-muted-foreground mt-1">Chaque grief garde un `responseDraft` pour futurs brouillons structurés.</p></div>
+            <div className="rounded-xl border p-3"><p className="font-medium">Extraction PDF</p><p className="text-muted-foreground mt-1">Texte extrait puis conservé dans l’analyse du document.</p></div>
+            <div className="rounded-xl border p-3"><p className="font-medium">Recevabilité prudente</p><p className="text-muted-foreground mt-1">Labels : probable, discutable, irrecevable probable ou à confirmer.</p></div>
+            <div className="rounded-xl border p-3"><p className="font-medium">Suggestions de griefs</p><p className="text-muted-foreground mt-1">Chaque moyen détecté reste une suggestion convertissable, jamais automatique.</p></div>
+            <div className="rounded-xl border p-3"><p className="font-medium">Sources citées</p><p className="text-muted-foreground mt-1">PDF recours, dossier lié, pièces, PLU, constructibilité et contraintes si disponibles.</p></div>
           </CardContent>
         </Card>
       </div>

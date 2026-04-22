@@ -123,6 +123,9 @@ importers:
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../packages/integrations-openai-ai-server
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
@@ -196,6 +199,9 @@ importers:
       '@workspace/ai-core':
         specifier: workspace:*
         version: link:../../packages/ai-core
+      '@workspace/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       leaflet:
         specifier: ^1.9.4
         version: 1.9.4
@@ -475,6 +481,18 @@ importers:
       '@types/node':
         specifier: ^20.19.37
         version: 20.19.37
+
+  packages/shared:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.5.0
+      tsx:
+        specifier: 'catalog:'
+        version: 4.21.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
   scripts:
     devDependencies:
@@ -7227,11 +7245,11 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 25.5.0
+      '@types/node': 20.19.37
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 20.19.37
 
   '@types/cookie-parser@1.4.10(@types/express@5.0.6)':
     dependencies:
@@ -7271,7 +7289,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.1.1':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 20.19.37
       '@types/qs': 6.15.0
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -7354,12 +7372,12 @@ snapshots:
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 20.19.37
 
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 25.5.0
+      '@types/node': 20.19.37
 
   '@types/unist@3.0.3': {}
 

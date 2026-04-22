@@ -183,6 +183,13 @@
       "when": 1775725200000,
       "tag": "0025_appeal_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1775732400000,
+      "tag": "0026_messaging_conversations",
+      "breakpoints": true
     }
   ]
 }

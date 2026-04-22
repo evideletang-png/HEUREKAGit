@@ -4,6 +4,7 @@ import { dossiersTable, documentReviewsTable, dossierMessagesTable, usersTable, 
 import { eq, desc, and, sql, asc } from "drizzle-orm";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import { NotificationService } from "../services/notificationService.js";
+import { ConversationService } from "../services/conversationService.js";
 
 const router: IRouter = Router();
 
@@ -41,6 +42,25 @@ function pickCitizenPortalCommune(args: {
     return { commune: normalizedAssigned[0], source: "first_user_commune" as const };
   }
   return { commune: null, source: "unresolved" as const };
+}
+
+function toLegacyMessage(message: {
+  id: string;
+  authorId: string;
+  authorActorType: string;
+  body: string;
+  parentMessageId?: string | null;
+  createdAt: Date;
+}) {
+  return {
+    id: message.id,
+    fromUserId: message.authorId,
+    fromRole: message.authorActorType.toLowerCase(),
+    content: message.body,
+    parentId: message.parentMessageId || null,
+    mentions: [],
+    createdAt: message.createdAt,
+  };
 }
 
 // GET /api/dossiers
@@ -282,11 +302,18 @@ router.patch("/:id/start-instruction", authenticate, requireMairie, async (req: 
 });
 // GET /api/dossiers/:id/messages
 router.get("/:id/messages", authenticate, async (req: AuthRequest, res) => {
-  const { id } = req.params;
-  const messages = await db.select().from(dossierMessagesTable)
-    .where(eq(dossierMessagesTable.dossierId, id as string))
-    .orderBy(asc(dossierMessagesTable.createdAt));
-  return res.json({ messages });
+  try {
+    const { id } = req.params;
+    const { conversation } = await ConversationService.ensureDefaultConversation(id as string, req.user!.userId);
+    const messages = await ConversationService.getMessages(conversation.id, req.user!.userId);
+    return res.json({ messages: messages.map(toLegacyMessage) });
+  } catch {
+    const { id } = req.params;
+    const messages = await db.select().from(dossierMessagesTable)
+      .where(eq(dossierMessagesTable.dossierId, id as string))
+      .orderBy(asc(dossierMessagesTable.createdAt));
+    return res.json({ messages });
+  }
 });
 
 // POST /api/dossiers/:id/messages
@@ -297,6 +324,20 @@ router.post("/:id/messages", authenticate, async (req: AuthRequest, res) => {
   if (!content) return res.status(400).json({ error: "Content is required" });
 
   const role = req.user!.role.toLowerCase();
+  try {
+    const { conversation } = await ConversationService.ensureDefaultConversation(id as string, req.user!.userId);
+    const message = await ConversationService.sendMessage({
+      conversationId: conversation.id,
+      userId: req.user!.userId,
+      body: content,
+      visibility: role === "citoyen" || role === "user" ? "PUBLIC" : undefined,
+    });
+    return res.status(201).json({ message: toLegacyMessage(message) });
+  } catch (error) {
+    if (error instanceof Error && ["FORBIDDEN", "DOSSIER_NOT_FOUND", "INVALID_MENTION_VISIBILITY"].includes(error.message)) {
+      return res.status(error.message === "FORBIDDEN" ? 403 : 400).json({ error: error.message });
+    }
+  }
   
   // 1. Insert message
   const [message] = await db.insert(dossierMessagesTable).values({

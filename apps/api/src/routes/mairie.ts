@@ -96,6 +96,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFSt
 import { VisionService } from "../services/visionService.js";
 import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { MessagingService } from "../services/messagingService.js";
+import { ConversationService } from "../services/conversationService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { AUTHORITY_POLICY } from "@workspace/ai-core";
@@ -163,6 +164,25 @@ function parseCommunes(raw: string | null): string[] {
   } catch { 
     return raw.split(",").map(c => c.trim()).filter(Boolean); 
   }
+}
+
+function toLegacyMessage(message: {
+  id: string;
+  authorId: string;
+  authorActorType: string;
+  body: string;
+  parentMessageId?: string | null;
+  createdAt: Date;
+}) {
+  return {
+    id: message.id,
+    fromUserId: message.authorId,
+    fromRole: message.authorActorType.toLowerCase(),
+    content: message.body,
+    parentId: message.parentMessageId || null,
+    mentions: [],
+    createdAt: message.createdAt,
+  };
 }
 
 function canAccessCommune(role: string | null | undefined, assignedCommunes: string[], commune: string | null | undefined): boolean {
@@ -2703,9 +2723,16 @@ router.get("/dossiers/:id/timeline", async (req: AuthRequest, res) => {
 router.get("/dossiers/:id/messages", async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const messages = await MessagingService.getThread(id as string);
-    return res.json({ messages });
+    const { conversation } = await ConversationService.ensureDefaultConversation(id as string, req.user!.userId);
+    const messages = await ConversationService.getMessages(conversation.id, req.user!.userId);
+    return res.json({ messages: messages.map(toLegacyMessage) });
   } catch (err) {
+    console.warn("[mairie/dossiers/:id/messages] transversal fallback", err);
+    try {
+      const { id } = req.params;
+      const messages = await MessagingService.getThread(id as string);
+      return res.json({ messages });
+    } catch {}
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });
@@ -2718,15 +2745,26 @@ router.post("/dossiers/:id/messages", async (req: AuthRequest, res) => {
     // Fetch User Role for the message
     const [user] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
 
-    const msg = await MessagingService.sendMessage(
-      id as string,
-      req.user!.userId,
-      user?.role || "unknown",
-      content,
-      parentId,
-      documentId
-    );
-    return res.json({ success: true, message: msg });
+    try {
+      const { conversation } = await ConversationService.ensureDefaultConversation(id as string, req.user!.userId);
+      const msg = await ConversationService.sendMessage({
+        conversationId: conversation.id,
+        userId: req.user!.userId,
+        body: content,
+        parentMessageId: parentId ? String(parentId) : null,
+      });
+      return res.json({ success: true, message: toLegacyMessage(msg) });
+    } catch (error) {
+      const msg = await MessagingService.sendMessage(
+        id as string,
+        req.user!.userId,
+        user?.role || "unknown",
+        content,
+        parentId,
+        documentId
+      );
+      return res.json({ success: true, message: msg, fallback: true });
+    }
   } catch (err) {
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
@@ -2956,6 +2994,17 @@ router.get("/messages/:dossierId", async (req: AuthRequest, res) => {
     const { dossierId } = req.params;
     const { documentId } = req.query;
 
+    if (!documentId) {
+      try {
+        const { conversation } = await ConversationService.ensureDefaultConversation(dossierId as string, req.user!.userId);
+        const messages = await ConversationService.getMessages(conversation.id, req.user!.userId);
+        res.json({ messages: messages.map(toLegacyMessage) });
+        return;
+      } catch (error) {
+        console.warn("[mairie/messages/:dossierId] transversal fallback", error);
+      }
+    }
+
     let whereClause = eq(dossierMessagesTable.dossierId, dossierId as string);
     if (documentId) {
       whereClause = and(whereClause, eq(dossierMessagesTable.documentId, documentId as string)) as any;
@@ -2986,6 +3035,21 @@ router.post("/messages/:dossierId", async (req: AuthRequest, res) => {
     if (content.trim().length > 2000) {
       res.status(400).json({ error: "BAD_REQUEST", message: "Message trop long (max 2000 caractères)." });
       return;
+    }
+
+    if (!documentId) {
+      try {
+        const { conversation } = await ConversationService.ensureDefaultConversation(dossierId as string, req.user!.userId);
+        const message = await ConversationService.sendMessage({
+          conversationId: conversation.id,
+          userId: req.user!.userId,
+          body: content,
+        });
+        res.json({ message: toLegacyMessage(message) });
+        return;
+      } catch (error) {
+        console.warn("[mairie/messages/:dossierId POST] transversal fallback", error);
+      }
     }
 
     // Check dossier exists

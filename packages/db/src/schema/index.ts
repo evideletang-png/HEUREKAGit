@@ -38,3 +38,4 @@ export * from "./regulatoryValidationHistory";
 export * from "./regulatoryRuleConflicts";
 export * from "./regulatoryCalibrationPermissions";
 export * from "./zoneThematicSegments";
+export * from "./messaging";
