@@ -5,6 +5,8 @@ import {
   appealPartiesTable,
   appealGroundsTable,
   appealDocumentsTable,
+  appealDocumentAnalysesTable,
+  appealGroundSuggestionsTable,
   appealEventsTable,
   appealNotificationsTable,
   appealDeadlinesTable,
@@ -20,6 +22,7 @@ import os from "os";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { analyzeAppealDocument } from "../services/appealAnalysisService.js";
 
 const router: IRouter = Router();
 
@@ -106,6 +109,36 @@ async function logAppealEvent(appealId: string, userId: string | null, type: str
     description,
     metadata,
   });
+}
+
+function shouldAnalyzeAppealDocument(file: Express.Multer.File, category?: string | null) {
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  const normalizedCategory = String(category || "").toLowerCase();
+  return (file.mimetype === "application/pdf" || ext === ".pdf")
+    && (normalizedCategory.includes("recours") || normalizedCategory.includes("requete") || normalizedCategory.includes("memoire"));
+}
+
+function groupSuggestions(suggestions: any[]) {
+  return {
+    byAdmissibility: suggestions.reduce<Record<string, any[]>>((acc, suggestion) => {
+      const key = suggestion.admissibilityLabel || "a_confirmer";
+      acc[key] = acc[key] || [];
+      acc[key].push(suggestion);
+      return acc;
+    }, {}),
+    byCategory: suggestions.reduce<Record<string, any[]>>((acc, suggestion) => {
+      const key = suggestion.category || "autre";
+      acc[key] = acc[key] || [];
+      acc[key].push(suggestion);
+      return acc;
+    }, {}),
+    byDocument: suggestions.reduce<Record<string, any[]>>((acc, suggestion) => {
+      const key = suggestion.documentId || "unknown";
+      acc[key] = acc[key] || [];
+      acc[key].push(suggestion);
+      return acc;
+    }, {}),
+  };
 }
 
 async function getUserContext(userId: string) {
@@ -463,17 +496,32 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
       return;
     }
 
-    const [grounds, parties, documents, events, notifications, deadlines, messages] = await Promise.all([
+    const [grounds, parties, documents, documentAnalyses, groundSuggestions, events, notifications, deadlines, messages] = await Promise.all([
       db.select().from(appealGroundsTable).where(eq(appealGroundsTable.appealId, appeal.id)).orderBy(desc(appealGroundsTable.createdAt)),
       db.select().from(appealPartiesTable).where(eq(appealPartiesTable.appealId, appeal.id)),
       db.select().from(appealDocumentsTable).where(eq(appealDocumentsTable.appealId, appeal.id)).orderBy(desc(appealDocumentsTable.createdAt)),
+      db.select().from(appealDocumentAnalysesTable).where(eq(appealDocumentAnalysesTable.appealId, appeal.id)).orderBy(desc(appealDocumentAnalysesTable.createdAt)),
+      db.select().from(appealGroundSuggestionsTable).where(eq(appealGroundSuggestionsTable.appealId, appeal.id)).orderBy(desc(appealGroundSuggestionsTable.createdAt)),
       db.select().from(appealEventsTable).where(eq(appealEventsTable.appealId, appeal.id)).orderBy(desc(appealEventsTable.createdAt)),
       db.select().from(appealNotificationsTable).where(eq(appealNotificationsTable.appealId, appeal.id)).orderBy(desc(appealNotificationsTable.createdAt)),
       db.select().from(appealDeadlinesTable).where(eq(appealDeadlinesTable.appealId, appeal.id)).orderBy(asc(appealDeadlinesTable.dueDate)),
       db.select().from(appealMessagesTable).where(eq(appealMessagesTable.appealId, appeal.id)).orderBy(asc(appealMessagesTable.createdAt)),
     ]);
 
-    res.json({ appeal, dossier, grounds, parties, documents, events, notifications, deadlines, messages });
+    res.json({
+      appeal,
+      dossier,
+      grounds,
+      parties,
+      documents,
+      documentAnalyses,
+      groundSuggestions,
+      groundSuggestionsGrouped: groupSuggestions(groundSuggestions),
+      events,
+      notifications,
+      deadlines,
+      messages,
+    });
   } catch (err) {
     console.error("[appeals/get]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de charger le recours." });
@@ -616,7 +664,7 @@ router.post("/:id/grounds", authenticate, async (req: AuthRequest, res) => {
 router.post("/:id/documents", authenticate, upload.single("file"), async (req: AuthRequest, res) => {
   try {
     const file = (req as any).file as Express.Multer.File | undefined;
-    const { allowed, appeal } = await canAccessAppeal(req.params.id as string, req.user!);
+    const { allowed, appeal, dossier } = await canAccessAppeal(req.params.id as string, req.user!);
     if (!appeal) {
       if (file?.path) {
         try { fs.unlinkSync(file.path); } catch {}
@@ -658,7 +706,22 @@ router.post("/:id/documents", authenticate, upload.single("file"), async (req: A
 
     await logAppealEvent(appeal.id, req.user!.userId, "DOCUMENT_UPLOAD", `Pièce ajoutée au recours: ${document.title}.`, { documentId: document.id });
 
-    res.status(201).json({ document });
+    const launchAnalysis = shouldAnalyzeAppealDocument(file, document.category);
+    if (launchAnalysis) {
+      setImmediate(() => {
+        analyzeAppealDocument({
+          appeal,
+          dossier,
+          document,
+          filePath: finalPath,
+          userId: req.user!.userId,
+        }).catch((error) => {
+          console.error("[appeals/documents/analysis/background]", error);
+        });
+      });
+    }
+
+    res.status(201).json({ document: { ...document, analysisStatus: launchAnalysis ? "processing" : null } });
   } catch (err) {
     console.error("[appeals/documents/create]", err);
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -666,6 +729,132 @@ router.post("/:id/documents", authenticate, upload.single("file"), async (req: A
       try { fs.unlinkSync(file.path); } catch {}
     }
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible d'ajouter la pièce." });
+  }
+});
+
+router.post("/:id/ground-suggestions/:suggestionId/accept", authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { allowed, appeal } = await canAccessAppeal(req.params.id as string, req.user!);
+    if (!appeal) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Recours introuvable." });
+      return;
+    }
+    if (!allowed) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Conversion de suggestion non autorisée." });
+      return;
+    }
+
+    const [suggestion] = await db.select().from(appealGroundSuggestionsTable)
+      .where(and(
+        eq(appealGroundSuggestionsTable.id, req.params.suggestionId as string),
+        eq(appealGroundSuggestionsTable.appealId, appeal.id),
+      ))
+      .limit(1);
+    if (!suggestion) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Suggestion introuvable." });
+      return;
+    }
+
+    const responseDraft = [
+      suggestion.responseDraft,
+      "",
+      "Analyse automatique prudente:",
+      `Recevabilité: ${suggestion.admissibilityLabel}`,
+      `Opposabilité/fond: ${suggestion.opposabilityLabel}`,
+      `Confiance: ${suggestion.confidence}`,
+      suggestion.proceduralAssessment ? `Procédure: ${JSON.stringify(suggestion.proceduralAssessment)}` : "",
+      suggestion.substantiveAssessment ? `Fond: ${JSON.stringify(suggestion.substantiveAssessment)}` : "",
+      Array.isArray(suggestion.requiredChecks) && suggestion.requiredChecks.length > 0
+        ? `Vérifications requises: ${suggestion.requiredChecks.join(" ; ")}`
+        : "",
+    ].filter(Boolean).join("\n");
+
+    const [ground] = await db.insert(appealGroundsTable).values({
+      appealId: appeal.id,
+      category: suggestion.category,
+      title: suggestion.title,
+      description: suggestion.claimantArgument || suggestion.sourceText,
+      linkedDocumentId: suggestion.documentId,
+      seriousnessScore: suggestion.seriousnessScore,
+      responseDraft,
+      status: "a_qualifier",
+    }).returning();
+
+    await db.update(appealGroundSuggestionsTable)
+      .set({
+        status: "accepted",
+        acceptedGroundId: ground.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(appealGroundSuggestionsTable.id, suggestion.id));
+
+    const [grounds, notifications] = await Promise.all([
+      db.select().from(appealGroundsTable).where(eq(appealGroundsTable.appealId, appeal.id)),
+      db.select().from(appealNotificationsTable).where(eq(appealNotificationsTable.appealId, appeal.id)),
+    ]);
+    const computedScores = computeScores({
+      appealType: appeal.appealType,
+      postingEvidenceStatus: appeal.postingEvidenceStatus,
+      groundsCount: grounds.length,
+      hasAuthorityNotification: notifications.some((item) => item.type === "notification_autorite" && item.status === "envoye"),
+      hasBeneficiaryNotification: notifications.some((item) => item.type === "notification_beneficiaire" && item.status === "envoye"),
+    });
+    await db.update(appealsTable)
+      .set({ ...computedScores, updatedAt: new Date() })
+      .where(eq(appealsTable.id, appeal.id));
+
+    await logAppealEvent(
+      appeal.id,
+      req.user!.userId,
+      "GROUND_SUGGESTION_ACCEPTED",
+      `Suggestion convertie en grief: ${ground.title}.`,
+      { suggestionId: suggestion.id, groundId: ground.id },
+    );
+
+    res.status(201).json({ ground, suggestion: { ...suggestion, status: "accepted", acceptedGroundId: ground.id } });
+  } catch (err) {
+    console.error("[appeals/ground-suggestions/accept]", err);
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de convertir cette suggestion en grief." });
+  }
+});
+
+router.post("/:id/ground-suggestions/:suggestionId/reject", authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { allowed, appeal } = await canAccessAppeal(req.params.id as string, req.user!);
+    if (!appeal) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Recours introuvable." });
+      return;
+    }
+    if (!allowed) {
+      res.status(403).json({ error: "FORBIDDEN", message: "Écart de suggestion non autorisé." });
+      return;
+    }
+
+    const [suggestion] = await db.update(appealGroundSuggestionsTable)
+      .set({ status: "rejected", updatedAt: new Date() })
+      .where(and(
+        eq(appealGroundSuggestionsTable.id, req.params.suggestionId as string),
+        eq(appealGroundSuggestionsTable.appealId, appeal.id),
+      ))
+      .returning();
+
+    if (!suggestion) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Suggestion introuvable." });
+      return;
+    }
+
+    await logAppealEvent(
+      appeal.id,
+      req.user!.userId,
+      "GROUND_SUGGESTION_REJECTED",
+      `Suggestion écartée: ${suggestion.title}.`,
+      { suggestionId: suggestion.id },
+    );
+
+    res.json({ suggestion });
+  } catch (err) {
+    console.error("[appeals/ground-suggestions/reject]", err);
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible d'écarter cette suggestion." });
   }
 });
 

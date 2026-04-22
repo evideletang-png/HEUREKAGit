@@ -6,6 +6,7 @@ import {
   jsonb,
   integer,
   doublePrecision,
+  index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
@@ -77,6 +78,55 @@ export const appealDocumentsTable = pgTable("appeal_documents", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const appealDocumentAnalysesTable = pgTable("appeal_document_analyses", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  appealId: uuid("appeal_id").notNull().references(() => appealsTable.id, { onDelete: "cascade" }),
+  documentId: uuid("document_id").notNull().references(() => appealDocumentsTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("processing"),
+  summary: text("summary"),
+  extractedText: text("extracted_text"),
+  analysisJson: jsonb("analysis_json").default({}),
+  globalAdmissibilityScore: doublePrecision("global_admissibility_score"),
+  warnings: jsonb("warnings").default([]),
+  failureReason: text("failure_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  appealIdx: index("appeal_document_analyses_appeal_idx").on(table.appealId),
+  documentIdx: index("appeal_document_analyses_document_idx").on(table.documentId),
+  statusIdx: index("appeal_document_analyses_status_idx").on(table.status),
+}));
+
+export const appealGroundSuggestionsTable = pgTable("appeal_ground_suggestions", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  appealId: uuid("appeal_id").notNull().references(() => appealsTable.id, { onDelete: "cascade" }),
+  documentAnalysisId: uuid("document_analysis_id").notNull().references(() => appealDocumentAnalysesTable.id, { onDelete: "cascade" }),
+  documentId: uuid("document_id").notNull().references(() => appealDocumentsTable.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  category: text("category").notNull().default("autre"),
+  sourceText: text("source_text").notNull(),
+  claimantArgument: text("claimant_argument"),
+  proceduralAssessment: jsonb("procedural_assessment").default({}),
+  substantiveAssessment: jsonb("substantive_assessment").default({}),
+  admissibilityLabel: text("admissibility_label").notNull().default("a_confirmer"),
+  opposabilityLabel: text("opposability_label").notNull().default("a_confirmer"),
+  confidence: text("confidence").notNull().default("low"),
+  seriousnessScore: doublePrecision("seriousness_score"),
+  requiredChecks: jsonb("required_checks").default([]),
+  sources: jsonb("sources").default([]),
+  responseDraft: text("response_draft"),
+  status: text("status").notNull().default("suggested"),
+  acceptedGroundId: uuid("accepted_ground_id").references(() => appealGroundsTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  appealIdx: index("appeal_ground_suggestions_appeal_idx").on(table.appealId),
+  documentIdx: index("appeal_ground_suggestions_document_idx").on(table.documentId),
+  analysisIdx: index("appeal_ground_suggestions_analysis_idx").on(table.documentAnalysisId),
+  statusIdx: index("appeal_ground_suggestions_status_idx").on(table.status),
+  admissibilityIdx: index("appeal_ground_suggestions_admissibility_idx").on(table.admissibilityLabel),
+}));
+
 export const appealEventsTable = pgTable("appeal_events", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   appealId: uuid("appeal_id").notNull().references(() => appealsTable.id, { onDelete: "cascade" }),
@@ -128,4 +178,6 @@ export const insertAppealSchema = createInsertSchema(appealsTable);
 export type Appeal = typeof appealsTable.$inferSelect;
 export type InsertAppeal = typeof appealsTable.$inferInsert;
 export type AppealGround = typeof appealGroundsTable.$inferSelect;
+export type AppealDocumentAnalysis = typeof appealDocumentAnalysesTable.$inferSelect;
+export type AppealGroundSuggestion = typeof appealGroundSuggestionsTable.$inferSelect;
 export type AppealEvent = typeof appealEventsTable.$inferSelect;

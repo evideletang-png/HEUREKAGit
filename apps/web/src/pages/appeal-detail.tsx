@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, ArrowLeft, CalendarClock, FileText, Gavel, Loader2, MessageSquare, Scale, Send, ShieldCheck, Upload } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarClock, CheckCircle2, FileText, Loader2, MessageSquare, Scale, Send, ShieldCheck, Upload, XCircle } from "lucide-react";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -47,6 +47,30 @@ const STATUS_LABELS: Record<string, string> = {
   clos: "Clos",
 };
 
+const ADMISSIBILITY_LABELS: Record<string, string> = {
+  recevable_probable: "Recevable probable",
+  discutable: "Discutable",
+  irrecevable_probable: "Irrecevable probable",
+  a_confirmer: "À confirmer",
+};
+
+const ANALYSIS_STATUS_LABELS: Record<string, string> = {
+  processing: "Analyse en cours",
+  completed: "Analyse terminée",
+  failed: "Analyse échouée",
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  procedure: "Procédure",
+  urbanisme: "Urbanisme",
+  affichage: "Affichage",
+  notification: "Notification",
+  interet_a_agir: "Intérêt à agir",
+  pieces: "Pièces",
+  fond_plu: "Fond PLU",
+  autre: "Autre",
+};
+
 export default function AppealDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -78,6 +102,16 @@ export default function AppealDetailPage() {
   const isInstructor = currentRole === "mairie" || currentRole === "admin" || currentRole === "super_admin";
   const appeal = detailQuery.data?.appeal;
   const dossier = detailQuery.data?.dossier;
+  const documentAnalyses = detailQuery.data?.documentAnalyses || [];
+  const groundSuggestions = detailQuery.data?.groundSuggestions || [];
+  const pendingSuggestions = groundSuggestions.filter((suggestion: any) => suggestion.status === "suggested");
+  const documentAnalysisByDocumentId = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const analysis of documentAnalyses) {
+      if (!map.has(analysis.documentId)) map.set(analysis.documentId, analysis);
+    }
+    return map;
+  }, [documentAnalyses]);
 
   const statusMutation = useMutation({
     mutationFn: (status: string) => apiFetch(`/api/appeals/${id}/status`, {
@@ -138,9 +172,39 @@ export default function AppealDetailPage() {
         body: formData,
       });
     },
+    onSuccess: (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] });
+      toast({
+        title: "Pièce ajoutée",
+        description: payload?.document?.analysisStatus === "processing"
+          ? "Le PDF est stocké et son analyse automatique est lancée."
+          : "Le document a bien été stocké dans le recours.",
+      });
+      if (payload?.document?.analysisStatus === "processing") {
+        setTimeout(() => queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] }), 1500);
+        setTimeout(() => queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] }), 8000);
+      }
+    },
+  });
+
+  const acceptSuggestionMutation = useMutation({
+    mutationFn: (suggestionId: string) => apiFetch(`/api/appeals/${id}/ground-suggestions/${suggestionId}/accept`, {
+      method: "POST",
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] });
-      toast({ title: "Pièce ajoutée", description: "Le document a bien été stocké dans le recours." });
+      queryClient.invalidateQueries({ queryKey: ["appeals"] });
+      toast({ title: "Suggestion convertie", description: "Le point analysé est maintenant un grief qualifié." });
+    },
+  });
+
+  const rejectSuggestionMutation = useMutation({
+    mutationFn: (suggestionId: string) => apiFetch(`/api/appeals/${id}/ground-suggestions/${suggestionId}/reject`, {
+      method: "POST",
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] });
+      toast({ title: "Suggestion écartée", description: "Le point reste archivé mais ne sera pas converti en grief." });
     },
   });
 
@@ -149,10 +213,11 @@ export default function AppealDetailPage() {
     return [
       { label: "Recevabilité", value: appeal.admissibilityScore != null ? `${appeal.admissibilityScore}/100` : "N/A" },
       { label: "Risque urbanistique", value: appeal.urbanRiskScore != null ? `${appeal.urbanRiskScore}/100` : "N/A" },
+      { label: "Suggestions IA", value: `${pendingSuggestions.length}` },
       { label: "Dossier lié", value: dossier?.dossierNumber || dossier?.title || "N/A" },
       { label: "Commune", value: appeal.commune || dossier?.commune || "N/A" },
     ];
-  }, [appeal, dossier]);
+  }, [appeal, dossier, pendingSuggestions.length]);
 
   if (detailQuery.isLoading) {
     return (
@@ -277,7 +342,57 @@ export default function AppealDetailPage() {
           </TabsContent>
 
           <TabsContent value="griefs" className="pt-4">
-            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Scale className="w-4 h-4" />
+                    Analyse automatique du recours
+                  </CardTitle>
+                  <CardDescription>
+                    Les moyens détectés restent des suggestions prudentes. Convertis uniquement les points que tu veux formaliser comme griefs.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {documentAnalyses.length === 0 && (
+                    <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+                      Dépose un PDF de recours dans l’onglet Pièces pour lancer automatiquement l’analyse point par point.
+                    </div>
+                  )}
+                  {documentAnalyses.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {documentAnalyses.map((analysis: any) => (
+                        <Badge key={analysis.id} variant="outline" className="gap-1">
+                          {analysis.status === "processing" && <Loader2 className="w-3 h-3 animate-spin" />}
+                          {analysis.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
+                          {analysis.status === "failed" && <AlertTriangle className="w-3 h-3" />}
+                          {ANALYSIS_STATUS_LABELS[analysis.status] || analysis.status}
+                          {analysis.globalAdmissibilityScore != null ? ` · ${analysis.globalAdmissibilityScore}/100` : ""}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {groundSuggestions.length === 0 && documentAnalyses.some((analysis: any) => analysis.status === "completed") && (
+                    <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+                      L’analyse n’a pas isolé de moyen exploitable. Cela peut arriver avec un PDF trop général ou non argumenté.
+                    </div>
+                  )}
+                  <div className="grid gap-3">
+                    {groundSuggestions.map((suggestion: any) => (
+                      <AppealSuggestionCard
+                        key={suggestion.id}
+                        suggestion={suggestion}
+                        onAccept={() => acceptSuggestionMutation.mutate(suggestion.id)}
+                        onReject={() => rejectSuggestionMutation.mutate(suggestion.id)}
+                        isAccepting={acceptSuggestionMutation.isPending}
+                        isRejecting={rejectSuggestionMutation.isPending}
+                      />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
               <Card>
                 <CardHeader>
                   <CardTitle>Griefs qualifiés</CardTitle>
@@ -334,6 +449,7 @@ export default function AppealDetailPage() {
                 </CardContent>
               </Card>
             </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="pieces" className="pt-4">
@@ -346,17 +462,28 @@ export default function AppealDetailPage() {
                   {(detailQuery.data?.documents || []).length === 0 && (
                     <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">Aucune pièce n'a été téléversée pour l'instant.</div>
                   )}
-                  {(detailQuery.data?.documents || []).map((document: any) => (
-                    <div key={document.id} className="rounded-xl border p-4 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{document.title}</p>
-                        <p className="text-xs text-muted-foreground">{document.category || "Pièce recours"} · {document.originalFileName || document.fileName}</p>
+                  {(detailQuery.data?.documents || []).map((document: any) => {
+                    const analysis = documentAnalysisByDocumentId.get(document.id);
+                    return (
+                      <div key={document.id} className="rounded-xl border p-4 flex items-center justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <p className="font-medium truncate">{document.title}</p>
+                          <p className="text-xs text-muted-foreground">{document.category || "Pièce recours"} · {document.originalFileName || document.fileName}</p>
+                          {analysis && (
+                            <Badge variant="outline" className="gap-1">
+                              {analysis.status === "processing" && <Loader2 className="w-3 h-3 animate-spin" />}
+                              {analysis.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
+                              {analysis.status === "failed" && <AlertTriangle className="w-3 h-3" />}
+                              {ANALYSIS_STATUS_LABELS[analysis.status] || analysis.status}
+                            </Badge>
+                          )}
+                        </div>
+                        <Button variant="outline" asChild>
+                          <a href={`/api/appeals/documents/${document.id}/view`} target="_blank" rel="noreferrer"><FileText className="w-4 h-4 mr-2" /> Ouvrir</a>
+                        </Button>
                       </div>
-                      <Button variant="outline" asChild>
-                        <a href={`/api/appeals/documents/${document.id}/view`} target="_blank" rel="noreferrer"><FileText className="w-4 h-4 mr-2" /> Ouvrir</a>
-                      </Button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardContent>
               </Card>
 
@@ -369,6 +496,7 @@ export default function AppealDetailPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
+                    accept="application/pdf,.pdf"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -477,6 +605,92 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl border p-3">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="font-medium mt-2">{value}</p>
+    </div>
+  );
+}
+
+function readableAssessment(value: any) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value.analysis === "string") return value.analysis;
+  if (typeof value.rule_or_source === "string") return value.rule_or_source;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+function AppealSuggestionCard({
+  suggestion,
+  onAccept,
+  onReject,
+  isAccepting,
+  isRejecting,
+}: {
+  suggestion: any;
+  onAccept: () => void;
+  onReject: () => void;
+  isAccepting: boolean;
+  isRejecting: boolean;
+}) {
+  const isSuggested = suggestion.status === "suggested";
+  const procedural = readableAssessment(suggestion.proceduralAssessment);
+  const substantive = readableAssessment(suggestion.substantiveAssessment);
+  const checks = Array.isArray(suggestion.requiredChecks) ? suggestion.requiredChecks : [];
+
+  return (
+    <div className="rounded-xl border p-4 space-y-3 bg-background">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-semibold">{suggestion.title}</p>
+        <Badge variant="outline">{CATEGORY_LABELS[suggestion.category] || suggestion.category}</Badge>
+        <Badge className={
+          suggestion.admissibilityLabel === "recevable_probable"
+            ? "bg-emerald-600 text-white border-0"
+            : suggestion.admissibilityLabel === "irrecevable_probable"
+              ? "bg-rose-600 text-white border-0"
+              : suggestion.admissibilityLabel === "discutable"
+                ? "bg-amber-500 text-white border-0"
+                : "bg-slate-700 text-white border-0"
+        }>
+          {ADMISSIBILITY_LABELS[suggestion.admissibilityLabel] || "À confirmer"}
+        </Badge>
+        <Badge variant="outline">Confiance {suggestion.confidence || "low"}</Badge>
+        {suggestion.status !== "suggested" && <Badge variant="secondary">{suggestion.status === "accepted" ? "Converti" : "Écarté"}</Badge>}
+      </div>
+      <p className="text-sm text-muted-foreground line-clamp-3">{suggestion.sourceText}</p>
+      {(procedural || substantive) && (
+        <div className="grid gap-3 md:grid-cols-2 text-sm">
+          {procedural && (
+            <div className="rounded-lg bg-muted/30 p-3">
+              <p className="font-medium mb-1">Procédure</p>
+              <p className="text-muted-foreground">{procedural}</p>
+            </div>
+          )}
+          {substantive && (
+            <div className="rounded-lg bg-muted/30 p-3">
+              <p className="font-medium mb-1">Fond / opposabilité</p>
+              <p className="text-muted-foreground">{substantive}</p>
+            </div>
+          )}
+        </div>
+      )}
+      {checks.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-medium mb-1">À vérifier manuellement</p>
+          <p>{checks.map((item: any) => String(item)).join(" · ")}</p>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={onAccept} disabled={!isSuggested || isAccepting}>
+          {isAccepting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+          Convertir en grief
+        </Button>
+        <Button size="sm" variant="outline" onClick={onReject} disabled={!isSuggested || isRejecting}>
+          {isRejecting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <XCircle className="w-4 h-4 mr-2" />}
+          Écarter
+        </Button>
+      </div>
     </div>
   );
 }

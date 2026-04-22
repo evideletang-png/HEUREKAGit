@@ -90,6 +90,109 @@ function buildSourceBlock(source: RetrievedSource): string {
   return `${source.citation} ${source.label}\n${source.content}`;
 }
 
+type QuestionAmbiguityProfile = {
+  isBroad: boolean;
+  requestedTopics: string[];
+  missingDetails: string[];
+  possibleCaseAxes: string[];
+  responseInstruction: string;
+};
+
+const TOPIC_PATTERNS: Array<{ topic: string; patterns: RegExp[] }> = [
+  { topic: "constructibilite", patterns: [/constructib/i, /b[âa]tir/i, /construire/i, /possible/i, /faisab/i, /droit\s+[aà]\s+b[âa]tir/i] },
+  { topic: "hauteur", patterns: [/hauteur/i, /gabarit/i, /fa[iî]tage/i, /[ée]gout/i, /sur[ée]l[ée]vation/i] },
+  { topic: "implantation", patterns: [/recul/i, /retrait/i, /limite/i, /alignement/i, /implant/i, /voie/i] },
+  { topic: "emprise", patterns: [/emprise/i, /\bces\b/i, /surface\s+b[aâ]tie/i, /occupation\s+du\s+sol/i] },
+  { topic: "pleine_terre", patterns: [/pleine\s+terre/i, /espace[s]?\s+vert/i, /plantation/i, /arbre/i] },
+  { topic: "stationnement", patterns: [/stationnement/i, /parking/i, /place[s]?\s+de\s+stationnement/i] },
+  { topic: "destination", patterns: [/destination/i, /usage/i, /commerce/i, /logement/i, /activit[ée]/i, /interdit/i, /autoris/i] },
+  { topic: "cloture", patterns: [/cl[oô]ture/i, /portail/i, /haie/i, /mur/i, /muret/i] },
+  { topic: "risque_servitude", patterns: [/risque/i, /\bppri\b/i, /servitude/i, /abf/i, /patrimoine/i, /oap/i] },
+];
+
+function hasAnyPattern(text: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function inferQuestionAmbiguity(question: string): QuestionAmbiguityProfile {
+  const normalized = normalizeCompact(question).toLowerCase();
+  const requestedTopics = TOPIC_PATTERNS
+    .filter((entry) => hasAnyPattern(normalized, entry.patterns))
+    .map((entry) => entry.topic);
+  const isShortQuestion = normalized.split(/\s+/).filter(Boolean).length <= 8;
+  const asksGeneralFeasibility = /que\s+puis-je|qu['’]est-ce\s+que\s+je\s+peux|est-ce\s+possible|possible\s+de|constructible|quoi\s+faire|peux\s+faire/i.test(normalized);
+  const hasProjectObject = /maison|immeuble|collectif|logement|commerce|bureau|annexe|garage|piscine|extension|sur[ée]l[ée]vation|division|lotissement|changement\s+de\s+destination|r[ée]habilitation|cl[oô]ture/i.test(normalized);
+  const hasActionDetail = /neuf|nouvelle|existant|extension|sur[ée]l[ée]vation|d[ée]molition|division|r[ée]novation|annexe|piscine|cl[oô]ture|stationnement|hauteur|emprise|recul/i.test(normalized);
+  const hasQuantifiedProject = /\d+(?:[,.]\d+)?\s*(m2|m²|m|logements?|places?|niveaux?|lots?)/i.test(normalized);
+
+  const missingDetails: string[] = [];
+  if (!hasProjectObject && (asksGeneralFeasibility || requestedTopics.length === 0)) {
+    missingDetails.push("nature du projet : construction neuve, extension, annexe, division, surélévation, changement de destination, etc.");
+  }
+  if (!hasQuantifiedProject && (requestedTopics.includes("constructibilite") || requestedTopics.includes("emprise") || requestedTopics.includes("stationnement"))) {
+    missingDetails.push("ordre de grandeur : surface créée, nombre de logements/lots, nombre de niveaux ou stationnements visés");
+  }
+  if (!hasActionDetail && requestedTopics.length <= 1) {
+    missingDetails.push("thème réglementaire visé : hauteur, emprise, recul, pleine terre, stationnement, destination, risques/servitudes");
+  }
+  if (!/neuf|existant|extension|sur[ée]l[ée]vation|annexe|piscine|cl[oô]ture/i.test(normalized)) {
+    missingDetails.push("objet concerné : bâtiment principal, annexe, clôture, piscine, extension ou construction existante");
+  }
+
+  const possibleCaseAxes = Array.from(new Set([
+    requestedTopics.length === 0 || requestedTopics.includes("constructibilite")
+      ? "Construction principale neuve / extension de l'existant / annexe / division ou opération groupée"
+      : null,
+    requestedTopics.includes("hauteur") || requestedTopics.includes("constructibilite")
+      ? "Hauteur du bâtiment principal / hauteur d'annexe / hauteur de clôture ou portail / exception service public ou bâtiment voisin"
+      : null,
+    requestedTopics.includes("implantation") || requestedTopics.includes("constructibilite")
+      ? "Implantation sur voie / limites séparatives / piscine / annexe / alignement possible"
+      : null,
+    requestedTopics.includes("emprise") || requestedTopics.includes("pleine_terre") || requestedTopics.includes("constructibilite")
+      ? "Emprise non réglementée ou limitée par les autres règles / pleine terre minimale / exception d'extension si prévue"
+      : null,
+    requestedTopics.includes("stationnement") || requestedTopics.includes("destination")
+      ? "Destination et sous-destination du projet : logement, commerce, activité, équipement, stationnement associé"
+      : null,
+    requestedTopics.includes("risque_servitude") || requestedTopics.length === 0
+      ? "Couches complémentaires : OAP, servitudes, risques, patrimoine, documents graphiques"
+      : null,
+  ].filter((value): value is string => !!value)));
+
+  const isBroad = asksGeneralFeasibility || isShortQuestion || missingDetails.length >= 2;
+  const responseInstruction = isBroad
+    ? [
+        "QUESTION POTENTIELLEMENT TROP OUVERTE : ne donne pas une conclusion unique si les informations de projet sont insuffisantes.",
+        "Commence par dire que la réponse dépend du cas de figure, puis liste les cas possibles utiles pour cette parcelle.",
+        "Pour chaque cas, indique : règle certaine, règle probable, point à confirmer, sources citées.",
+        "Ne choisis jamais arbitrairement entre bâtiment principal, annexe, clôture, extension, piscine, division ou changement de destination.",
+      ].join(" ")
+    : "QUESTION SUFFISAMMENT CIBLEE : réponds directement, tout en signalant les limites si une donnée projet manque.";
+
+  return {
+    isBroad,
+    requestedTopics: requestedTopics.length > 0 ? requestedTopics : ["non_precise"],
+    missingDetails,
+    possibleCaseAxes,
+    responseInstruction,
+  };
+}
+
+function buildAmbiguityGuidance(profile: QuestionAmbiguityProfile) {
+  return [
+    `Niveau de précision de la question : ${profile.isBroad ? "insuffisant ou large" : "suffisant ou ciblé"}.`,
+    `Thèmes détectés : ${profile.requestedTopics.join(", ")}.`,
+    profile.missingDetails.length
+      ? `Informations manquantes à demander ou à signaler : ${profile.missingDetails.join(" | ")}.`
+      : "Aucune information manquante majeure détectée automatiquement.",
+    profile.possibleCaseAxes.length
+      ? `Cas de figure à envisager si la demande reste large : ${profile.possibleCaseAxes.join(" | ")}.`
+      : "",
+    `Instruction de réponse : ${profile.responseInstruction}`,
+  ].filter(Boolean).join("\n");
+}
+
 function dedupeSources(sources: RetrievedSource[]): RetrievedSource[] {
   const seen = new Set<string>();
   const deduped: RetrievedSource[] = [];
@@ -320,8 +423,9 @@ async function buildSystemPrompt(args: {
   geoContext: any;
   retrievedSources: RetrievedSource[];
   territorialPattern: TerritorialPattern | null;
+  question: string;
 }): Promise<string> {
-  const { analysis, parcel, zoneAnalysis, articles, buildability, constraints, geoContext, retrievedSources, territorialPattern } = args;
+  const { analysis, parcel, zoneAnalysis, articles, buildability, constraints, geoContext, retrievedSources, territorialPattern, question } = args;
   const gc = geoContext ?? {};
   const pm = gc.parcel_metrics ?? {};
   const pb = gc.parcel_boundaries ?? {};
@@ -375,6 +479,7 @@ async function buildSystemPrompt(args: {
 
   const customInstructions = await loadPrompt("chat_system");
   const expertInstructions = await loadPrompt("expert_zone_analysis_system");
+  const ambiguityGuidance = buildAmbiguityGuidance(inferQuestionAmbiguity(question));
   const expertAnalysisSummary = expertZoneAnalysis
     ? [
         `Identification: zone ${expertZoneAnalysis.identification?.zoneCode || zoneAnalysis?.zoneCode || "N/D"}${expertZoneAnalysis.identification?.zoneLabel ? ` — ${expertZoneAnalysis.identification.zoneLabel}` : ""}.`,
@@ -459,7 +564,12 @@ REGLES DE REPONSE :
 - Toute interpretation doit mentionner les elements factuels qui la soutiennent dans la meme phrase ou juste apres, avec citations.
 - Distingue toujours clairement : Faits etablis, Interpretation, Points a confirmer.
 - Si une information manque ou si les sources se contredisent, dis-le explicitement.
+- Si la demande de l'utilisateur est large ou insuffisamment precise, ne reduis pas la reponse a une valeur unique : liste les cas de figure possibles, puis precise les donnees a fournir pour arbitrer.
+- Les regles portant sur un objet specifique doivent rester separees : hauteur de construction, hauteur de cloture, annexe, piscine, extension, bâtiment principal, stationnement ou pleine terre ne sont pas interchangeables.
 - La memoire territoriale [M1] n'est jamais opposable seule : elle sert seulement de contexte local.
+
+QUALIFICATION DE LA QUESTION UTILISATEUR :
+${ambiguityGuidance}
 
 DONNEES DE LA PARCELLE :
 - Adresse : ${analysis.address}
@@ -579,6 +689,7 @@ router.post("/:id/chat", authenticate, async (req: AuthRequest, res) => {
       geoContext,
       retrievedSources,
       territorialPattern,
+      question: message,
     });
 
     const chatMessages = [
