@@ -213,7 +213,7 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 function isPlausibleBuildabilityHeight(value: unknown, sourceDetail?: BuildabilitySourceDetail | null): value is number {
-  if (!isFiniteNumber(value) || value <= 0 || value > 80 || (value >= 1900 && value <= 2099)) return false;
+  if (!isFiniteNumber(value) || value < 2.5 || value > 80 || (value >= 1900 && value <= 2099)) return false;
   const sourceText = [
     sourceDetail?.sourceExcerpt,
     sourceDetail?.ruleLabel,
@@ -886,7 +886,7 @@ export default function AnalysisDetailPage() {
   const radarData = buildability ? [
     { subject: "Emprise", A: Math.max(0, (buildability.maxFootprintM2 || 0) / (parcel?.parcelSurfaceM2 || 1) * 100), fullMark: 100 },
     { subject: "Pleine Terre", A: greenSpaceRatio * 100, fullMark: 100 },
-    { subject: "Hauteur", A: Math.min((buildability.maxHeightM || 0) * 10, 100), fullMark: 100 },
+    { subject: "Hauteur", A: isPlausibleBuildabilityHeight(buildability.maxHeightM, buildabilitySourceDetails.height) ? Math.min((buildability.maxHeightM || 0) * 10, 100) : 0, fullMark: 100 },
   ] : [];
   
   // simulatedBilan moved to top

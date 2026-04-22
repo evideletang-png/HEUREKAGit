@@ -24,6 +24,17 @@ export function pickMinPositiveNumeric(values: number[] | null | undefined): num
   return Math.min(...candidates);
 }
 
+export function pickMinBuildingHeight(values: number[] | null | undefined): number | null {
+  const candidates = (values || []).filter((value) =>
+    Number.isFinite(value)
+    && value >= 2.5
+    && value <= 80
+    && !(value >= 1900 && value <= 2099),
+  );
+  if (candidates.length === 0) return null;
+  return Math.min(...candidates);
+}
+
 export function summarizeRuleTexts(values: string[] | null | undefined, emptyLabel: string) {
   const normalized = Array.from(
     new Set(
@@ -44,7 +55,7 @@ export function resolveNormalizedBuildabilitySelections(normalizedRules: Calcula
     roadSetback: pickMaxNumeric(normalizedRules.road_setback),
     boundarySetback: pickMaxNumeric(normalizedRules.boundary_setback),
     internalSpacing: pickMaxNumeric(normalizedRules.internal_spacing),
-    maxHeight: pickMinPositiveNumeric(normalizedRules.max_height),
+    maxHeight: pickMinBuildingHeight(normalizedRules.max_height),
     parkingRequirement: summarizeRuleTexts(normalizedRules.parking_requirements, "").trim() || null,
     landscapingRequirement: summarizeRuleTexts(normalizedRules.landscaping_requirements, "").trim() || null,
   };
