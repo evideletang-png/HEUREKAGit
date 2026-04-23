@@ -675,7 +675,10 @@ router.post("/:id/run", authenticate, async (req: AuthRequest, res) => {
 });
 
 // Cadastral extract PDF download
-router.get("/:id/cadastral-extract", authenticate, async (req: AuthRequest, res) => {
+// Accepts an optional { mapImage: "data:image/png;base64,..." } body.
+// The map image is generated client-side (browser canvas + tile proxy) to bypass
+// IGN's server-side origin allowlist restriction on their WMS GetMap endpoint.
+router.post("/:id/cadastral-extract", authenticate, async (req: AuthRequest, res) => {
   try {
     const idStr = req.params.id as string;
     const [analysis] = await db.select().from(analysesTable)
@@ -689,7 +692,16 @@ router.get("/:id/cadastral-extract", authenticate, async (req: AuthRequest, res)
       res.status(404).json({ error: "NO_PARCEL", message: "Données cadastrales non disponibles." });
       return;
     }
-    const pdfBytes = await generateCadastralExtractPDF(parcel, analysis);
+
+    // Decode optional map image sent as base64 data URL from the browser
+    let mapImageBytes: Uint8Array | null = null;
+    const mapImage = req.body?.mapImage;
+    if (typeof mapImage === "string" && mapImage.startsWith("data:image/")) {
+      const base64 = mapImage.replace(/^data:image\/\w+;base64,/, "");
+      mapImageBytes = new Uint8Array(Buffer.from(base64, "base64"));
+    }
+
+    const pdfBytes = await generateCadastralExtractPDF(parcel, analysis, mapImageBytes);
     const filename = `extrait-cadastral-${parcel.cadastralSection || "parcelle"}-${parcel.parcelNumber || idStr}.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

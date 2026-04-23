@@ -68,6 +68,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { AIConfidence, TraceabilityReference } from "@workspace/ai-core";
 import { MissingInfoAlert } from "@/components/analysis/missing-info-alert";
+import { composeCadastralMap } from "@/utils/mapTileComposer";
 
 type ReliabilityLevel = "validated" | "calculated" | "estimated" | "to_confirm";
 
@@ -565,7 +566,18 @@ export default function AnalysisDetailPage() {
   const handleDownloadCadastralExtract = async () => {
     setCadastralExtractLoading(true);
     try {
-      const res = await fetch(`/api/analyses/${id}/cadastral-extract`, { credentials: "include" });
+      // Generate the cadastral map client-side using browser canvas + tile proxy,
+      // then send it as base64 to the backend which embeds it in the PDF.
+      const mapImage = parcelPositions.length >= 3
+        ? await composeCadastralMap(parcelPositions)
+        : null;
+
+      const res = await fetch(`/api/analyses/${id}/cadastral-extract`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mapImage }),
+      });
       if (!res.ok) throw new Error("Échec du téléchargement");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
