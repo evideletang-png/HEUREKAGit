@@ -560,6 +560,31 @@ export default function AnalysisDetailPage() {
     }
   };
 
+  const [cadastralExtractLoading, setCadastralExtractLoading] = useState(false);
+
+  const handleDownloadCadastralExtract = async () => {
+    setCadastralExtractLoading(true);
+    try {
+      const res = await fetch(`/api/analyses/${id}/cadastral-extract`, { credentials: "include" });
+      if (!res.ok) throw new Error("Échec du téléchargement");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      a.download = match?.[1] ?? `extrait-cadastral.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Erreur", description: "Impossible de générer l'extrait cadastral.", variant: "destructive" });
+    } finally {
+      setCadastralExtractLoading(false);
+    }
+  };
+
   const handleRun = () => {
     runMutation.mutate({ id }, {
       onSuccess: () => {
@@ -1174,7 +1199,24 @@ export default function AnalysisDetailPage() {
             <div className="space-y-6">
               <Card>
                 <CardHeader className="pb-4">
-                  <CardTitle className="text-lg">Données Cadastrales</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Données Cadastrales</CardTitle>
+                    {parcel && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDownloadCadastralExtract}
+                        disabled={cadastralExtractLoading}
+                        className="gap-1.5 text-xs"
+                      >
+                        {cadastralExtractLoading
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Download className="w-3.5 h-3.5" />
+                        }
+                        Extrait cadastral
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex justify-between py-2 border-b border-border/50">

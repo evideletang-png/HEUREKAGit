@@ -30,6 +30,7 @@ import { extractDeterministicRegulatoryRules } from "../services/pluAnalysis.js"
 import { loadRegulatoryUnits, buildArticlesFromRegulatoryUnits } from "../services/regulatoryUnitService.js";
 import { buildArticlesFromUrbanRules, loadStructuredRulesForAnalysis } from "../services/urbanRuleExtractionService.js";
 import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "../services/municipalityAliasService.js";
+import { generateCadastralExtractPDF } from "../services/cadastralExtractService.js";
 
 const router: IRouter = Router();
 
@@ -670,6 +671,33 @@ router.post("/:id/run", authenticate, async (req: AuthRequest, res) => {
   } catch (err) {
     console.error("[analyses/run]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
+  }
+});
+
+// Cadastral extract PDF download
+router.get("/:id/cadastral-extract", authenticate, async (req: AuthRequest, res) => {
+  try {
+    const idStr = req.params.id as string;
+    const [analysis] = await db.select().from(analysesTable)
+      .where(and(eq(analysesTable.id, idStr), eq(analysesTable.userId, req.user!.userId))).limit(1);
+    if (!analysis) {
+      res.status(404).json({ error: "NOT_FOUND", message: "Analyse non trouvée." });
+      return;
+    }
+    const [parcel] = await db.select().from(parcelsTable).where(eq(parcelsTable.analysisId, idStr)).limit(1);
+    if (!parcel) {
+      res.status(404).json({ error: "NO_PARCEL", message: "Données cadastrales non disponibles." });
+      return;
+    }
+    const pdfBytes = await generateCadastralExtractPDF(parcel, analysis);
+    const filename = `extrait-cadastral-${parcel.cadastralSection || "parcelle"}-${parcel.parcelNumber || idStr}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBytes.byteLength);
+    res.status(200).send(Buffer.from(pdfBytes));
+  } catch (err) {
+    console.error("[analyses/cadastral-extract]", err);
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur lors de la génération de l'extrait." });
   }
 });
 
