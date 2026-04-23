@@ -675,23 +675,20 @@ export default function AnalysisDetailPage() {
     ? (parcelMetadata.parcelRefs as string[]).filter(Boolean)
     : [];
 
-  // Build a deep-link URL to cadastre.gouv.fr pre-filled with this parcel's data.
-  // The IDU format is: [insee:5][prefixe:3][section:2][numero:4]
-  const cadastreGouv = (() => {
-    const idu = parcelMetadata?.idu || "";
-    const dept    = idu.length >= 5  ? idu.slice(0, 2)  : "";
-    const comm3   = idu.length >= 5  ? idu.slice(2, 5)  : "";
-    const section = idu.length >= 10 ? idu.slice(8, 10).trim() : (parcel?.cadastralSection || "");
-    const numero  = idu.length >= 14 ? idu.slice(10, 14) : (parcel?.parcelNumber || "");
-    if (!dept || !comm3 || !section || !numero) return null;
-    const params = new URLSearchParams({
-      codeDepartement: dept,
-      codeCommune: comm3,
-      nomCommune: (analysis.city || "").toUpperCase(),
-      codeSection: section,
-      numeroParcelle: numero,
-    });
-    return `https://cadastre.gouv.fr/scpc/rechercherPlan.do?${params.toString()}`;
+  // Deep-link to Géoportail IGN with the cadastral layer centred on the parcel.
+  // Géoportail supports permalink URLs with coordinates + layer — this reliably
+  // opens the cadastral plan at the right location without server-side form auth.
+  const geoportailUrl = (() => {
+    const lat = parcel?.centroidLat;
+    const lng = parcel?.centroidLng;
+    if (!lat || !lng) return null;
+    return (
+      `https://www.geoportail.gouv.fr/carte` +
+      `?c=${lng},${lat}` +
+      `&z=19` +
+      `&l0=CADASTRALPARCELS.PARCELLAIRE_EXPRESS::GEOPORTAIL:OGC:WMTS(1)` +
+      `&permalink=yes`
+    );
   })();
 
   const displayParcelRef = analysis.parcelRef
@@ -1234,11 +1231,11 @@ export default function AnalysisDetailPage() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">Données Cadastrales</CardTitle>
                     <div className="flex items-center gap-2">
-                      {cadastreGouv && (
-                        <a href={cadastreGouv} target="_blank" rel="noopener noreferrer">
+                      {geoportailUrl && (
+                        <a href={geoportailUrl} target="_blank" rel="noopener noreferrer">
                           <Button variant="outline" size="sm" className="gap-1.5 text-xs">
                             <ExternalLink className="w-3.5 h-3.5" />
-                            cadastre.gouv.fr
+                            Voir sur Géoportail
                           </Button>
                         </a>
                       )}
