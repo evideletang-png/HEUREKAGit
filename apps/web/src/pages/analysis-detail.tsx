@@ -674,6 +674,26 @@ export default function AnalysisDetailPage() {
   const groupedParcelRefs = Array.isArray(parcelMetadata?.parcelRefs)
     ? (parcelMetadata.parcelRefs as string[]).filter(Boolean)
     : [];
+
+  // Build a deep-link URL to cadastre.gouv.fr pre-filled with this parcel's data.
+  // The IDU format is: [insee:5][prefixe:3][section:2][numero:4]
+  const cadastreGouv = (() => {
+    const idu = parcelMetadata?.idu || "";
+    const dept    = idu.length >= 5  ? idu.slice(0, 2)  : "";
+    const comm3   = idu.length >= 5  ? idu.slice(2, 5)  : "";
+    const section = idu.length >= 10 ? idu.slice(8, 10).trim() : (parcel?.cadastralSection || "");
+    const numero  = idu.length >= 14 ? idu.slice(10, 14) : (parcel?.parcelNumber || "");
+    if (!dept || !comm3 || !section || !numero) return null;
+    const params = new URLSearchParams({
+      codeDepartement: dept,
+      codeCommune: comm3,
+      nomCommune: (analysis.city || "").toUpperCase(),
+      codeSection: section,
+      numeroParcelle: numero,
+    });
+    return `https://cadastre.gouv.fr/scpc/rechercherPlan.do?${params.toString()}`;
+  })();
+
   const displayParcelRef = analysis.parcelRef
     || (groupedParcelRefs.length > 0
       ? groupedParcelRefs.join(" + ")
@@ -1213,21 +1233,31 @@ export default function AnalysisDetailPage() {
                 <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">Données Cadastrales</CardTitle>
-                    {parcel && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDownloadCadastralExtract}
-                        disabled={cadastralExtractLoading}
-                        className="gap-1.5 text-xs"
-                      >
-                        {cadastralExtractLoading
-                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : <Download className="w-3.5 h-3.5" />
-                        }
-                        Extrait cadastral
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {cadastreGouv && (
+                        <a href={cadastreGouv} target="_blank" rel="noopener noreferrer">
+                          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            cadastre.gouv.fr
+                          </Button>
+                        </a>
+                      )}
+                      {parcel && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadCadastralExtract}
+                          disabled={cadastralExtractLoading}
+                          className="gap-1.5 text-xs"
+                        >
+                          {cadastralExtractLoading
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Download className="w-3.5 h-3.5" />
+                          }
+                          Extrait HEUREKA
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
