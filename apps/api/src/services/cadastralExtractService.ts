@@ -1,61 +1,100 @@
 /**
- * Cadastral Extract PDF Generator
- * Produces a document styled after the official "Extrait du Plan Cadastral" (DGFiP/IGN).
- * The cadastral map image is generated client-side (WMTS tiles via browser proxy)
- * and passed as a PNG buffer to this service.
+ * Cadastral Extract PDF Generator — HEUREKA edition
+ * Professional parcel extract with HEUREKA branding and IGN cadastral map.
  */
 
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
 import type { Analysis, Parcel } from "@workspace/db";
 
+// ── Brand colours ─────────────────────────────────────────────────────────────
+const NAVY   = rgb(0.102, 0.153, 0.267); // #1a2744
+const GOLD   = rgb(0.788, 0.663, 0.431); // #c9a96e
+const WHITE  = rgb(1, 1, 1);
 const BLACK  = rgb(0, 0, 0);
 const GRAY   = rgb(0.45, 0.45, 0.45);
-const LIGHT  = rgb(0.95, 0.95, 0.95);
-const WHITE  = rgb(1, 1, 1);
+const LGRAY  = rgb(0.88, 0.88, 0.88);
+const BGROW  = rgb(0.967, 0.961, 0.945); // alternating row bg
 
-// ── Layout constants ─────────────────────────────────────────────────────────
-const PAGE_W = 595;
-const PAGE_H = 842;
-const MARGIN = 18;
+// ── Layout ────────────────────────────────────────────────────────────────────
+const PAGE_W  = 595;
+const PAGE_H  = 842;
+const MARGIN  = 18;
 const INNER_W = PAGE_W - MARGIN * 2;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── French department lookup (code → name) ────────────────────────────────────
+const DEPTS: Record<string, string> = {
+  "01":"Ain","02":"Aisne","03":"Allier","04":"Alpes-de-Haute-Provence","05":"Hautes-Alpes",
+  "06":"Alpes-Maritimes","07":"Ardèche","08":"Ardennes","09":"Ariège","10":"Aube",
+  "11":"Aude","12":"Aveyron","13":"Bouches-du-Rhône","14":"Calvados","15":"Cantal",
+  "16":"Charente","17":"Charente-Maritime","18":"Cher","19":"Corrèze","2A":"Corse-du-Sud",
+  "2B":"Haute-Corse","21":"Côte-d'Or","22":"Côtes-d'Armor","23":"Creuse","24":"Dordogne",
+  "25":"Doubs","26":"Drôme","27":"Eure","28":"Eure-et-Loir","29":"Finistère",
+  "30":"Gard","31":"Haute-Garonne","32":"Gers","33":"Gironde","34":"Hérault",
+  "35":"Ille-et-Vilaine","36":"Indre","37":"Indre-et-Loire","38":"Isère","39":"Jura",
+  "40":"Landes","41":"Loir-et-Cher","42":"Loire","43":"Haute-Loire","44":"Loire-Atlantique",
+  "45":"Loiret","46":"Lot","47":"Lot-et-Garonne","48":"Lozère","49":"Maine-et-Loire",
+  "50":"Manche","51":"Marne","52":"Haute-Marne","53":"Mayenne","54":"Meurthe-et-Moselle",
+  "55":"Meuse","56":"Morbihan","57":"Moselle","58":"Nièvre","59":"Nord",
+  "60":"Oise","61":"Orne","62":"Pas-de-Calais","63":"Puy-de-Dôme","64":"Pyrénées-Atlantiques",
+  "65":"Hautes-Pyrénées","66":"Pyrénées-Orientales","67":"Bas-Rhin","68":"Haut-Rhin","69":"Rhône",
+  "70":"Haute-Saône","71":"Saône-et-Loire","72":"Sarthe","73":"Savoie","74":"Haute-Savoie",
+  "75":"Paris","76":"Seine-Maritime","77":"Seine-et-Marne","78":"Yvelines","79":"Deux-Sèvres",
+  "80":"Somme","81":"Tarn","82":"Tarn-et-Garonne","83":"Var","84":"Vaucluse",
+  "85":"Vendée","86":"Vienne","87":"Haute-Vienne","88":"Vosges","89":"Yonne",
+  "90":"Territoire de Belfort","91":"Essonne","92":"Hauts-de-Seine","93":"Seine-Saint-Denis",
+  "94":"Val-de-Marne","95":"Val-d'Oise","971":"Guadeloupe","972":"Martinique",
+  "973":"Guyane","974":"La Réunion","976":"Mayotte",
+};
+
+function deptFromIdu(idu: string): { code: string; name: string } | null {
+  if (idu.length < 5) return null;
+  const insee = idu.slice(0, 5);
+  // Corsica: starts with 2A or 2B (INSEE uses 20xxx but sometimes 2A/2B)
+  const code2 = insee.slice(0, 2).toUpperCase();
+  const code3 = insee.slice(0, 3);
+  if (DEPTS[code3]) return { code: code3, name: DEPTS[code3] };
+  if (DEPTS[code2]) return { code: code2, name: DEPTS[code2] };
+  return null;
+}
+
+// ── Drawing helpers ───────────────────────────────────────────────────────────
 
 function drawRect(
-  page: PDFPage,
-  x: number, y: number, w: number, h: number,
+  page: PDFPage, x: number, y: number, w: number, h: number,
   opts: { fill?: ReturnType<typeof rgb>; stroke?: ReturnType<typeof rgb>; thickness?: number } = {},
 ) {
   page.drawRectangle({
     x, y, width: w, height: h,
-    ...(opts.fill ? { color: opts.fill } : {}),
+    ...(opts.fill   ? { color: opts.fill } : {}),
     ...(opts.stroke ? { borderColor: opts.stroke, borderWidth: opts.thickness ?? 0.5 } : {}),
   });
 }
 
-function text(
-  page: PDFPage,
-  str: string, x: number, y: number,
-  size: number, font: PDFFont,
-  color = BLACK,
-  maxWidth?: number,
+function txt(
+  page: PDFPage, s: string, x: number, y: number,
+  size: number, font: PDFFont, color = BLACK, maxW?: number,
 ) {
-  let s = str;
-  if (maxWidth) {
-    while (s.length > 4 && font.widthOfTextAtSize(s, size) > maxWidth) {
-      s = s.slice(0, -1);
-    }
-    if (s !== str) s = s.slice(0, -1) + "…";
+  let str = s;
+  if (maxW) {
+    while (str.length > 4 && font.widthOfTextAtSize(str, size) > maxW) str = str.slice(0, -1);
+    if (str !== s) str = str.slice(0, -1) + "…";
   }
-  page.drawText(s, { x, y, size, font, color });
+  page.drawText(str, { x, y, size, font, color });
 }
 
-function drawHLine(page: PDFPage, x1: number, x2: number, y: number, thickness = 0.5) {
-  page.drawLine({ start: { x: x1, y }, end: { x: x2, y }, thickness, color: BLACK });
+function hline(page: PDFPage, x1: number, x2: number, y: number, c = LGRAY, t = 0.5) {
+  page.drawLine({ start: { x: x1, y }, end: { x: x2, y }, thickness: t, color: c });
 }
 
-function drawVLine(page: PDFPage, x: number, y1: number, y2: number, thickness = 0.5) {
-  page.drawLine({ start: { x, y: y1 }, end: { x, y: y2 }, thickness, color: BLACK });
+function dataRow(
+  page: PDFPage, label: string, value: string,
+  x: number, y: number, w: number, rowH: number,
+  font: PDFFont, bold: PDFFont, shade: boolean,
+) {
+  if (shade) drawRect(page, x, y - rowH, w, rowH, { fill: BGROW });
+  txt(page, label, x + 6, y - rowH + 4, 8, font, GRAY);
+  txt(page, value, x + w * 0.48, y - rowH + 4, 8.5, bold, BLACK, w * 0.5);
+  return y - rowH;
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -66,170 +105,156 @@ export async function generateCadastralExtractPDF(
   mapImageBytes: Uint8Array | null,
 ): Promise<Uint8Array> {
 
-  const metadata: Record<string, string> = (() => {
-    try {
-      const raw = parcel.metadataJson;
-      return (typeof raw === "string" ? JSON.parse(raw) : raw) ?? {};
-    } catch { return {}; }
+  const metadata: Record<string, any> = (() => {
+    try { const r = parcel.metadataJson; return (typeof r === "string" ? JSON.parse(r) : r) ?? {}; }
+    catch { return {}; }
   })();
 
   const gc: Record<string, any> = (() => {
-    try {
-      const raw = analysis.geoContextJson;
-      return (typeof raw === "string" ? JSON.parse(raw) : raw) ?? {};
-    } catch { return {}; }
+    try { const r = analysis.geoContextJson; return (typeof r === "string" ? JSON.parse(r) : r) ?? {}; }
+    catch { return {}; }
   })();
 
-  const commune   = analysis.city || metadata.commune || "N/D";
-  const dept      = gc?.administrative?.department_name || "";
-  const section   = parcel.cadastralSection || metadata.section || "N/D";
-  const numero    = parcel.parcelNumber || metadata.numero || "N/D";
-  const idu       = metadata.idu || "";
-  const feuille   = idu.length >= 14 ? `${idu.slice(5, 8)} ${idu.slice(8, 10)} 01` : `000 ${section} 01`;
-  const surface   = parcel.parcelSurfaceM2 != null ? `${parcel.parcelSurfaceM2} m²` : "N/D";
-  const today     = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const idu       = (metadata.idu || "") as string;
+  const deptInfo  = deptFromIdu(idu);
+  const commune   = (analysis.city || metadata.commune || "").toUpperCase() || "N/D";
+  const deptName  = gc?.administrative?.department_name || deptInfo?.name || "N/D";
+  const deptCode  = deptInfo?.code || (idu.length >= 2 ? idu.slice(0, 2) : "");
+  const inseeCode = idu.length >= 5 ? idu.slice(0, 5) : "";
+  const section   = (parcel.cadastralSection || metadata.section || "N/D") as string;
+  const numero    = (parcel.parcelNumber    || metadata.numero  || "N/D") as string;
+  const feuille   = idu.length >= 14
+    ? `${idu.slice(5, 8)} ${idu.slice(8, 10).trim()} 01`
+    : `000 ${section} 01`;
+  const surface   = parcel.parcelSurfaceM2  != null ? `${parcel.parcelSurfaceM2.toLocaleString("fr-FR")} m²` : "N/D";
+  const frontage  = parcel.roadFrontageLengthM != null ? `${Math.round(parcel.roadFrontageLengthM)} m` : null;
+  const pb        = gc?.parcel_boundaries ?? {};
+  const pm        = gc?.parcel_metrics   ?? {};
+  const rd        = gc?.roads            ?? {};
+  const roadName  = pb.front_road_name ?? rd.nearest_road_name ?? null;
+  const perimeter = pm.perimeter_m != null ? `${Math.round(pm.perimeter_m)} m` : null;
+  const lat       = parcel.centroidLat;
+  const lng       = parcel.centroidLng;
+  const coords    = (lat != null && lng != null)
+    ? `${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E`
+    : null;
+  const today     = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
-  // ── Build PDF ───────────────────────────────────────────────────────────────
-  const pdfDoc   = await PDFDocument.create();
-  const font      = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const bold      = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const page      = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  // ── Build PDF ────────────────────────────────────────────────────────────────
+  const pdfDoc = await PDFDocument.create();
+  const font   = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold   = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const page   = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  let   curY   = PAGE_H;
 
-  // ── HEADER BLOCK ────────────────────────────────────────────────────────────
-  // Outer border of the header table
-  const HDR_TOP  = PAGE_H - MARGIN;
-  const HDR_H    = 190;
-  const HDR_BOT  = HDR_TOP - HDR_H;
+  // ── Navy header bar ──────────────────────────────────────────────────────────
+  const HDR_H = 64;
+  drawRect(page, 0, curY - HDR_H, PAGE_W, HDR_H, { fill: NAVY });
 
-  drawRect(page, MARGIN, HDR_BOT, INNER_W, HDR_H, { stroke: BLACK, thickness: 0.7 });
+  // Gold accent left strip
+  drawRect(page, 0, curY - HDR_H, 5, HDR_H, { fill: GOLD });
 
-  // Column dividers  x
-  const COL1_W = 175;
-  const COL3_W = 165;
-  const COL2_X = MARGIN + COL1_W;
-  const COL3_X = PAGE_W - MARGIN - COL3_W;
-  const COL2_W = COL3_X - COL2_X;
+  txt(page, "HEUREKA", MARGIN + 8, curY - 22, 15, bold, GOLD);
+  txt(page, "ANALYSE URBAINE", MARGIN + 8, curY - 34, 6.5, font, rgb(0.6, 0.6, 0.6));
 
-  drawVLine(page, COL2_X, HDR_BOT, HDR_TOP);
-  drawVLine(page, COL3_X, HDR_BOT, HDR_TOP);
+  const title = "EXTRAIT DU PLAN CADASTRAL";
+  const titleW = bold.widthOfTextAtSize(title, 13);
+  txt(page, title, PAGE_W / 2 - titleW / 2, curY - 28, 13, bold, WHITE);
 
-  // ── Column 1: left metadata ─────────────────────────────────────────────────
-  const L = MARGIN + 6;
-  let ly = HDR_TOP - 14;
-  text(page, "Département :", L, ly, 7, font, GRAY);         ly -= 11;
-  text(page, dept || "N/D", L, ly, 8, bold, BLACK, COL1_W - 10); ly -= 14;
-  text(page, "Commune :", L, ly, 7, font, GRAY);              ly -= 11;
-  text(page, commune.toUpperCase(), L, ly, 8, bold, BLACK, COL1_W - 10); ly -= 16;
-  drawHLine(page, MARGIN, COL2_X, ly + 4, 0.4);
-  text(page, `Section : ${section}`, L, ly, 7.5, font);      ly -= 11;
-  text(page, `Feuille : ${feuille}`, L, ly, 7.5, font);       ly -= 16;
-  drawHLine(page, MARGIN, COL2_X, ly + 4, 0.4);
-  text(page, "Échelle d'origine : 1/500", L, ly, 7, font, GRAY);  ly -= 10;
-  text(page, "Échelle d'édition : 1/200", L, ly, 7, font, GRAY);  ly -= 14;
-  drawHLine(page, MARGIN, COL2_X, ly + 4, 0.4);
-  text(page, `Date d'édition : ${today}`, L, ly, 7, font);   ly -= 10;
-  text(page, "(fuseau horaire de Paris)", L, ly, 6.5, font, GRAY);  ly -= 14;
-  drawHLine(page, MARGIN, COL2_X, ly + 4, 0.4);
-  text(page, "Coordonnées en projection : WGS84", L, ly, 6.5, font, GRAY);  ly -= 9;
-  text(page, "Source : IGN — data.geopf.fr", L, ly, 6.5, font, GRAY);
+  txt(page, `Édité le ${today}`, PAGE_W - MARGIN - 90, curY - 22, 7, font, rgb(0.55, 0.55, 0.55));
+  txt(page, "Source : IGN — data.geopf.fr", PAGE_W - MARGIN - 90, curY - 32, 6.5, font, rgb(0.5, 0.5, 0.5));
+  txt(page, "Document non opposable à des tiers", PAGE_W - MARGIN - 90, curY - 42, 6, font, rgb(0.45, 0.45, 0.45));
 
-  // ── Column 2: title (center) ─────────────────────────────────────────────────
-  const C_MID = COL2_X + COL2_W / 2;
-  const titleLines = [
-    { t: "DIRECTION GÉNÉRALE", size: 7.5, f: bold },
-    { t: "DES FINANCES PUBLIQUES", size: 7.5, f: bold },
-    { t: "————————", size: 7, f: font },
-    { t: "EXTRAIT DU", size: 12, f: bold },
-    { t: "PLAN CADASTRAL", size: 12, f: bold },
-    { t: "————————", size: 7, f: font },
+  curY -= HDR_H + 10;
+
+  // ── Two-column info block ────────────────────────────────────────────────────
+  const COL_W  = INNER_W / 2 - 4;
+  const ROW_H  = 17;
+  const LX     = MARGIN;
+  const RX     = MARGIN + COL_W + 8;
+
+  // Column titles
+  const colTitleY = curY;
+  drawRect(page, LX, colTitleY - 16, COL_W, 16, { fill: NAVY });
+  drawRect(page, RX, colTitleY - 16, COL_W, 16, { fill: NAVY });
+  txt(page, "IDENTIFICATION CADASTRALE", LX + 6, colTitleY - 11, 7.5, bold, GOLD);
+  txt(page, "LOCALISATION & GÉOMÉTRIE",  RX + 6, colTitleY - 11, 7.5, bold, GOLD);
+  curY = colTitleY - 16;
+
+  // Left column rows
+  const leftRows: [string, string][] = [
+    ["Section",    section],
+    ["Numéro",     numero],
+    ["Feuille",    feuille],
+    ["Surface",    surface],
+    ...(frontage ? [["Linéaire voie", frontage] as [string, string]] : []),
+    ...(idu       ? [["IDU",          idu]       as [string, string]] : []),
+    ...(inseeCode ? [["Code INSEE",   inseeCode] as [string, string]] : []),
   ];
-  let ty = HDR_TOP - 18;
-  for (const l of titleLines) {
-    const w = l.f.widthOfTextAtSize(l.t, l.size);
-    text(page, l.t, C_MID - w / 2, ty, l.size, l.f);
-    ty -= l.size + 5;
-  }
-  // Surface chip
-  const chipLabel = `Surface : ${surface}`;
-  const chipW = bold.widthOfTextAtSize(chipLabel, 8) + 10;
-  drawRect(page, C_MID - chipW / 2, ty - 5, chipW, 14, { fill: LIGHT, stroke: BLACK, thickness: 0.4 });
-  text(page, chipLabel, C_MID - chipW / 2 + 5, ty, 8, bold);
-  ty -= 20;
 
-  if (idu) {
-    const iduLabel = `IDU : ${idu}`;
-    const iduW = font.widthOfTextAtSize(iduLabel, 7);
-    text(page, iduLabel, C_MID - iduW / 2, ty, 7, font, GRAY);
-    ty -= 12;
-  }
-
-  // ── Column 3: right info ─────────────────────────────────────────────────────
-  const R = COL3_X + 6;
-  const RW = COL3_W - 10;
-  let ry = HDR_TOP - 14;
-  const rightLines = [
-    "Le plan visualisé sur cet extrait est géré",
-    "par le service des impôts fonciers :",
-    "",
-    "Pour toute question, consultez :",
-    "cadastre.gouv.fr",
+  // Right column rows
+  const rightRows: [string, string][] = [
+    ["Commune",     commune],
+    ["Département", deptCode ? `${deptCode} — ${deptName}` : deptName],
+    ...(roadName   ? [["Voie",       roadName]                          as [string, string]] : []),
+    ...(perimeter  ? [["Périmètre",  perimeter]                        as [string, string]] : []),
+    ...(coords     ? [["Coordonnées (WGS84)", coords]                  as [string, string]] : []),
   ];
-  for (const l of rightLines) {
-    if (l === "cadastre.gouv.fr") {
-      text(page, l, R, ry, 7.5, bold, BLACK, RW);
-    } else {
-      text(page, l, R, ry, 7, font, GRAY, RW);
-    }
-    ry -= l === "" ? 8 : 10;
-  }
-  drawHLine(page, COL3_X, PAGE_W - MARGIN, ry + 4, 0.4);
-  ry -= 4;
-  text(page, "Cet extrait vous est délivré par :", R, ry, 7, font, GRAY, RW);
-  ry -= 12;
-  text(page, "HEUREKA", R, ry, 10, bold, BLACK);
-  ry -= 11;
-  text(page, "analyse-urbaine.fr", R, ry, 7.5, font, GRAY, RW);
-  ry -= 14;
-  text(page, "Document non opposable à des tiers.", R, ry, 6.5, font, GRAY, RW);
 
-  // ── MAP AREA ────────────────────────────────────────────────────────────────
-  const MAP_TOP  = HDR_BOT - 2;          // 2pt gap below header
-  const MAP_BOT  = MARGIN + 20;           // leave space for footer
-  const MAP_H    = MAP_TOP - MAP_BOT;
-  const MAP_X    = MARGIN;
+  const maxRows = Math.max(leftRows.length, rightRows.length);
+  let ly = curY;
+  let ry = curY;
+
+  for (let i = 0; i < leftRows.length; i++) {
+    ly = dataRow(page, leftRows[i][0], leftRows[i][1], LX, ly, COL_W, ROW_H, font, bold, i % 2 === 0);
+  }
+  // Left column border
+  drawRect(page, LX, ly, COL_W, curY - ly, { stroke: LGRAY, thickness: 0.5 });
+
+  for (let i = 0; i < rightRows.length; i++) {
+    ry = dataRow(page, rightRows[i][0], rightRows[i][1], RX, ry, COL_W, ROW_H, font, bold, i % 2 === 0);
+  }
+  // Right column border
+  drawRect(page, RX, ry, COL_W, curY - ry, { stroke: LGRAY, thickness: 0.5 });
+
+  curY = Math.min(ly, ry) - 12;
+
+  // ── Map section title bar ────────────────────────────────────────────────────
+  drawRect(page, MARGIN, curY - 16, INNER_W, 16, { fill: NAVY });
+  txt(page, "PLAN CADASTRAL  —  Source : IGN CADASTRALPARCELS.PARCELLAIRE_EXPRESS", MARGIN + 6, curY - 11, 7.5, bold, GOLD);
+  curY -= 16;
+
+  // ── Map image ────────────────────────────────────────────────────────────────
+  const FOOTER_H = 24;
+  const MAP_H    = curY - MARGIN - FOOTER_H;
   const MAP_W    = INNER_W;
 
-  drawRect(page, MAP_X, MAP_BOT, MAP_W, MAP_H, { stroke: BLACK, thickness: 0.7 });
+  drawRect(page, MARGIN, MARGIN + FOOTER_H, MAP_W, MAP_H, { stroke: LGRAY, thickness: 0.5 });
 
   if (mapImageBytes) {
     try {
-      const img = await pdfDoc.embedPng(mapImageBytes);
-      const { width: nW, height: nH } = img;
-      const scale  = Math.min((MAP_W - 2) / nW, (MAP_H - 2) / nH, 1);
-      const drawW  = nW * scale;
-      const drawH  = nH * scale;
-      const imgX   = MAP_X + (MAP_W - drawW) / 2;
-      const imgY   = MAP_BOT + (MAP_H - drawH) / 2;
-      page.drawImage(img, { x: imgX, y: imgY, width: drawW, height: drawH });
-    } catch {
-      drawRect(page, MAP_X + 1, MAP_BOT + 1, MAP_W - 2, MAP_H - 2, { fill: LIGHT });
-      const msg = "Carte cadastrale non disponible";
-      const msgW = font.widthOfTextAtSize(msg, 10);
-      text(page, msg, MAP_X + (MAP_W - msgW) / 2, MAP_BOT + MAP_H / 2, 10, font, GRAY);
-    }
-  } else {
-    drawRect(page, MAP_X + 1, MAP_BOT + 1, MAP_W - 2, MAP_H - 2, { fill: LIGHT });
-    const msg = "Carte cadastrale non disponible";
-    const msgW = font.widthOfTextAtSize(msg, 10);
-    text(page, msg, MAP_X + (MAP_W - msgW) / 2, MAP_BOT + MAP_H / 2, 10, font, GRAY);
+      const img   = await pdfDoc.embedPng(mapImageBytes);
+      const scale = Math.min((MAP_W - 2) / img.width, (MAP_H - 2) / img.height, 1);
+      const dW    = img.width  * scale;
+      const dH    = img.height * scale;
+      page.drawImage(img, {
+        x: MARGIN + (MAP_W - dW) / 2,
+        y: MARGIN + FOOTER_H + (MAP_H - dH) / 2,
+        width: dW, height: dH,
+      });
+    } catch { /* placeholder below */ }
   }
 
-  // ── FOOTER ───────────────────────────────────────────────────────────────────
-  const footerY = MARGIN + 4;
-  const footerText =
-    `©${new Date().getFullYear()} Direction Générale des Finances Publiques — Données IGN — Document généré par HEUREKA le ${today}`;
-  const ftW = font.widthOfTextAtSize(footerText, 6);
-  text(page, footerText, PAGE_W / 2 - ftW / 2, footerY, 6, font, GRAY);
+  if (!mapImageBytes) {
+    const msg  = "Carte cadastrale en cours de génération…";
+    const msgW = font.widthOfTextAtSize(msg, 9);
+    txt(page, msg, MARGIN + (MAP_W - msgW) / 2, MARGIN + FOOTER_H + MAP_H / 2, 9, font, GRAY);
+  }
+
+  // ── Footer ───────────────────────────────────────────────────────────────────
+  hline(page, MARGIN, PAGE_W - MARGIN, MARGIN + FOOTER_H - 2, LGRAY);
+  const foot = `©${new Date().getFullYear()} Direction Générale des Finances Publiques · Données IGN open data · Document généré par HEUREKA — ${today}`;
+  txt(page, foot, MARGIN, MARGIN + 7, 6, font, GRAY, INNER_W);
 
   return pdfDoc.save();
 }
