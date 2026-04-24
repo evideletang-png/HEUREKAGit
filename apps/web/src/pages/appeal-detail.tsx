@@ -81,6 +81,7 @@ export default function AppealDetailPage() {
 
   const [nextStatus, setNextStatus] = useState("analyse_recevabilite");
   const [message, setMessage] = useState("");
+  const [linkDossierId, setLinkDossierId] = useState("");
   const [newGround, setNewGround] = useState({
     category: "urbanisme",
     title: "",
@@ -97,6 +98,11 @@ export default function AppealDetailPage() {
     queryKey: ["appeal-detail", id],
     queryFn: () => apiFetch(`/api/appeals/${id}`),
     enabled: !!id,
+  });
+
+  const dossierOptionsQuery = useQuery<{ dossiers: Array<{ id: string; title?: string | null; dossierNumber?: string | null; commune?: string | null; address?: string | null }> }>({
+    queryKey: ["appeal-dossier-options"],
+    queryFn: () => apiFetch("/api/appeals/options/dossiers"),
   });
 
   const isInstructor = currentRole === "mairie" || currentRole === "admin" || currentRole === "super_admin";
@@ -184,6 +190,22 @@ export default function AppealDetailPage() {
         setTimeout(() => queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] }), 1500);
         setTimeout(() => queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] }), 8000);
       }
+    },
+  });
+
+  const linkDossierMutation = useMutation({
+    mutationFn: () => apiFetch(`/api/appeals/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ linkedUrbanismCaseId: linkDossierId }),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appeal-detail", id] });
+      queryClient.invalidateQueries({ queryKey: ["appeals"] });
+      setLinkDossierId("");
+      toast({ title: "Dossier rattaché", description: "Le recours est maintenant relié au dossier initial." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Rattachement impossible", description: error.message || "Le dossier n'a pas pu être rattaché.", variant: "destructive" });
     },
   });
 
@@ -288,6 +310,38 @@ export default function AppealDetailPage() {
             </Card>
           ))}
         </div>
+
+        {!dossier && (
+          <Card className="border-amber-200 bg-amber-50/60">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-700" />
+                Recours à rattacher au dossier initial
+              </CardTitle>
+              <CardDescription>
+                Ce suivi peut provenir d’un recours papier importé. Rattache-le au dossier concerné dès que la référence est confirmée.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <Select value={linkDossierId} onValueChange={setLinkDossierId}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Sélectionner le dossier initial" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(dossierOptionsQuery.data?.dossiers || []).map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {(item.dossierNumber || item.title || "Dossier") + (item.commune ? ` · ${item.commune}` : "")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={() => linkDossierMutation.mutate()} disabled={linkDossierMutation.isPending || !linkDossierId}>
+                {linkDossierMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                Rattacher
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <Tabs defaultValue="synthese" className="w-full">
           <TabsList className="flex flex-wrap h-auto gap-2 bg-muted/30 p-2">

@@ -499,6 +499,163 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
   }
 });
 
+router.post("/intake-document", authenticate, upload.single("file"), async (req: AuthRequest, res) => {
+  const file = (req as any).file as Express.Multer.File | undefined;
+  try {
+    if (!file) {
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "PDF du recours requis." });
+      return;
+    }
+    if (file.mimetype !== "application/pdf" && !file.originalname.toLowerCase().endsWith(".pdf")) {
+      try { fs.unlinkSync(file.path); } catch {}
+      res.status(400).json({ error: "VALIDATION_ERROR", message: "Seuls les PDF sont acceptés pour créer un suivi de recours papier." });
+      return;
+    }
+
+    const { role, communes, user } = await getUserContext(req.user!.userId);
+    const commune = String(req.body.commune || "").trim();
+    if (commune && role === "mairie" && !communes.some((item) => item.toLowerCase() === commune.toLowerCase())) {
+      try { fs.unlinkSync(file.path); } catch {}
+      res.status(403).json({ error: "FORBIDDEN", message: "Vous n'avez pas accès à cette commune." });
+      return;
+    }
+
+    const appealType = String(req.body.appealType || "gracieux");
+    const summary = String(req.body.summary || "").trim() || `Recours papier reçu - ${file.originalname}`;
+    const filing = toDateOrNull(req.body.filingDate || null);
+    const computedScores = computeScores({
+      appealType,
+      postingEvidenceStatus: "a_confirmer",
+      groundsCount: 0,
+      hasAuthorityNotification: false,
+      hasBeneficiaryNotification: false,
+    });
+
+    const [appeal] = await db.insert(appealsTable).values({
+      linkedUrbanismCaseId: null,
+      appealType,
+      status: "analyse_recevabilite",
+      claimantRole: String(req.body.claimantRole || "tiers_requerant"),
+      claimantIdentity: {
+        name: req.body.claimantName || null,
+        source: "paper_intake",
+      },
+      beneficiaryIdentity: {},
+      authorityIdentity: commune ? { commune } : {},
+      projectAddress: req.body.projectAddress || null,
+      decisionReference: req.body.decisionReference || null,
+      permitType: req.body.permitType || null,
+      postingEvidenceStatus: "a_confirmer",
+      filingDate: filing,
+      admissibilityScore: computedScores.admissibilityScore,
+      urbanRiskScore: computedScores.urbanRiskScore,
+      summary,
+      commune: commune || null,
+      metadata: {
+        intakeMode: "paper_pdf",
+        requiresDossierLink: true,
+        createdFromRole: role,
+        originalFileName: file.originalname,
+      },
+      createdBy: req.user!.userId,
+    }).returning();
+
+    await db.insert(appealPartiesTable).values([
+      { appealId: appeal.id, partyRole: "claimant", identity: { name: req.body.claimantName || null, source: "paper_intake" } },
+      { appealId: appeal.id, partyRole: "beneficiary", identity: {} },
+      { appealId: appeal.id, partyRole: "authority", identity: commune ? { commune } : {} },
+    ]);
+
+    const deadlineRows = buildDeadlineRows(appeal.id, {
+      filingDate: filing,
+      notificationToAuthorityDate: null,
+      notificationToBeneficiaryDate: null,
+    });
+    if (deadlineRows.length > 0) {
+      await db.insert(appealDeadlinesTable).values(deadlineRows);
+    }
+
+    await db.insert(appealNotificationsTable).values([
+      {
+        appealId: appeal.id,
+        type: "notification_autorite",
+        status: "a_confirmer",
+        targetRole: "mairie",
+        dueAt: filing ? addDays(filing, 15) : null,
+        sentAt: null,
+        notes: "Notification à vérifier depuis le recours papier importé",
+      },
+      {
+        appealId: appeal.id,
+        type: "notification_beneficiaire",
+        status: "a_confirmer",
+        targetRole: "beneficiaire",
+        dueAt: filing ? addDays(filing, 15) : null,
+        sentAt: null,
+        notes: "Notification au bénéficiaire à vérifier depuis le recours papier importé",
+      },
+    ]);
+
+    const ext = path.extname(file.originalname || "") || ".pdf";
+    const storedFileName = `${crypto.randomUUID()}${ext}`;
+    const uploadDir = path.resolve(process.cwd(), "uploads");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    const finalPath = path.join(uploadDir, storedFileName);
+    fs.copyFileSync(file.path, finalPath);
+    try { fs.unlinkSync(file.path); } catch {}
+
+    const [document] = await db.insert(appealDocumentsTable).values({
+      appealId: appeal.id,
+      uploadedBy: req.user!.userId,
+      title: req.body.title || file.originalname,
+      category: "piece_recours",
+      fileName: storedFileName,
+      originalFileName: file.originalname,
+      mimeType: file.mimetype,
+      fileSize: file.size,
+    }).returning();
+
+    await logAppealEvent(
+      appeal.id,
+      req.user!.userId,
+      "PAPER_RECOURSE_INTAKE",
+      `Suivi créé depuis un recours papier importé: ${file.originalname}.`,
+      { documentId: document.id, commune: commune || null },
+    );
+
+    setImmediate(() => {
+      analyzeAppealDocument({
+        appeal,
+        dossier: null,
+        document,
+        filePath: finalPath,
+        userId: req.user!.userId,
+      }).catch((error) => {
+        console.error("[appeals/intake-document/analysis/background]", error);
+      });
+    });
+
+    if (commune) {
+      await NotificationService.notifyRoleInCommune({
+        role: "mairie",
+        commune,
+        type: "STATUS_CHANGE",
+        title: "Nouveau recours papier importé",
+        message: `${user?.name || user?.email || "Un utilisateur"} a créé un suivi de recours depuis un PDF reçu papier.`,
+        priority: "HIGH",
+      }).catch(() => undefined);
+    }
+
+    res.status(201).json({ appeal, document: { ...document, analysisStatus: "processing" } });
+  } catch (err) {
+    console.error("[appeals/intake-document]", err);
+    if (file?.path) {
+      try { fs.unlinkSync(file.path); } catch {}
+    }
+    res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de créer le suivi depuis ce recours papier." });
+  }
+});
+
 router.get("/:id", authenticate, async (req: AuthRequest, res) => {
   try {
     const { allowed, appeal, dossier } = await canAccessAppeal(req.params.id as string, req.user!);
@@ -559,6 +716,38 @@ router.patch("/:id", authenticate, async (req: AuthRequest, res) => {
     const updates: Record<string, unknown> = {
       updatedAt: new Date(),
     };
+
+    if ("linkedUrbanismCaseId" in payload) {
+      if (!payload.linkedUrbanismCaseId) {
+        updates.linkedUrbanismCaseId = null;
+      } else {
+        const [targetDossier] = await db.select().from(dossiersTable).where(eq(dossiersTable.id, payload.linkedUrbanismCaseId)).limit(1);
+        if (!targetDossier) {
+          res.status(404).json({ error: "NOT_FOUND", message: "Dossier d'urbanisme introuvable." });
+          return;
+        }
+        const { role, communes } = await getUserContext(req.user!.userId);
+        const canAttach =
+          role === "admin"
+          || role === "super_admin"
+          || targetDossier.userId === req.user!.userId
+          || canAccessByCommune(role, communes, targetDossier.commune);
+        if (!canAttach) {
+          res.status(403).json({ error: "FORBIDDEN", message: "Vous ne pouvez pas rattacher ce recours à ce dossier." });
+          return;
+        }
+        updates.linkedUrbanismCaseId = targetDossier.id;
+        if (!appeal.projectAddress && targetDossier.address) updates.projectAddress = targetDossier.address;
+        if (!appeal.decisionReference && targetDossier.dossierNumber) updates.decisionReference = targetDossier.dossierNumber;
+        if (!appeal.permitType && targetDossier.typeProcedure) updates.permitType = targetDossier.typeProcedure;
+        if (!appeal.commune && targetDossier.commune) updates.commune = targetDossier.commune;
+        updates.metadata = {
+          ...(appeal.metadata || {}),
+          requiresDossierLink: false,
+          linkedFromPaperIntakeAt: new Date().toISOString(),
+        };
+      }
+    }
 
     const allowedFields = [
       "status",

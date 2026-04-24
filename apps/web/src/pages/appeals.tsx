@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, BrainCircuit, FileSearch, Gavel, Loader2, Plus, ShieldAlert, Sparkles } from "lucide-react";
+import { ArrowRight, BrainCircuit, FileSearch, Gavel, Loader2, Plus, ShieldAlert, Sparkles, Upload, X } from "lucide-react";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -105,6 +105,15 @@ export default function AppealsPage() {
   const [deadlineFilter, setDeadlineFilter] = useState("all");
   const [linkedUrbanismCaseId, setLinkedUrbanismCaseId] = useState("");
   const [step, setStep] = useState<"autorisation" | "requérant" | "qualification" | "griefs" | "validation">("autorisation");
+  const [appealPdf, setAppealPdf] = useState<File | null>(null);
+  const [paperAppealPdf, setPaperAppealPdf] = useState<File | null>(null);
+  const [paperIntake, setPaperIntake] = useState({
+    appealType: "gracieux",
+    commune: "",
+    decisionReference: "",
+    filingDate: "",
+    summary: "",
+  });
 
   const [form, setForm] = useState({
     appealType: "signalement",
@@ -180,7 +189,7 @@ export default function AppealsPage() {
   const createAppeal = useMutation({
     mutationFn: async () => {
       if (!linkedUrbanismCaseId) throw new Error("Veuillez lier le recours à un dossier existant.");
-      return apiFetch("/api/appeals", {
+      const created = await apiFetch("/api/appeals", {
         method: "POST",
         body: JSON.stringify({
           linkedUrbanismCaseId,
@@ -217,14 +226,80 @@ export default function AppealsPage() {
           status: "nouveau",
         }),
       });
+
+      if (!appealPdf || !created?.appeal?.id) {
+        return { ...created, uploadResult: null, uploadError: null };
+      }
+
+      const uploadForm = new FormData();
+      uploadForm.append("file", appealPdf);
+      uploadForm.append("title", appealPdf.name);
+      uploadForm.append("category", "piece_recours");
+
+      try {
+        const uploadResult = await apiFetch(`/api/appeals/${created.appeal.id}/documents`, {
+          method: "POST",
+          body: uploadForm,
+        });
+        return { ...created, uploadResult, uploadError: null };
+      } catch (error: any) {
+        return { ...created, uploadResult: null, uploadError: error?.message || "Le PDF n'a pas pu être envoyé." };
+      }
     },
     onSuccess: (payload) => {
       queryClient.invalidateQueries({ queryKey: ["appeals"] });
-      toast({ title: "Recours créé", description: "Le module Recours est maintenant initialisé pour ce dossier." });
+      if (payload.uploadResult?.analysisStatus === "processing") {
+        toast({ title: "Recours créé", description: "Le PDF est envoyé et l'analyse automatique démarre." });
+      } else if (payload.uploadError) {
+        toast({
+          title: "Recours créé, PDF non envoyé",
+          description: payload.uploadError,
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Recours créé", description: "Le module Recours est maintenant initialisé pour ce dossier." });
+      }
+      setAppealPdf(null);
       setLocation(`/recours/${payload.appeal.id}`);
     },
     onError: (error: any) => {
       toast({ title: "Création impossible", description: error.message || "Le recours n'a pas pu être créé.", variant: "destructive" });
+    },
+  });
+
+  const paperIntakeMutation = useMutation({
+    mutationFn: async () => {
+      if (!paperAppealPdf) throw new Error("Dépose le PDF scanné du recours papier.");
+      const formData = new FormData();
+      formData.append("file", paperAppealPdf);
+      formData.append("title", paperAppealPdf.name);
+      formData.append("appealType", paperIntake.appealType);
+      formData.append("claimantRole", "tiers_requerant");
+      if (paperIntake.commune.trim()) formData.append("commune", paperIntake.commune.trim());
+      if (paperIntake.decisionReference.trim()) formData.append("decisionReference", paperIntake.decisionReference.trim());
+      if (paperIntake.filingDate) formData.append("filingDate", paperIntake.filingDate);
+      if (paperIntake.summary.trim()) formData.append("summary", paperIntake.summary.trim());
+
+      return apiFetch("/api/appeals/intake-document", {
+        method: "POST",
+        body: formData,
+      });
+    },
+    onSuccess: (payload) => {
+      queryClient.invalidateQueries({ queryKey: ["appeals"] });
+      setPaperAppealPdf(null);
+      setPaperIntake({
+        appealType: "gracieux",
+        commune: "",
+        decisionReference: "",
+        filingDate: "",
+        summary: "",
+      });
+      toast({ title: "Suivi créé", description: "Le recours papier est importé et l'analyse automatique démarre." });
+      setLocation(`/recours/${payload.appeal.id}`);
+    },
+    onError: (error: any) => {
+      toast({ title: "Import impossible", description: error.message || "Le recours papier n'a pas pu être importé.", variant: "destructive" });
     },
   });
 
@@ -259,7 +334,7 @@ export default function AppealsPage() {
                       Analyse automatique des recours PDF
                     </CardTitle>
                     <CardDescription className="mt-2">
-                      Ouvre un recours, dépose le PDF dans l’onglet Pièces, puis Heuréka extrait les moyens point par point avec une recevabilité prudente.
+                      Dépose le PDF dès la création du recours, ou depuis l’onglet Pièces ensuite : Heuréka extrait les moyens point par point avec une recevabilité prudente.
                     </CardDescription>
                   </div>
                   <Badge className="w-fit bg-primary text-primary-foreground border-0">
@@ -268,18 +343,117 @@ export default function AppealsPage() {
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-3 text-sm">
-                <div className="rounded-xl border bg-background/80 p-3">
-                  <p className="font-medium">1. Déposer le PDF</p>
-                  <p className="text-muted-foreground mt-1">Catégorie recours, requête ou mémoire : l’analyse démarre automatiquement.</p>
+              <CardContent className="space-y-4 text-sm">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border bg-background/80 p-3">
+                    <p className="font-medium">1. Déposer le PDF</p>
+                    <p className="text-muted-foreground mt-1">Recours papier scanné, requête ou mémoire : l’analyse démarre automatiquement.</p>
+                  </div>
+                  <div className="rounded-xl border bg-background/80 p-3">
+                    <p className="font-medium">2. Points détectés</p>
+                    <p className="text-muted-foreground mt-1">Procédure, affichage, intérêt à agir, pièces, fond PLU et autres moyens.</p>
+                  </div>
+                  <div className="rounded-xl border bg-background/80 p-3">
+                    <p className="font-medium">3. Suggestions validables</p>
+                    <p className="text-muted-foreground mt-1">Chaque point peut être converti en grief ou écarté, sans création automatique.</p>
+                  </div>
                 </div>
-                <div className="rounded-xl border bg-background/80 p-3">
-                  <p className="font-medium">2. Points détectés</p>
-                  <p className="text-muted-foreground mt-1">Procédure, affichage, intérêt à agir, pièces, fond PLU et autres moyens.</p>
-                </div>
-                <div className="rounded-xl border bg-background/80 p-3">
-                  <p className="font-medium">3. Suggestions validables</p>
-                  <p className="text-muted-foreground mt-1">Chaque point peut être converti en grief ou écarté, sans création automatique.</p>
+
+                <div className="rounded-2xl border bg-background/90 p-4 shadow-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="font-semibold text-primary">Créer un suivi depuis un recours papier</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Scanne le courrier reçu, importe le PDF, puis rattache le recours au dossier initial quand l’analyse a identifié les références.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="w-fit bg-amber-50 text-amber-700 border-amber-100">Sans dossier préalable</Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
+                    <div className="space-y-2">
+                      <Label>PDF scanné reçu</Label>
+                      {paperAppealPdf ? (
+                        <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/30 p-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{paperAppealPdf.name}</p>
+                            <p className="text-xs text-muted-foreground">{Math.max(1, Math.round(paperAppealPdf.size / 1024))} Ko · Création du suivi prête</p>
+                          </div>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setPaperAppealPdf(null)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <label className="flex min-h-[112px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-muted/20 p-4 text-center transition-colors hover:border-primary/40 hover:bg-primary/5">
+                          <Upload className="h-5 w-5 text-primary" />
+                          <span className="font-medium">Choisir le PDF du recours reçu</span>
+                          <span className="text-xs text-muted-foreground">Le suivi sera créé puis analysé automatiquement.</span>
+                          <input
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            className="sr-only"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] || null;
+                              event.target.value = "";
+                              if (!file) return;
+                              if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+                                toast({ title: "Format non accepté", description: "Dépose uniquement un fichier PDF.", variant: "destructive" });
+                                return;
+                              }
+                              setPaperAppealPdf(file);
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-1">
+                        <div className="space-y-2">
+                          <Label>Type</Label>
+                          <Select value={paperIntake.appealType} onValueChange={(value) => setPaperIntake((current) => ({ ...current, appealType: value }))}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="gracieux">Recours gracieux</SelectItem>
+                              <SelectItem value="contentieux">Recours contentieux</SelectItem>
+                              <SelectItem value="signalement">Signalement</SelectItem>
+                              <SelectItem value="deja_engage">Contentieux déjà engagé</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Commune</Label>
+                          <Input value={paperIntake.commune} onChange={(event) => setPaperIntake((current) => ({ ...current, commune: event.target.value }))} placeholder="Ex : Ballan-Miré" />
+                        </div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Référence décision</Label>
+                          <Input value={paperIntake.decisionReference} onChange={(event) => setPaperIntake((current) => ({ ...current, decisionReference: event.target.value }))} placeholder="PC, DP..." />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Date de réception</Label>
+                          <Input type="date" value={paperIntake.filingDate} onChange={(event) => setPaperIntake((current) => ({ ...current, filingDate: event.target.value }))} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    <Label>Synthèse courte</Label>
+                    <Textarea
+                      value={paperIntake.summary}
+                      onChange={(event) => setPaperIntake((current) => ({ ...current, summary: event.target.value }))}
+                      placeholder="Optionnel : résumé libre si le courrier est déjà qualifié."
+                    />
+                  </div>
+
+                  <div className="mt-4 flex justify-end">
+                    <Button onClick={() => paperIntakeMutation.mutate()} disabled={paperIntakeMutation.isPending || !paperAppealPdf}>
+                      {paperIntakeMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                      Créer le suivi depuis le PDF
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -462,6 +636,46 @@ export default function AppealsPage() {
                       <p className="text-muted-foreground">{selectedDossier.dossierNumber || "Sans numéro"} · {selectedDossier.typeProcedure || "Type non défini"}</p>
                     </div>
                   )}
+                  <div className="rounded-2xl border border-dashed bg-primary/5 p-4 space-y-3">
+                    <div className="space-y-1">
+                      <Label>PDF du recours à analyser</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Optionnel mais recommandé : le PDF sera déposé dans les pièces et analysé automatiquement après création.
+                      </p>
+                    </div>
+                    {appealPdf ? (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3 text-sm">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{appealPdf.name}</p>
+                          <p className="text-xs text-muted-foreground">{Math.max(1, Math.round(appealPdf.size / 1024))} Ko · Analyse automatique prête</p>
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setAppealPdf(null)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border bg-background p-5 text-center text-sm transition-colors hover:border-primary/40 hover:bg-primary/5">
+                        <Upload className="h-5 w-5 text-primary" />
+                        <span className="font-medium">Choisir un PDF de recours</span>
+                        <span className="text-xs text-muted-foreground">Recours gracieux, requête, mémoire ou courrier contradictoire.</span>
+                        <input
+                          type="file"
+                          accept="application/pdf,.pdf"
+                          className="sr-only"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] || null;
+                            event.target.value = "";
+                            if (!file) return;
+                            if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+                              toast({ title: "Format non accepté", description: "Dépose uniquement un fichier PDF pour l'analyse automatique.", variant: "destructive" });
+                              return;
+                            }
+                            setAppealPdf(file);
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Référence décision</Label>
@@ -609,6 +823,7 @@ export default function AppealsPage() {
                     <p>Type: {APPEAL_TYPE_LABELS[form.appealType]}</p>
                     <p>Qualité du requérant: {form.claimantRole}</p>
                     <p>Griefs qualifiés: {grounds.filter((ground) => ground.title && ground.description).length}</p>
+                    <p>PDF à analyser: {appealPdf?.name || "Aucun PDF sélectionné"}</p>
                   </div>
                 </TabsContent>
               </Tabs>

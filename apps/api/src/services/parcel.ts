@@ -21,6 +21,34 @@ const TIMEOUT_MS    = 30000;
 
 function signal() { return AbortSignal.timeout(TIMEOUT_MS); }
 
+function buildIduFromRawProperties(properties: Record<string, any> | null | undefined): string | null {
+  const codeDep = String(properties?.code_dep || "").trim();
+  const codeCom = String(properties?.code_com || "").trim();
+  const comAbs = String(properties?.com_abs || "000").trim().padStart(3, "0");
+  const section = String(properties?.section || "").trim().toUpperCase();
+  const numero = String(properties?.numero || "").trim().padStart(4, "0");
+  if (!codeDep || !codeCom || !section || !numero) return null;
+  return `${codeDep}${codeCom}${comAbs}${section}${numero}`;
+}
+
+function normalizeParcelFeature(feature: any): any {
+  if (!feature?.properties) return feature;
+  const properties = { ...feature.properties };
+  const codeInsee = String(properties.code_insee || `${properties.code_dep || ""}${properties.code_com || ""}`).trim();
+  const idu = String(properties.idu || buildIduFromRawProperties(properties) || "").trim();
+  const contenance = Number(properties.contenance ?? turf.area(feature));
+
+  return {
+    ...feature,
+    properties: {
+      ...properties,
+      idu: idu || undefined,
+      code_insee: codeInsee || undefined,
+      contenance: Number.isFinite(contenance) ? Math.round(contenance) : 0,
+    },
+  };
+}
+
 export interface ParcelData {
   cadastralSection: string;
   parcelNumber: string;
@@ -112,7 +140,8 @@ async function getCadastreFeaturesByIdu(idus: string[]): Promise<any[]> {
       const res = await fetch(url, { signal: signal() });
       if (!res.ok) return;
       const data: any = await res.json();
-      for (const f of data.features ?? []) {
+      for (const rawFeature of data.features ?? []) {
+        const f = normalizeParcelFeature(rawFeature);
         const id = f.properties?.idu || idu;
         if (!seenIds.has(id)) {
           seenIds.add(id);
@@ -124,7 +153,67 @@ async function getCadastreFeaturesByIdu(idus: string[]): Promise<any[]> {
     }
   }));
 
+  if (results.length === 0 && idus.length > 0) {
+    await Promise.all(idus.map(async (idu) => {
+      const parsed = parseIdu(idu);
+      if (!parsed) return;
+      const codeDep = parsed.codeInsee.slice(0, 2);
+      const codeCom = parsed.codeInsee.slice(2, 5);
+      const cql = `code_dep='${codeDep}' AND code_com='${codeCom}' AND com_abs='000' AND section='${parsed.section}' AND numero='${parsed.numero}'`;
+      const url = `${IGN_GEOPF_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature`
+        + `&TYPENAMES=${encodeURIComponent("BDPARCELLAIRE-VECTEUR_WLD_BDD_WGS84G:parcelle")}`
+        + `&SRSNAME=EPSG:4326&OUTPUTFORMAT=application/json`
+        + `&CQL_FILTER=${encodeURIComponent(cql)}&COUNT=5`;
+      try {
+        const res = await fetch(url, { signal: signal() });
+        if (!res.ok) return;
+        const data: any = await res.json();
+        for (const rawFeature of data.features ?? []) {
+          const f = normalizeParcelFeature(rawFeature);
+          const resolvedId = String(f?.properties?.idu || idu);
+          if (!seenIds.has(resolvedId)) {
+            seenIds.add(resolvedId);
+            results.push(f);
+          }
+        }
+      } catch (error) {
+        console.warn("[parcel] BDPARCELLAIRE IDU fallback failed:", (error as Error).message);
+      }
+    }));
+  }
+
   return results;
+}
+
+/**
+ * BAN can omit `parcelles` on some otherwise precise addresses.
+ * This fallback resolves the address BAN id to cadastral IDUs via the official
+ * BAN-PLUS address/parcel link layer, then reuses the direct IDU lookup.
+ */
+async function getCadastreFeaturesFromBanId(banId?: string): Promise<any[]> {
+  if (!banId) return [];
+
+  const cql = `id_adr='${String(banId).replace(/'/g, "''")}'`;
+  const url = `${IGN_GEOPF_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature`
+    + `&TYPENAMES=${encodeURIComponent("BAN-PLUS:lien_adresse_parcelle")}`
+    + `&SRSNAME=EPSG:4326&OUTPUTFORMAT=application/json`
+    + `&CQL_FILTER=${encodeURIComponent(cql)}&COUNT=20`;
+
+  try {
+    const res = await fetch(url, { signal: signal() });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    const iduValues = (data.features ?? [])
+      .map((feature: any) => String(feature?.properties?.idu || "").trim().toUpperCase())
+      .filter((value: string) => Boolean(value));
+    const idus = Array.from(new Set<string>(iduValues));
+    if (!idus.length) return [];
+    console.log("[parcel] BAN-PLUS fallback resolved address to parcel IDUs:", idus);
+    return getCadastreFeaturesByIdu(idus);
+  } catch (error) {
+    console.warn("[parcel] BAN-PLUS address/parcel fallback failed:", (error as Error).message);
+    return [];
+  }
 }
 
 async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
@@ -157,6 +246,22 @@ async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
         [lng - radiusDegrees, lat - radiusDegrees],
       ]],
     });
+  };
+
+  const fetchBdParcellaireBbox = async (radiusDegrees: number) => {
+    const bbox = `${lng - radiusDegrees},${lat - radiusDegrees},${lng + radiusDegrees},${lat + radiusDegrees},EPSG:4326`;
+    const url = `${IGN_GEOPF_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature`
+      + `&TYPENAMES=${encodeURIComponent("BDPARCELLAIRE-VECTEUR_WLD_BDD_WGS84G:parcelle")}`
+      + `&SRSNAME=EPSG:4326&OUTPUTFORMAT=application/json&BBOX=${bbox}&COUNT=50`;
+    try {
+      const res = await fetch(url, { signal: signal() });
+      if (!res.ok) return [];
+      const data: any = await res.json();
+      return (data.features ?? []).map((feature: any) => normalizeParcelFeature(feature));
+    } catch (error) {
+      console.warn("[parcel] BDPARCELLAIRE bbox fallback failed:", (error as Error).message);
+      return [];
+    }
   };
 
   const allFeatures: any[] = [];
@@ -202,6 +307,12 @@ async function getCadastreFeatures(lat: number, lng: number): Promise<any[]> {
   }
   if (allFeatures.length < 3) {
     addFeatures(await fetchSearchBox(0.00055));
+  }
+  if (allFeatures.length < 3) {
+    addFeatures(await fetchBdParcellaireBbox(0.00055));
+  }
+  if (allFeatures.length < 3) {
+    addFeatures(await fetchBdParcellaireBbox(0.0012));
   }
 
   return allFeatures;
@@ -683,6 +794,9 @@ export async function getParcelSelectionPreview(
     console.log("[parcel] Using BAN parcelles for direct IDU lookup:", banParcelles);
     cadastreFeatures = await getCadastreFeaturesByIdu(banParcelles);
   }
+  if (!cadastreFeatures.length && banId) {
+    cadastreFeatures = await getCadastreFeaturesFromBanId(banId);
+  }
   // Fall back to coordinate-based search if IDU lookup returned nothing
   if (!cadastreFeatures.length) {
     cadastreFeatures = await getCadastreFeatures(lat, lng);
@@ -708,8 +822,8 @@ export async function getParcelSelectionPreview(
 
   // Fetch neighbours for the adjacent parcels panel (coordinate search around primary centroid)
   let allCandidates = cadastreFeatures;
-  if (banParcelles && banParcelles.length > 0) {
-    const neighbourFeatures = await getCadastreFeatures(lat, lng);
+  if ((banParcelles && banParcelles.length > 0) || banId) {
+    const neighbourFeatures = await getCadastreFeatures(lat, lng).catch(() => []);
     const seenIds = new Set(cadastreFeatures.map(getFeatureId));
     for (const f of neighbourFeatures) {
       if (!seenIds.has(getFeatureId(f))) allCandidates.push(f);
@@ -836,6 +950,10 @@ export async function getParcelByCoords(
     if (banParcelles && banParcelles.length > 0) {
       console.log("[parcel] Direct IDU lookup via BAN parcelles:", banParcelles);
       cadastreFeatures = await getCadastreFeaturesByIdu(banParcelles);
+    }
+    if (!cadastreFeatures.length && banId) {
+      console.log("[parcel] Trying BAN-PLUS address/parcel fallback for BAN id:", banId);
+      cadastreFeatures = await getCadastreFeaturesFromBanId(banId);
     }
     if (!cadastreFeatures.length) {
       console.log("[parcel] Fetching cadastre features by coordinates...");

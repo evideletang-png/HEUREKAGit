@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { Building2, LogOut, User as UserIcon, LayoutDashboard, ShieldCheck, Scale, Building, FileText, Gavel, Menu } from "lucide-react";
+import { Building2, LogOut, User as UserIcon, LayoutDashboard, ShieldCheck, Scale, FileText, Gavel, Menu, MessageSquare } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +23,7 @@ export function Navbar() {
   const navigationLinks = [
     { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, show: isAuthenticated },
     { href: "/citoyen", label: "Mes dossiers", icon: FileText, show: role === "citoyen" || role === "user" },
+    { href: "/messagerie", label: "Messagerie", icon: MessageSquare, show: isAuthenticated },
     { href: "/recours", label: "Recours", icon: Gavel, show: ["citoyen", "user", "mairie", "admin", "super_admin"].includes(role) },
     { href: "/portail-mairie", label: "Instruction Mairie", icon: ShieldCheck, show: ["mairie", "admin", "super_admin"].includes(role) },
     { href: "/portail-metropole", label: "Instruction Métropole", icon: Building2, show: ["metropole", "admin"].includes(role) },
@@ -75,6 +76,12 @@ export function Navbar() {
                   </Link>
                 </Button>
               )}
+              <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-slate-700 font-medium">
+                <Link href="/messagerie">
+                  <MessageSquare className="w-4 h-4" />
+                  Messagerie
+                </Link>
+              </Button>
               {["citoyen", "user", "mairie", "admin", "super_admin"].includes((user?.role as string) || "") && (
                 <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-slate-700 font-medium">
                   <Link href="/recours">
@@ -193,6 +200,12 @@ export function Navbar() {
                       </Link>
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem asChild className="cursor-pointer rounded-md">
+                    <Link href="/messagerie" className="flex items-center w-full">
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      <span>Messagerie</span>
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild className="cursor-pointer rounded-md">
                     <Link href="/account" className="flex items-center w-full">
                       <UserIcon className="mr-2 h-4 w-4" />

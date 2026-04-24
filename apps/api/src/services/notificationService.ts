@@ -42,7 +42,7 @@ export class NotificationService {
   static async notifyRoleInCommune(data: {
     role: string;
     commune: string;
-    dossierId: string;
+    dossierId?: string;
     type: 'MENTION' | 'MESSAGE' | 'NEW_DOSSIER' | 'STATUS_CHANGE';
     title: string;
     message: string;
