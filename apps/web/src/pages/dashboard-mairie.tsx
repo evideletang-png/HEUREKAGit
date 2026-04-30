@@ -1,0 +1,411 @@
+import { Link, useLocation } from "wouter";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  BarChart3,
+  Bell,
+  CheckCircle2,
+  Clock3,
+  Download,
+  FileText,
+  LogOut,
+  Mail,
+  MessageSquare,
+  MoreVertical,
+  Plus,
+  Search,
+  Send,
+  Settings,
+  TrendingUp,
+  User,
+  Users,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { useAuth } from "@/hooks/use-auth";
+
+type MairieDossier = {
+  id: string;
+  title?: string | null;
+  dossierNumber?: string | null;
+  userName?: string | null;
+  address?: string | null;
+  commune?: string | null;
+  typeProcedure?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  documentCount?: number | null;
+  anomalyCount?: number | null;
+};
+
+async function apiFetch(path: string) {
+  const response = await fetch(path, { credentials: "include" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+const demoRows: MairieDossier[] = [
+  { id: "demo-1", dossierNumber: "DP-13120-26-00045", typeProcedure: "DP", address: "5 rue des Oliviers", userName: "Marie Martin", status: "Pièces manquantes", updatedAt: "2026-04-26", anomalyCount: 2 },
+  { id: "demo-2", dossierNumber: "CU-13120-26-00012", typeProcedure: "CU", address: "7 impasse Mistral", userName: "Anne Roche", status: "À notifier", updatedAt: "2026-04-10" },
+  { id: "demo-3", dossierNumber: "CU-13120-26-00023", typeProcedure: "CU", address: "45 route de Marseille", userName: "Patrick Vincent", status: "Notifié au demandeur", updatedAt: "2026-03-15" },
+  { id: "demo-4", dossierNumber: "DP-13120-26-00067", typeProcedure: "DP", address: "22 rue des Lilas", userName: "François Garnier", status: "Consultation interne", updatedAt: "2026-05-01", documentCount: 4 },
+  { id: "demo-5", dossierNumber: "PC-13120-26-00123", typeProcedure: "PC", address: "12 avenue de la République", userName: "Jean Dupont", status: "En instruction", updatedAt: "2026-05-11", documentCount: 6 },
+  { id: "demo-6", dossierNumber: "PC-13120-26-00098", typeProcedure: "PC", address: "28 chemin du Lac", userName: "Lucie Bernard", status: "En instruction", updatedAt: "2026-05-27", documentCount: 5 },
+  { id: "demo-7", dossierNumber: "PC-13120-26-00089", typeProcedure: "PC", address: "14 boulevard Gambetta", userName: "SCI Provence", status: "En instruction", updatedAt: "2026-06-13", documentCount: 5 },
+  { id: "demo-8", dossierNumber: "PC-13120-26-00134", typeProcedure: "PC", address: "3 place de la Mairie", userName: "Sylvie Moreau", status: "Déposé", updatedAt: "2026-06-25" },
+];
+
+const conversations = [
+  { name: "Jean Dupont", ref: "PC-13120-26-00123", preview: "Merci pour votre retour. Je vais compléter les pièces manquantes.", time: "Il y a 2h" },
+  { name: "Marie Martin", ref: "DP-13120-26-00045", preview: "Bonjour, avez-vous reçu les documents complémentaires ?", time: "Hier" },
+  { name: "Pierre Dubois", ref: "CU-13120-26-00078", preview: "Je vous confirme la réception de l'avis favorable.", time: "2 mars" },
+];
+
+function formatDate(value?: string | null) {
+  if (!value) return "Non daté";
+  return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
+}
+
+function statusStyle(status?: string | null) {
+  const normalized = (status || "").toLowerCase();
+  if (normalized.includes("manqu") || normalized.includes("retard")) return "bg-amber-100 text-amber-800";
+  if (normalized.includes("notifi")) return "bg-emerald-100 text-emerald-800";
+  if (normalized.includes("consult")) return "bg-indigo-100 text-indigo-800";
+  if (normalized.includes("instruction")) return "bg-blue-100 text-blue-800";
+  return "bg-stone-100 text-stone-700";
+}
+
+function MairieShell({ children }: { children: React.ReactNode }) {
+  const { user, logout } = useAuth();
+  const [location] = useLocation();
+  const navItems = [
+    { href: "/dashboard-mairie", label: "Tableau de bord", icon: FileText },
+    { href: "/dashboard-mairie/messagerie", label: "Messagerie", icon: MessageSquare },
+    { href: "/dashboard-mairie/statistiques", label: "Statistiques", icon: BarChart3 },
+    { href: "/dashboard-mairie/parametres", label: "Paramètres", icon: Settings },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white">
+        <div className="flex min-h-20 items-center gap-3 px-4 sm:px-6">
+          <Link href="/dashboard-mairie" className="flex min-w-[8.5rem] items-center gap-3 font-bold leading-tight text-slate-950">
+            <span className="flex h-8 w-6 items-center justify-center rounded-full bg-slate-950 text-sm text-white">H</span>
+            <span>HEUREKA -<br />Portail Mairie</span>
+          </Link>
+          <nav className="flex flex-1 items-center gap-1 overflow-x-auto px-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = location === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`inline-flex h-12 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors sm:px-4 ${
+                    active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-950"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+          <Button variant="ghost" size="icon" className="relative shrink-0 text-slate-500">
+            <Bell className="h-5 w-5" />
+            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500" />
+          </Button>
+          <div className="hidden max-w-40 text-sm leading-snug text-slate-500 md:block">
+            {user?.name || "Sophie Laurent"} -<br />Service Urbanisme
+          </div>
+          <Button variant="ghost" size="icon" className="shrink-0 text-slate-500" onClick={() => logout()}>
+            <LogOut className="h-5 w-5" />
+          </Button>
+        </div>
+      </header>
+      <main className="w-full max-w-[46rem] px-4 py-9 sm:px-6">{children}</main>
+    </div>
+  );
+}
+
+function StatCard({ label, value, delta, icon: Icon, tone = "blue" }: { label: string; value: string; delta: string; icon: typeof FileText; tone?: "blue" | "amber" | "emerald" | "violet" }) {
+  const colors = {
+    blue: "text-blue-600",
+    amber: "text-amber-600",
+    emerald: "text-emerald-600",
+    violet: "text-violet-600",
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <Icon className={`h-5 w-5 ${colors[tone]}`} />
+      </div>
+      <p className="mt-3 text-4xl font-bold tracking-tight text-slate-950">{value}</p>
+      <p className="mt-3 text-sm font-medium text-emerald-700">{delta}</p>
+    </div>
+  );
+}
+
+function DashboardView() {
+  const { data, isLoading } = useQuery<{ dossiers: MairieDossier[] }>({
+    queryKey: ["mairie-dashboard-dossiers"],
+    queryFn: () => apiFetch("/api/mairie/dossiers"),
+  });
+  const rows = data?.dossiers?.length ? data.dossiers : demoRows;
+  const pendingCount = rows.filter((row) => !String(row.status || "").toLowerCase().includes("notifi")).length;
+  const processedCount = Math.max(42, rows.filter((row) => String(row.status || "").toLowerCase().includes("notifi")).length);
+
+  return (
+    <MairieShell>
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Tableau de bord</h1>
+          <p className="mt-2 text-base text-slate-600">Gestion des demandes d'urbanisme</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2 rounded-lg border-slate-300 bg-white">
+            <Download className="h-4 w-4" /> Exporter
+          </Button>
+          <Button asChild className="gap-2 rounded-lg bg-slate-950 text-white hover:bg-slate-800">
+            <Link href="/conformite"><Plus className="h-4 w-4" /> Nouveau dossier</Link>
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Dossiers en cours" value={String(rows.length || 24)} delta="+3 cette semaine" icon={Clock3} />
+        <StatCard label="En attente" value={String(pendingCount || 8)} delta="2 en retard" icon={Clock3} tone="amber" />
+        <StatCard label="Traités ce mois" value={String(processedCount)} delta="+12% vs M-1" icon={CheckCircle2} tone="emerald" />
+        <StatCard label="Délai moyen" value="38j" delta="-5j sur 30j" icon={TrendingUp} tone="violet" />
+      </div>
+
+      <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input className="h-11 rounded-lg border-slate-200 pl-9" placeholder="Rechercher (numéro, nom, adresse, parcelle...)" />
+          </div>
+          {["Statut", "Type", "Agent"].map((label) => (
+            <Button key={label} variant="outline" className="rounded-lg border-slate-300 bg-white text-slate-950">
+              {label} ▾
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-sm text-slate-500">
+          <span>{isLoading ? "Chargement..." : `${rows.length} dossiers`}</span>
+          <span>1-{rows.length} sur {rows.length}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left text-sm">
+            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="w-10 px-4 py-3"><Checkbox /></th>
+                <th className="px-3 py-3">Numéro</th>
+                <th className="px-3 py-3">Demandeur</th>
+                <th className="px-3 py-3">Statut</th>
+                <th className="px-3 py-3">Échéance ↑</th>
+                <th className="px-3 py-3">Agent</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((row, index) => (
+                <tr key={row.id} className={row.anomalyCount ? "border-l-4 border-l-red-400 bg-amber-50/20" : ""}>
+                  <td className="px-4 py-4"><Checkbox /></td>
+                  <td className="px-3 py-4">
+                    <Link href={row.id.startsWith("demo-") ? "/portail-mairie" : `/portail-mairie/${row.id}`} className="font-bold leading-tight text-slate-950 hover:underline">
+                      {row.dossierNumber || row.title || "Dossier urbanisme"}
+                    </Link>
+                    <p className="mt-1 text-xs text-slate-500">{row.typeProcedure || "PC"} · {row.address || row.commune || "Adresse à compléter"}</p>
+                    {!!row.documentCount && <span className="mt-2 inline-flex rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">PLU analysé</span>}
+                  </td>
+                  <td className="px-3 py-4 font-medium">{row.userName || "Demandeur"}</td>
+                  <td className="px-3 py-4"><span className={`inline-flex rounded px-2 py-1 text-xs font-medium ${statusStyle(row.status)}`}>{row.status || "Déposé"}</span></td>
+                  <td className="px-3 py-4">
+                    <p className={index < 1 ? "font-semibold text-red-600" : index < 4 ? "font-semibold text-amber-600" : "font-semibold text-emerald-700"}>{index < 1 ? "J+3 retard" : `J-${index * 8}`}</p>
+                    <p className="text-xs text-slate-400">{formatDate(row.updatedAt || row.createdAt)}</p>
+                  </td>
+                  <td className="px-3 py-4">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">{index % 2 ? "SL" : "JD"}</span>
+                      <span className="text-xs font-medium">{index % 2 ? "S. Leroy" : "J. Dubois"}</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
+          <span>↵ naviguer · ↩ ouvrir · ⌘K recherche</span>
+          <span>‹ 1 / 1 ›</span>
+        </div>
+      </div>
+    </MairieShell>
+  );
+}
+
+function MessagerieView() {
+  const [selectedConversation] = useState(conversations[0]);
+  return (
+    <MairieShell>
+      <h1 className="text-3xl font-bold tracking-tight">Messagerie</h1>
+      <p className="mt-2 text-base text-slate-600">Échangez avec les demandeurs</p>
+      <div className="my-8 border-t border-slate-200" />
+      <div className="grid overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:grid-cols-[18rem_1fr]">
+        <aside className="border-b border-slate-200 lg:border-b-0 lg:border-r">
+          <div className="p-4">
+            <Input className="rounded-lg border-slate-200" placeholder="Rechercher une conversation..." />
+          </div>
+          <div className="divide-y divide-slate-100">
+            {conversations.map((conversation, index) => (
+              <button key={conversation.ref} className={`w-full p-4 text-left ${index === 0 ? "bg-slate-50" : "bg-white hover:bg-slate-50"}`}>
+                <p className="font-bold">{conversation.name}</p>
+                <p className="text-sm text-slate-500">{conversation.ref}</p>
+                <p className="mt-2 line-clamp-2 text-sm text-slate-600">{conversation.preview}</p>
+                <p className="mt-2 text-xs text-slate-400">{conversation.time}</p>
+              </button>
+            ))}
+          </div>
+        </aside>
+        <section>
+          <div className="flex items-center gap-3 border-b border-slate-200 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100"><User className="h-5 w-5 text-slate-500" /></span>
+            <div>
+              <p className="font-bold">{selectedConversation.name}</p>
+              <p className="text-sm text-slate-500">{selectedConversation.ref}</p>
+            </div>
+          </div>
+          <div className="space-y-5 p-5">
+            <p className="max-w-sm rounded-lg bg-slate-100 p-4">Bonjour, j'ai une question concernant mon dossier de permis de construire.</p>
+            <p className="ml-auto max-w-sm rounded-lg bg-slate-950 p-4 text-white">Bonjour Monsieur Dupont, je suis à votre disposition. Quelle est votre question ?</p>
+            <p className="max-w-sm rounded-lg bg-slate-100 p-4">Il me manque le plan de façade. Puis-je le transmettre par ce canal ?</p>
+            <p className="ml-auto max-w-sm rounded-lg bg-slate-950 p-4 text-white">Oui, vous pouvez joindre le document ici ou via votre espace personnel.</p>
+          </div>
+          <div className="flex gap-2 border-t border-slate-200 p-4">
+            <Input className="rounded-lg border-slate-200" placeholder="Votre message..." />
+            <Button className="gap-2 rounded-lg bg-slate-950"><Send className="h-4 w-4" /> Envoyer</Button>
+          </div>
+        </section>
+      </div>
+    </MairieShell>
+  );
+}
+
+function StatistiquesView() {
+  return (
+    <MairieShell>
+      <h1 className="text-3xl font-bold tracking-tight">Statistiques</h1>
+      <p className="mt-2 text-base text-slate-600">Analyse des performances du service urbanisme</p>
+      <div className="mt-9 grid gap-6">
+        <StatCard label="Dossiers traités" value="156" delta="+12% vs mois dernier" icon={FileText} />
+        <StatCard label="Délai moyen" value="38j" delta="-5 jours" icon={Clock3} tone="violet" />
+        <StatCard label="Taux d'acceptation" value="78%" delta="+3%" icon={CheckCircle2} tone="emerald" />
+        <StatCard label="Demandeurs actifs" value="324" delta="+8%" icon={Users} tone="amber" />
+        {["Évolution mensuelle", "Répartition par type"].map((title) => (
+          <section key={title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-bold">{title}</h2>
+            <div className="mt-6 flex h-64 items-center justify-center rounded-lg bg-slate-50 text-slate-500">Graphique à venir</div>
+          </section>
+        ))}
+      </div>
+    </MairieShell>
+  );
+}
+
+function ParametresView() {
+  const { user } = useAuth();
+  const profileName = user?.name || "Sophie Laurent";
+  const profileEmail = user?.email || "s.laurent@mairie.fr";
+
+  return (
+    <MairieShell>
+      <h1 className="text-3xl font-bold tracking-tight">Paramètres</h1>
+      <p className="mt-2 text-base text-slate-600">Configuration de votre compte et notifications</p>
+      <div className="mt-9 grid gap-6">
+        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-5 flex items-center gap-2 text-xl font-bold"><User className="h-5 w-5" /> Profil</h2>
+          <div className="space-y-4">
+            <label className="block text-sm font-medium">Nom<Input className="mt-2 rounded-lg border-slate-300" defaultValue={profileName} /></label>
+            <label className="block text-sm font-medium">Service<Input className="mt-2 rounded-lg border-slate-300" defaultValue="Service Urbanisme" /></label>
+            <label className="block text-sm font-medium">Email<Input className="mt-2 rounded-lg border-slate-300" defaultValue={profileEmail} /></label>
+          </div>
+        </section>
+        <SettingsBlock title="Notifications" icon={Bell} items={["Nouveau dossier déposé", "Avis reçu d'un service consulté", "Rappel de délai d'instruction"]} checked={[true, true, false]} />
+        <SettingsBlock title="Notifications par email" icon={Mail} items={["Résumé quotidien", "Résumé hebdomadaire"]} checked={[true, false]} />
+        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <h2 className="flex items-center gap-2 text-xl font-bold"><FileText className="h-5 w-5" /> Modèles de courrier</h2>
+            <Button variant="outline" className="gap-2 rounded-lg"><Plus className="h-4 w-4" /> Nouveau modèle</Button>
+          </div>
+          <p className="mb-3 text-sm font-medium">Modèles disponibles</p>
+          {[
+            ["Acceptation - Permis de Construire", "acceptation", "bg-emerald-100 text-emerald-700"],
+            ["Refus - Non-conformité PLU", "refus", "bg-red-100 text-red-700"],
+          ].map(([title, badge, color]) => (
+            <button key={title} className="mb-2 flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-4 text-left">
+              <span><span className="block font-bold">{title}</span><span className={`mt-2 inline-flex rounded px-2 py-0.5 text-sm ${color}`}>{badge}</span></span>
+              <MoreVertical className="h-5 w-5 text-slate-400" />
+            </button>
+          ))}
+          <div className="mt-4 flex h-28 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-500">
+            <FileText className="mb-2 h-8 w-8" />
+            <p className="font-bold">Sélectionnez un modèle</p>
+            <p>ou créez-en un nouveau</p>
+          </div>
+        </section>
+        <Button className="h-12 rounded-lg bg-slate-950 text-base font-bold text-white hover:bg-slate-800">
+          Enregistrer les modifications
+        </Button>
+      </div>
+    </MairieShell>
+  );
+}
+
+function SettingsBlock({ title, icon: Icon, items, checked }: { title: string; icon: typeof Bell; items: string[]; checked: boolean[] }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="mb-5 flex items-center gap-2 text-xl font-bold"><Icon className="h-5 w-5" /> {title}</h2>
+      <div className="space-y-4">
+        {items.map((item, index) => (
+          <label key={item} className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+            <Checkbox defaultChecked={checked[index]} />
+            {item}
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export default function DashboardMairiePage() {
+  const [location, setLocation] = useLocation();
+  const { user, isAuthenticated, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && (!isAuthenticated || !["mairie", "admin", "super_admin"].includes((user?.role as string) || ""))) {
+      setLocation(isAuthenticated ? "/dashboard" : "/login");
+    }
+  }, [isAuthenticated, isLoading, setLocation, user]);
+
+  if (isLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-[#f7f7f6] text-slate-500">Chargement...</div>;
+  }
+
+  if (!isAuthenticated || !["mairie", "admin", "super_admin"].includes((user?.role as string) || "")) {
+    return <div className="flex min-h-screen items-center justify-center bg-[#f7f7f6] text-slate-500">Redirection...</div>;
+  }
+
+  if (location.endsWith("/messagerie")) return <MessagerieView />;
+  if (location.endsWith("/statistiques")) return <StatistiquesView />;
+  if (location.endsWith("/parametres")) return <ParametresView />;
+  return <DashboardView />;
+}

@@ -25,7 +25,7 @@ export function Navbar() {
     { href: "/citoyen", label: "Mes dossiers", icon: FileText, show: role === "citoyen" || role === "user" },
     { href: "/messagerie", label: "Messagerie", icon: MessageSquare, show: isAuthenticated },
     { href: "/recours", label: "Recours", icon: Gavel, show: ["citoyen", "user", "mairie", "admin", "super_admin"].includes(role) },
-    { href: "/portail-mairie", label: "Instruction Mairie", icon: ShieldCheck, show: ["mairie", "admin", "super_admin"].includes(role) },
+    { href: "/dashboard-mairie", label: "Instruction Mairie", icon: ShieldCheck, show: ["mairie", "admin", "super_admin"].includes(role) },
     { href: "/portail-metropole", label: "Instruction Métropole", icon: Building2, show: ["metropole", "admin"].includes(role) },
     { href: "/portail-abf", label: "Avis ABF", icon: Scale, show: ["abf", "admin"].includes(role) },
     { href: "/account", label: "Mon compte", icon: UserIcon, show: isAuthenticated },
@@ -92,7 +92,7 @@ export function Navbar() {
               )}
               {((user?.role as string) === "mairie" || (user?.role as string) === "admin" || (user?.role as string) === "super_admin") && (
                 <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-primary font-bold">
-                  <Link href="/portail-mairie">
+                  <Link href="/dashboard-mairie">
                     <ShieldCheck className="w-4 h-4" />
                     Instruction Mairie
                   </Link>
@@ -230,7 +230,7 @@ export function Navbar() {
                   )}
                   {((user?.role as string) === "mairie" || (user?.role as string) === "admin") && (
                     <DropdownMenuItem asChild className="cursor-pointer rounded-md text-primary font-bold">
-                      <Link href="/portail-mairie" className="flex items-center w-full">
+                      <Link href="/dashboard-mairie" className="flex items-center w-full">
                         <ShieldCheck className="mr-2 h-4 w-4" />
                         <span>Instruction Experte (Mairie)</span>
                       </Link>
