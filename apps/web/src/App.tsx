@@ -14,6 +14,7 @@ import AnalysisDetailPage from "@/pages/analysis-detail";
 import AdminPage from "@/pages/admin";
 import AccountPage from "@/pages/account";
 import MairiePage from "@/pages/mairie";
+import DashboardMairiePage from "@/pages/dashboard-mairie";
 import PortailMairiePage from "@/pages/portail-mairie";
 import PortailMetropolePage from "@/pages/portail-metropole";
 import PortailABFPage from "@/pages/portail-abf";
@@ -48,6 +49,10 @@ function Router() {
       <Route path="/admin" component={AdminPage} />
       <Route path="/account" component={AccountPage} />
       <Route path="/conformite" component={MairiePage} />
+      <Route path="/dashboard-mairie/messagerie" component={DashboardMairiePage} />
+      <Route path="/dashboard-mairie/statistiques" component={DashboardMairiePage} />
+      <Route path="/dashboard-mairie/parametres" component={DashboardMairiePage} />
+      <Route path="/dashboard-mairie" component={DashboardMairiePage} />
       <Route path="/portail-mairie/base-ia/zones/:zoneId" component={PortailMairiePage} />
       <Route path="/portail-mairie/:id?" component={PortailMairiePage} />
       <Route path="/portail-metropole/:id?" component={PortailMetropolePage} />
