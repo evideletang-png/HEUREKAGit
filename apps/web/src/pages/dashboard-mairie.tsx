@@ -146,7 +146,7 @@ function statusMatches(rowStatus: string | null | undefined, configuredStatus: D
 }
 
 function getDossierUrl(row: MairieDossier) {
-  return row.id.startsWith("demo-") ? "/portail-mairie" : `/portail-mairie/${encodeURIComponent(row.id)}`;
+  return row.id.startsWith("demo-") ? "/dossier/d2" : `/dossier/${encodeURIComponent(row.id)}`;
 }
 
 function MairieShell({ children }: { children: React.ReactNode }) {
@@ -245,54 +245,54 @@ function DossierPreview({ dossier, onClose }: { dossier: MairieDossier | null; o
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-[1px]" onClick={onClose}>
+    <div className="pointer-events-none fixed inset-0 z-50 p-4 sm:p-6">
       <aside
-        className="ml-auto flex h-full w-full max-w-[40rem] flex-col overflow-y-auto border-l border-slate-200 bg-white shadow-2xl"
+        className="pointer-events-auto ml-auto flex max-h-[calc(100vh-3rem)] w-full max-w-[30rem] flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="p-8">
-          <div className="mb-7 flex items-start justify-between gap-4">
+        <div className="p-6">
+          <div className="mb-5 flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-3xl font-bold tracking-tight">{dossier.dossierNumber || dossier.title || "Dossier urbanisme"}</h2>
-              <p className="mt-2 text-2xl font-semibold text-slate-500">{dossier.typeProcedure || "Procédure urbanisme"}</p>
+              <h2 className="text-2xl font-bold tracking-tight">{dossier.dossierNumber || dossier.title || "Dossier urbanisme"}</h2>
+              <p className="mt-1 text-lg font-semibold text-slate-500">{dossier.typeProcedure || "Procédure urbanisme"}</p>
             </div>
             <Button variant="ghost" size="icon" className="text-slate-400 hover:text-slate-950" onClick={onClose}>
-              <X className="h-7 w-7" />
+              <X className="h-5 w-5" />
             </Button>
           </div>
 
-          <span className={`inline-flex rounded-lg px-3 py-2 text-lg font-medium ${statusStyle(dossier.status)}`}>
+          <span className={`inline-flex rounded-lg px-3 py-2 text-sm font-medium ${statusStyle(dossier.status)}`}>
             ● {dossier.status || "Déposé"}
           </span>
 
-          <div className="mt-10 space-y-7">
+          <div className="mt-7 space-y-5">
             <div>
-              <p className="text-xl font-semibold uppercase tracking-widest text-slate-500">Demandeur</p>
-              <p className="mt-3 text-2xl font-medium">{dossier.userName || "Demandeur"} · {dossier.address || "Adresse non renseignée"}</p>
+              <p className="text-sm font-semibold uppercase tracking-widest text-slate-500">Demandeur</p>
+              <p className="mt-2 text-lg font-medium">{dossier.userName || "Demandeur"} · {dossier.address || "Adresse non renseignée"}</p>
             </div>
             <div>
-              <p className="text-xl font-semibold uppercase tracking-widest text-slate-500">Parcelle</p>
-              <p className="mt-3 text-2xl font-medium">{dossier.parcelRef || dossier.metadata?.parcel_ref || "Parcelle non renseignée"} · {zone}</p>
+              <p className="text-sm font-semibold uppercase tracking-widest text-slate-500">Parcelle</p>
+              <p className="mt-2 text-lg font-medium">{dossier.parcelRef || dossier.metadata?.parcel_ref || "Parcelle non renseignée"} · {zone}</p>
             </div>
             <div>
-              <p className="text-xl font-semibold uppercase tracking-widest text-slate-500">Échéance légale</p>
-              <p className="mt-3 text-2xl font-medium">{formatDate(deadline.date)} · <span className={deadline.className}>{deadline.label}</span></p>
+              <p className="text-sm font-semibold uppercase tracking-widest text-slate-500">Échéance légale</p>
+              <p className="mt-2 text-lg font-medium">{formatDate(deadline.date)} · <span className={deadline.className}>{deadline.label}</span></p>
             </div>
           </div>
 
-          <div className="mt-7 rounded-2xl bg-slate-50 p-6 text-xl font-medium text-slate-500">
+          <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-base font-medium text-slate-500">
             {hasPlu ? "Analyse PLU disponible" : "Pas d'analyse PLU disponible"}
           </div>
 
-          <div className="mt-8">
-            <p className="mb-5 text-xl font-semibold uppercase tracking-widest text-slate-500">Frise</p>
-            <div className="space-y-5">
+          <div className="mt-6">
+            <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-slate-500">Frise</p>
+            <div className="space-y-4">
               {timeline.map((item) => (
                 <div key={item.label} className="flex gap-4">
                   <span className={`mt-2 h-3 w-3 shrink-0 rounded-full ${item.current ? "bg-blue-700" : item.done ? "bg-green-700" : "bg-stone-300"}`} />
                   <div>
-                    <p className={`text-xl font-semibold ${item.current ? "text-slate-700" : item.done ? "text-slate-700" : "text-stone-500"}`}>{item.label}</p>
-                    <p className="text-lg font-medium text-slate-400">{item.date}</p>
+                    <p className={`text-base font-semibold ${item.current ? "text-slate-700" : item.done ? "text-slate-700" : "text-stone-500"}`}>{item.label}</p>
+                    <p className="text-sm font-medium text-slate-400">{item.date}</p>
                   </div>
                 </div>
               ))}
@@ -300,12 +300,12 @@ function DossierPreview({ dossier, onClose }: { dossier: MairieDossier | null; o
           </div>
         </div>
 
-        <div className="mt-auto flex gap-3 border-t border-slate-100 p-8">
-          <Button className="h-14 flex-1 rounded-xl bg-slate-900 text-xl font-bold text-white hover:bg-slate-800" onClick={openDossier}>
+        <div className="mt-auto flex gap-3 border-t border-slate-100 p-6">
+          <Button className="h-12 flex-1 rounded-xl bg-slate-900 text-base font-bold text-white hover:bg-slate-800" onClick={openDossier}>
             Ouvrir le dossier
           </Button>
-          <Button variant="outline" size="icon" className="h-14 w-20 rounded-xl border-slate-300">
-            <MoreVertical className="h-6 w-6" />
+          <Button variant="outline" size="icon" className="h-12 w-16 rounded-xl border-slate-300">
+            <MoreVertical className="h-5 w-5" />
           </Button>
         </div>
       </aside>
