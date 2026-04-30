@@ -128,7 +128,7 @@ function MairieShell({ children }: { children: React.ReactNode }) {
           </Button>
         </div>
       </header>
-      <main className="w-full max-w-[46rem] px-4 py-9 sm:px-6">{children}</main>
+      <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">{children}</main>
     </div>
   );
 }
@@ -260,7 +260,7 @@ function MessagerieView() {
       <h1 className="text-3xl font-bold tracking-tight">Messagerie</h1>
       <p className="mt-2 text-base text-slate-600">Échangez avec les demandeurs</p>
       <div className="my-8 border-t border-slate-200" />
-      <div className="grid overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:grid-cols-[18rem_1fr]">
+      <div className="grid min-h-[42rem] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:grid-cols-[22rem_1fr]">
         <aside className="border-b border-slate-200 lg:border-b-0 lg:border-r">
           <div className="p-4">
             <Input className="rounded-lg border-slate-200" placeholder="Rechercher une conversation..." />
@@ -305,13 +305,13 @@ function StatistiquesView() {
     <MairieShell>
       <h1 className="text-3xl font-bold tracking-tight">Statistiques</h1>
       <p className="mt-2 text-base text-slate-600">Analyse des performances du service urbanisme</p>
-      <div className="mt-9 grid gap-6">
+      <div className="mt-9 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Dossiers traités" value="156" delta="+12% vs mois dernier" icon={FileText} />
         <StatCard label="Délai moyen" value="38j" delta="-5 jours" icon={Clock3} tone="violet" />
         <StatCard label="Taux d'acceptation" value="78%" delta="+3%" icon={CheckCircle2} tone="emerald" />
         <StatCard label="Demandeurs actifs" value="324" delta="+8%" icon={Users} tone="amber" />
         {["Évolution mensuelle", "Répartition par type"].map((title) => (
-          <section key={title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <section key={title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm md:col-span-2">
             <h2 className="text-xl font-bold">{title}</h2>
             <div className="mt-6 flex h-64 items-center justify-center rounded-lg bg-slate-50 text-slate-500">Graphique à venir</div>
           </section>
