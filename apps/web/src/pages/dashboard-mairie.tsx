@@ -1,11 +1,12 @@
 import { Link, useLocation } from "wouter";
-import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
   Bell,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   Download,
   FileText,
   LogOut,
@@ -16,6 +17,7 @@ import {
   Search,
   Send,
   Settings,
+  X,
   TrendingUp,
   User,
   Users,
@@ -24,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 
 type MairieDossier = {
   id: string;
@@ -36,8 +39,28 @@ type MairieDossier = {
   status?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  metadata?: Record<string, any> | null;
+  parcelRef?: string | null;
   documentCount?: number | null;
   anomalyCount?: number | null;
+  criticalityScore?: number | null;
+};
+
+type DashboardStatusConfig = {
+  key: string;
+  label: string;
+  active: boolean;
+  color?: string;
+};
+
+type MairieSettings = {
+  citizenPortalTownHallName?: string;
+  citizenPortalEmail?: string;
+  formulas?: {
+    dashboardStatuses?: DashboardStatusConfig[];
+    [key: string]: any;
+  } | null;
+  [key: string]: any;
 };
 
 async function apiFetch(path: string) {
@@ -50,14 +73,23 @@ async function apiFetch(path: string) {
 }
 
 const demoRows: MairieDossier[] = [
-  { id: "demo-1", dossierNumber: "DP-13120-26-00045", typeProcedure: "DP", address: "5 rue des Oliviers", userName: "Marie Martin", status: "Pièces manquantes", updatedAt: "2026-04-26", anomalyCount: 2 },
-  { id: "demo-2", dossierNumber: "CU-13120-26-00012", typeProcedure: "CU", address: "7 impasse Mistral", userName: "Anne Roche", status: "À notifier", updatedAt: "2026-04-10" },
-  { id: "demo-3", dossierNumber: "CU-13120-26-00023", typeProcedure: "CU", address: "45 route de Marseille", userName: "Patrick Vincent", status: "Notifié au demandeur", updatedAt: "2026-03-15" },
-  { id: "demo-4", dossierNumber: "DP-13120-26-00067", typeProcedure: "DP", address: "22 rue des Lilas", userName: "François Garnier", status: "Consultation interne", updatedAt: "2026-05-01", documentCount: 4 },
-  { id: "demo-5", dossierNumber: "PC-13120-26-00123", typeProcedure: "PC", address: "12 avenue de la République", userName: "Jean Dupont", status: "En instruction", updatedAt: "2026-05-11", documentCount: 6 },
-  { id: "demo-6", dossierNumber: "PC-13120-26-00098", typeProcedure: "PC", address: "28 chemin du Lac", userName: "Lucie Bernard", status: "En instruction", updatedAt: "2026-05-27", documentCount: 5 },
-  { id: "demo-7", dossierNumber: "PC-13120-26-00089", typeProcedure: "PC", address: "14 boulevard Gambetta", userName: "SCI Provence", status: "En instruction", updatedAt: "2026-06-13", documentCount: 5 },
-  { id: "demo-8", dossierNumber: "PC-13120-26-00134", typeProcedure: "PC", address: "3 place de la Mairie", userName: "Sylvie Moreau", status: "Déposé", updatedAt: "2026-06-25" },
+  { id: "demo-1", dossierNumber: "DP-13120-26-00045", typeProcedure: "Déclaration Préalable", address: "5 rue des Oliviers", userName: "Marie Martin", status: "Pièces manquantes", updatedAt: "2026-04-26", createdAt: "2026-03-20", parcelRef: "CD-0118", metadata: { zoneCode: "UB" }, anomalyCount: 2 },
+  { id: "demo-2", dossierNumber: "CU-13120-26-00012", typeProcedure: "Certificat d'Urbanisme", address: "7 impasse Mistral", userName: "Anne Roche", status: "À notifier", updatedAt: "2026-04-10", parcelRef: "AB-2041" },
+  { id: "demo-3", dossierNumber: "CU-13120-26-00023", typeProcedure: "Certificat d'Urbanisme", address: "45 route de Marseille", userName: "Patrick Vincent", status: "Notifié au demandeur", updatedAt: "2026-03-15", parcelRef: "AC-0932" },
+  { id: "demo-4", dossierNumber: "DP-13120-26-00067", typeProcedure: "Déclaration Préalable", address: "22 rue des Lilas", userName: "François Garnier", status: "Consultation interne", updatedAt: "2026-05-01", documentCount: 4, parcelRef: "BD-4430", metadata: { zoneCode: "UA" } },
+  { id: "demo-5", dossierNumber: "PC-13120-26-00123", typeProcedure: "Permis de Construire", address: "12 avenue de la République", userName: "Jean Dupont", status: "En instruction", updatedAt: "2026-05-11", documentCount: 6, parcelRef: "AA-0112" },
+  { id: "demo-6", dossierNumber: "PC-13120-26-00098", typeProcedure: "Permis de Construire", address: "28 chemin du Lac", userName: "Lucie Bernard", status: "En instruction", updatedAt: "2026-05-27", documentCount: 5, parcelRef: "AD-7812" },
+  { id: "demo-7", dossierNumber: "PC-13120-26-00089", typeProcedure: "Permis de Construire", address: "14 boulevard Gambetta", userName: "SCI Provence", status: "En instruction", updatedAt: "2026-06-13", documentCount: 5, parcelRef: "BC-1109" },
+  { id: "demo-8", dossierNumber: "PC-13120-26-00134", typeProcedure: "Permis de Construire", address: "3 place de la Mairie", userName: "Sylvie Moreau", status: "Déposé", updatedAt: "2026-06-25", parcelRef: "AE-5540" },
+];
+
+const defaultDashboardStatuses: DashboardStatusConfig[] = [
+  { key: "depose", label: "Déposé", active: true },
+  { key: "instruction", label: "En instruction", active: true },
+  { key: "pieces_manquantes", label: "Pièces manquantes", active: true },
+  { key: "consultation", label: "Consultation interne", active: true },
+  { key: "notifier", label: "À notifier", active: true },
+  { key: "notifie", label: "Notifié au demandeur", active: true },
 ];
 
 const conversations = [
@@ -71,6 +103,35 @@ function formatDate(value?: string | null) {
   return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
 }
 
+function normalizeText(value?: string | null) {
+  return (value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function parseCommunes(raw: unknown) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {}
+    return raw.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function deadlineInfo(row: MairieDossier, index = 0) {
+  const baseDate = row.updatedAt || row.createdAt;
+  if (row.status && normalizeText(row.status).includes("manqu")) {
+    return { label: "J+3 retard", className: "text-red-600", date: baseDate || "2026-04-26" };
+  }
+  if (normalizeText(row.status).includes("notifi")) {
+    return { label: "J-0", className: "text-amber-600", date: baseDate };
+  }
+  const days = Math.max(2, 12 + index * 8);
+  return { label: `J-${days}`, className: days > 30 ? "text-emerald-700" : "text-amber-600", date: baseDate };
+}
+
 function statusStyle(status?: string | null) {
   const normalized = (status || "").toLowerCase();
   if (normalized.includes("manqu") || normalized.includes("retard")) return "bg-amber-100 text-amber-800";
@@ -78,6 +139,14 @@ function statusStyle(status?: string | null) {
   if (normalized.includes("consult")) return "bg-indigo-100 text-indigo-800";
   if (normalized.includes("instruction")) return "bg-blue-100 text-blue-800";
   return "bg-stone-100 text-stone-700";
+}
+
+function statusMatches(rowStatus: string | null | undefined, configuredStatus: DashboardStatusConfig) {
+  return normalizeText(rowStatus).includes(normalizeText(configuredStatus.label));
+}
+
+function getDossierUrl(row: MairieDossier) {
+  return row.id.startsWith("demo-") ? "/portail-mairie" : `/portail-mairie/${encodeURIComponent(row.id)}`;
 }
 
 function MairieShell({ children }: { children: React.ReactNode }) {
@@ -133,7 +202,7 @@ function MairieShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function StatCard({ label, value, delta, icon: Icon, tone = "blue" }: { label: string; value: string; delta: string; icon: typeof FileText; tone?: "blue" | "amber" | "emerald" | "violet" }) {
+function StatCard({ label, value, delta, icon: Icon, tone = "blue", active = false, onClick }: { label: string; value: string; delta: string; icon: typeof FileText; tone?: "blue" | "amber" | "emerald" | "violet"; active?: boolean; onClick?: () => void }) {
   const colors = {
     blue: "text-blue-600",
     amber: "text-amber-600",
@@ -141,25 +210,171 @@ function StatCard({ label, value, delta, icon: Icon, tone = "blue" }: { label: s
     violet: "text-violet-600",
   };
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md ${
+        active ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200"
+      }`}
+    >
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm font-medium text-slate-600">{label}</p>
         <Icon className={`h-5 w-5 ${colors[tone]}`} />
       </div>
       <p className="mt-3 text-4xl font-bold tracking-tight text-slate-950">{value}</p>
       <p className="mt-3 text-sm font-medium text-emerald-700">{delta}</p>
+    </button>
+  );
+}
+
+function DossierPreview({ dossier, onClose }: { dossier: MairieDossier | null; onClose: () => void }) {
+  if (!dossier) return null;
+
+  const deadline = deadlineInfo(dossier, 0);
+  const zone = dossier.metadata?.zoneCode || dossier.metadata?.zone_code || dossier.metadata?.pluAnalysis?.zone || "Zone non renseignée";
+  const hasPlu = !!dossier.documentCount || !!dossier.metadata?.pluAnalysis;
+  const timeline = [
+    { label: "Dépôt", date: formatDate(dossier.createdAt || "2026-03-20"), done: true },
+    { label: "Complétude", date: formatDate(dossier.updatedAt || "2026-03-22"), done: true },
+    { label: "Instruction en cours", date: "depuis 7 jours", current: true },
+    { label: "Décision", date: `avant ${formatDate(deadline.date)}`, done: false },
+  ];
+
+  const openDossier = () => {
+    window.open(getDossierUrl(dossier), "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-[1px]" onClick={onClose}>
+      <aside
+        className="ml-auto flex h-full w-full max-w-[40rem] flex-col overflow-y-auto border-l border-slate-200 bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="p-8">
+          <div className="mb-7 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">{dossier.dossierNumber || dossier.title || "Dossier urbanisme"}</h2>
+              <p className="mt-2 text-2xl font-semibold text-slate-500">{dossier.typeProcedure || "Procédure urbanisme"}</p>
+            </div>
+            <Button variant="ghost" size="icon" className="text-slate-400 hover:text-slate-950" onClick={onClose}>
+              <X className="h-7 w-7" />
+            </Button>
+          </div>
+
+          <span className={`inline-flex rounded-lg px-3 py-2 text-lg font-medium ${statusStyle(dossier.status)}`}>
+            ● {dossier.status || "Déposé"}
+          </span>
+
+          <div className="mt-10 space-y-7">
+            <div>
+              <p className="text-xl font-semibold uppercase tracking-widest text-slate-500">Demandeur</p>
+              <p className="mt-3 text-2xl font-medium">{dossier.userName || "Demandeur"} · {dossier.address || "Adresse non renseignée"}</p>
+            </div>
+            <div>
+              <p className="text-xl font-semibold uppercase tracking-widest text-slate-500">Parcelle</p>
+              <p className="mt-3 text-2xl font-medium">{dossier.parcelRef || dossier.metadata?.parcel_ref || "Parcelle non renseignée"} · {zone}</p>
+            </div>
+            <div>
+              <p className="text-xl font-semibold uppercase tracking-widest text-slate-500">Échéance légale</p>
+              <p className="mt-3 text-2xl font-medium">{formatDate(deadline.date)} · <span className={deadline.className}>{deadline.label}</span></p>
+            </div>
+          </div>
+
+          <div className="mt-7 rounded-2xl bg-slate-50 p-6 text-xl font-medium text-slate-500">
+            {hasPlu ? "Analyse PLU disponible" : "Pas d'analyse PLU disponible"}
+          </div>
+
+          <div className="mt-8">
+            <p className="mb-5 text-xl font-semibold uppercase tracking-widest text-slate-500">Frise</p>
+            <div className="space-y-5">
+              {timeline.map((item) => (
+                <div key={item.label} className="flex gap-4">
+                  <span className={`mt-2 h-3 w-3 shrink-0 rounded-full ${item.current ? "bg-blue-700" : item.done ? "bg-green-700" : "bg-stone-300"}`} />
+                  <div>
+                    <p className={`text-xl font-semibold ${item.current ? "text-slate-700" : item.done ? "text-slate-700" : "text-stone-500"}`}>{item.label}</p>
+                    <p className="text-lg font-medium text-slate-400">{item.date}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-auto flex gap-3 border-t border-slate-100 p-8">
+          <Button className="h-14 flex-1 rounded-xl bg-slate-900 text-xl font-bold text-white hover:bg-slate-800" onClick={openDossier}>
+            Ouvrir le dossier
+          </Button>
+          <Button variant="outline" size="icon" className="h-14 w-20 rounded-xl border-slate-300">
+            <MoreVertical className="h-6 w-6" />
+          </Button>
+        </div>
+      </aside>
     </div>
   );
 }
 
 function DashboardView() {
+  const { user } = useAuth();
+  const assignedCommunes = useMemo(() => parseCommunes((user as any)?.communes), [user]);
+  const selectedCommune = assignedCommunes[0] || "all";
+  const [activeMetric, setActiveMetric] = useState<"all" | "pending" | "processed" | "delay">("all");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [previewDossier, setPreviewDossier] = useState<MairieDossier | null>(null);
+
   const { data, isLoading } = useQuery<{ dossiers: MairieDossier[] }>({
-    queryKey: ["mairie-dashboard-dossiers"],
-    queryFn: () => apiFetch("/api/mairie/dossiers"),
+    queryKey: ["mairie-dashboard-dossiers", selectedCommune],
+    queryFn: () => apiFetch(`/api/mairie/dossiers${selectedCommune !== "all" ? `?commune=${encodeURIComponent(selectedCommune)}` : ""}`),
   });
+  const { data: settingsData } = useQuery<{ settings: MairieSettings | null }>({
+    queryKey: ["mairie-dashboard-settings", selectedCommune],
+    queryFn: () => apiFetch(`/api/mairie/settings/${encodeURIComponent(selectedCommune)}`),
+    enabled: selectedCommune !== "all",
+  });
+
   const rows = data?.dossiers?.length ? data.dossiers : demoRows;
-  const pendingCount = rows.filter((row) => !String(row.status || "").toLowerCase().includes("notifi")).length;
-  const processedCount = Math.max(42, rows.filter((row) => String(row.status || "").toLowerCase().includes("notifi")).length);
+  const activeStatuses = useMemo(() => {
+    const configured = settingsData?.settings?.formulas?.dashboardStatuses;
+    const base = configured?.length ? configured : defaultDashboardStatuses;
+    const presentLabels = Array.from(new Set(rows.map((row) => row.status).filter(Boolean).map(String)));
+    const merged = [...base];
+    presentLabels.forEach((label) => {
+      if (!merged.some((item) => normalizeText(item.label) === normalizeText(label))) {
+        merged.push({ key: normalizeText(label).replace(/\s+/g, "_"), label, active: true });
+      }
+    });
+    return merged.filter((status) => status.active);
+  }, [rows, settingsData]);
+
+  const agents = useMemo(() => Array.from(new Set(rows.map((_, index) => index % 2 ? "S. Leroy" : "J. Dubois"))), [rows]);
+  const types = useMemo(() => Array.from(new Set(rows.map((row) => row.typeProcedure || "PC"))), [rows]);
+  const pendingRows = rows.filter((row) => !normalizeText(row.status).includes("notifi"));
+  const processedRows = rows.filter((row) => normalizeText(row.status).includes("notifi"));
+
+  const filteredRows = useMemo(() => rows.filter((row, index) => {
+    if (activeMetric === "pending" && !pendingRows.includes(row)) return false;
+    if (activeMetric === "processed" && !processedRows.includes(row)) return false;
+    if (activeMetric === "delay" && !deadlineInfo(row, index).label.includes("+") && !deadlineInfo(row, index).label.includes("J-0")) return false;
+    if (statusFilter !== "all" && normalizeText(row.status) !== normalizeText(statusFilter)) return false;
+    if (typeFilter !== "all" && normalizeText(row.typeProcedure) !== normalizeText(typeFilter)) return false;
+    const agent = index % 2 ? "S. Leroy" : "J. Dubois";
+    if (agentFilter !== "all" && agent !== agentFilter) return false;
+
+    const haystack = [
+      row.dossierNumber,
+      row.title,
+      row.userName,
+      row.address,
+      row.commune,
+      row.parcelRef,
+      row.metadata?.parcel_ref,
+      row.status,
+      row.typeProcedure,
+    ].map((item) => normalizeText(String(item || ""))).join(" ");
+    return !search || haystack.includes(normalizeText(search));
+  }), [activeMetric, agentFilter, pendingRows, processedRows, rows, search, statusFilter, typeFilter]);
 
   return (
     <MairieShell>
@@ -179,30 +394,42 @@ function DashboardView() {
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Dossiers en cours" value={String(rows.length || 24)} delta="+3 cette semaine" icon={Clock3} />
-        <StatCard label="En attente" value={String(pendingCount || 8)} delta="2 en retard" icon={Clock3} tone="amber" />
-        <StatCard label="Traités ce mois" value={String(processedCount)} delta="+12% vs M-1" icon={CheckCircle2} tone="emerald" />
-        <StatCard label="Délai moyen" value="38j" delta="-5j sur 30j" icon={TrendingUp} tone="violet" />
+        <StatCard label="Dossiers en cours" value={String(rows.length || 24)} delta="+3 cette semaine" icon={Clock3} active={activeMetric === "all"} onClick={() => setActiveMetric("all")} />
+        <StatCard label="En attente" value={String(pendingRows.length || 8)} delta="2 en retard" icon={Clock3} tone="amber" active={activeMetric === "pending"} onClick={() => setActiveMetric("pending")} />
+        <StatCard label="Traités ce mois" value={String(processedRows.length || 42)} delta="+12% vs M-1" icon={CheckCircle2} tone="emerald" active={activeMetric === "processed"} onClick={() => setActiveMetric("processed")} />
+        <StatCard label="Délai moyen" value="38j" delta="-5j sur 30j" icon={TrendingUp} tone="violet" active={activeMetric === "delay"} onClick={() => setActiveMetric("delay")} />
       </div>
 
       <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input className="h-11 rounded-lg border-slate-200 pl-9" placeholder="Rechercher (numéro, nom, adresse, parcelle...)" />
+            <Input
+              className="h-11 rounded-lg border-slate-200 pl-9"
+              placeholder="Rechercher (numéro, nom, adresse, parcelle...)"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
           </div>
-          {["Statut", "Type", "Agent"].map((label) => (
-            <Button key={label} variant="outline" className="rounded-lg border-slate-300 bg-white text-slate-950">
-              {label} ▾
-            </Button>
-          ))}
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950">
+            <option value="all">Statut</option>
+            {activeStatuses.map((status) => <option key={status.key} value={status.label}>{status.label}</option>)}
+          </select>
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950">
+            <option value="all">Type</option>
+            {types.map((type) => <option key={type} value={type}>{type}</option>)}
+          </select>
+          <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-950">
+            <option value="all">Agent</option>
+            {agents.map((agent) => <option key={agent} value={agent}>{agent}</option>)}
+          </select>
         </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-sm text-slate-500">
-          <span>{isLoading ? "Chargement..." : `${rows.length} dossiers`}</span>
-          <span>1-{rows.length} sur {rows.length}</span>
+          <span>{isLoading ? "Chargement..." : `${filteredRows.length} dossier${filteredRows.length > 1 ? "s" : ""}`}</span>
+          <span>1-{filteredRows.length} sur {rows.length}</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
@@ -217,21 +444,23 @@ function DashboardView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((row, index) => (
-                <tr key={row.id} className={row.anomalyCount ? "border-l-4 border-l-red-400 bg-amber-50/20" : ""}>
-                  <td className="px-4 py-4"><Checkbox /></td>
+              {filteredRows.map((row, index) => {
+                const deadline = deadlineInfo(row, index);
+                return (
+                <tr key={row.id} className={`cursor-pointer hover:bg-slate-50 ${row.anomalyCount ? "border-l-4 border-l-red-400 bg-amber-50/20" : ""}`} onClick={() => setPreviewDossier(row)}>
+                  <td className="px-4 py-4" onClick={(event) => event.stopPropagation()}><Checkbox /></td>
                   <td className="px-3 py-4">
-                    <Link href={row.id.startsWith("demo-") ? "/portail-mairie" : `/portail-mairie/${row.id}`} className="font-bold leading-tight text-slate-950 hover:underline">
+                    <button type="button" className="text-left font-bold leading-tight text-slate-950 hover:underline">
                       {row.dossierNumber || row.title || "Dossier urbanisme"}
-                    </Link>
+                    </button>
                     <p className="mt-1 text-xs text-slate-500">{row.typeProcedure || "PC"} · {row.address || row.commune || "Adresse à compléter"}</p>
                     {!!row.documentCount && <span className="mt-2 inline-flex rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">PLU analysé</span>}
                   </td>
                   <td className="px-3 py-4 font-medium">{row.userName || "Demandeur"}</td>
                   <td className="px-3 py-4"><span className={`inline-flex rounded px-2 py-1 text-xs font-medium ${statusStyle(row.status)}`}>{row.status || "Déposé"}</span></td>
                   <td className="px-3 py-4">
-                    <p className={index < 1 ? "font-semibold text-red-600" : index < 4 ? "font-semibold text-amber-600" : "font-semibold text-emerald-700"}>{index < 1 ? "J+3 retard" : `J-${index * 8}`}</p>
-                    <p className="text-xs text-slate-400">{formatDate(row.updatedAt || row.createdAt)}</p>
+                    <p className={`font-semibold ${deadline.className}`}>{deadline.label}</p>
+                    <p className="text-xs text-slate-400">{formatDate(deadline.date)}</p>
                   </td>
                   <td className="px-3 py-4">
                     <div className="flex items-center gap-2">
@@ -240,15 +469,22 @@ function DashboardView() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
+          {filteredRows.length === 0 && (
+            <div className="py-12 text-center text-sm font-medium text-slate-500">
+              Aucun dossier ne correspond aux critères.
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
           <span>↵ naviguer · ↩ ouvrir · ⌘K recherche</span>
           <span>‹ 1 / 1 ›</span>
         </div>
       </div>
+      <DossierPreview dossier={previewDossier} onClose={() => setPreviewDossier(null)} />
     </MairieShell>
   );
 }
@@ -323,8 +559,54 @@ function StatistiquesView() {
 
 function ParametresView() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const assignedCommunes = useMemo(() => parseCommunes((user as any)?.communes), [user]);
+  const selectedCommune = assignedCommunes[0] || "all";
   const profileName = user?.name || "Sophie Laurent";
   const profileEmail = user?.email || "s.laurent@mairie.fr";
+  const { data: settingsData } = useQuery<{ settings: MairieSettings | null }>({
+    queryKey: ["mairie-dashboard-settings", selectedCommune],
+    queryFn: () => apiFetch(`/api/mairie/settings/${encodeURIComponent(selectedCommune)}`),
+    enabled: selectedCommune !== "all",
+  });
+  const [localStatuses, setLocalStatuses] = useState<DashboardStatusConfig[]>(defaultDashboardStatuses);
+
+  useEffect(() => {
+    const configured = settingsData?.settings?.formulas?.dashboardStatuses;
+    if (configured?.length) setLocalStatuses(configured);
+  }, [settingsData]);
+
+  const saveStatusesMutation = useMutation({
+    mutationFn: async () => {
+      if (selectedCommune === "all") throw new Error("Aucune commune sélectionnée");
+      const existing = settingsData?.settings || {};
+      const response = await fetch(`/api/mairie/settings/${encodeURIComponent(selectedCommune)}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...existing,
+          formulas: {
+            ...(existing.formulas || {}),
+            dashboardStatuses: localStatuses,
+          },
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || "Impossible de sauvegarder les statuts");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-dashboard-settings", selectedCommune] });
+      toast({ title: "Statuts sauvegardés", description: "Les filtres actifs du dashboard ont été mis à jour." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    },
+  });
 
   return (
     <MairieShell>
@@ -341,6 +623,34 @@ function ParametresView() {
         </section>
         <SettingsBlock title="Notifications" icon={Bell} items={["Nouveau dossier déposé", "Avis reçu d'un service consulté", "Rappel de délai d'instruction"]} checked={[true, true, false]} />
         <SettingsBlock title="Notifications par email" icon={Mail} items={["Résumé quotidien", "Résumé hebdomadaire"]} checked={[true, false]} />
+        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-xl font-bold"><Settings className="h-5 w-5" /> Statuts d'instruction actifs</h2>
+              <p className="mt-1 text-sm text-slate-500">Ces statuts alimentent le filtre Statut du dashboard Mairie.</p>
+            </div>
+            <Button
+              className="rounded-lg bg-slate-950 text-white hover:bg-slate-800"
+              onClick={() => saveStatusesMutation.mutate()}
+              disabled={saveStatusesMutation.isPending || selectedCommune === "all"}
+            >
+              Enregistrer
+            </Button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {localStatuses.map((status, index) => (
+              <label key={status.key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                <span className="font-semibold">{status.label}</span>
+                <Checkbox
+                  checked={status.active}
+                  onCheckedChange={(checked) => {
+                    setLocalStatuses((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: checked === true } : item));
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-5 flex items-center justify-between gap-4">
             <h2 className="flex items-center gap-2 text-xl font-bold"><FileText className="h-5 w-5" /> Modèles de courrier</h2>
