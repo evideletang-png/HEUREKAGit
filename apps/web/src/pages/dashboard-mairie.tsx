@@ -9,7 +9,6 @@ import {
   ExternalLink,
   Download,
   FileText,
-  LogOut,
   Mail,
   MessageSquare,
   MoreVertical,
@@ -27,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { AppShell } from "@/components/layout/AppShell";
 
 type MairieDossier = {
   id: string;
@@ -149,8 +149,7 @@ function getDossierUrl(row: MairieDossier) {
   return row.id.startsWith("demo-") ? "/dossier/d2" : `/dossier/${encodeURIComponent(row.id)}`;
 }
 
-function MairieShell({ children }: { children: React.ReactNode }) {
-  const { user, logout } = useAuth();
+function MairieSectionNav() {
   const [location] = useLocation();
   const navItems = [
     { href: "/dashboard-mairie", label: "Tableau de bord", icon: FileText },
@@ -160,45 +159,33 @@ function MairieShell({ children }: { children: React.ReactNode }) {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white">
-        <div className="flex min-h-20 items-center gap-3 px-4 sm:px-6">
-          <Link href="/dashboard-mairie" className="flex min-w-[8.5rem] items-center gap-3 font-bold leading-tight text-slate-950">
-            <span className="flex h-8 w-6 items-center justify-center rounded-full bg-slate-950 text-sm text-white">H</span>
-            <span>HEUREKA -<br />Portail Mairie</span>
+    <nav className="mb-8 flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      {navItems.map((item) => {
+        const Icon = item.icon;
+        const active = location === item.href;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors sm:px-4 ${
+              active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-950"
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            {item.label}
           </Link>
-          <nav className="flex flex-1 items-center gap-1 overflow-x-auto px-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = location === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`inline-flex h-12 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors sm:px-4 ${
-                    active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-950"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-          <Button variant="ghost" size="icon" className="relative shrink-0 text-slate-500">
-            <Bell className="h-5 w-5" />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500" />
-          </Button>
-          <div className="hidden max-w-40 text-sm leading-snug text-slate-500 md:block">
-            {user?.name || "Sophie Laurent"} -<br />Service Urbanisme
-          </div>
-          <Button variant="ghost" size="icon" className="shrink-0 text-slate-500" onClick={() => logout()}>
-            <LogOut className="h-5 w-5" />
-          </Button>
-        </div>
-      </header>
-      <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">{children}</main>
-    </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+function MairieShell({ children }: { children: React.ReactNode }) {
+  return (
+    <AppShell className="bg-[#f7f7f6] text-slate-950" mainClassName="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
+      <MairieSectionNav />
+      {children}
+    </AppShell>
   );
 }
 

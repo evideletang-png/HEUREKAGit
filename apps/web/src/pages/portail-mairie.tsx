@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { Navbar } from "@/components/layout/Navbar";
+import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -3194,9 +3194,7 @@ export default function PortailMairiePage() {
   const comparison: ComparisonResult | null = comparisonRaw?.data ?? comparisonRaw;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <Navbar />
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+    <AppShell mainClassName="flex-1 w-full max-w-7xl mx-auto px-3 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
         <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 sm:h-12 sm:w-12">
             <Building className="w-6 h-6 text-primary" />
@@ -4233,7 +4231,6 @@ export default function PortailMairiePage() {
             ) : null}
           </div>
         )}
-      </main>
-    </div>
+    </AppShell>
   );
 }

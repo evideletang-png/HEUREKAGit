@@ -20,11 +20,12 @@ import {
   Users,
 } from "lucide-react";
 import { useGetApiDocuments } from "@workspace/api-client-react";
+import { AppShell } from "@/components/layout/AppShell";
 
 const stepLabels: Record<string, { label: string; color: string; icon: any }> = {
   depot: { label: "Dépôt validé", color: "text-blue-700 bg-blue-50 border-blue-200", icon: Clock },
   analyse: { label: "Analyse experte en cours", color: "text-violet-700 bg-violet-50 border-violet-200", icon: Search },
-  instruction: { label: "Instruction mairie", color: "text-amber-700 bg-amber-50 border-amber-200", icon: Users },
+  instruction: { label: "Instruction Mairie", color: "text-amber-700 bg-amber-50 border-amber-200", icon: Users },
   pieces: { label: "Pièces à compléter", color: "text-rose-700 bg-rose-50 border-rose-200", icon: ShieldAlert },
   decision: { label: "Décision rendue", color: "text-emerald-700 bg-emerald-50 border-emerald-200", icon: FileCheck },
 };
@@ -123,28 +124,7 @@ export default function CitoyenPage() {
   const lastActivityLabel = documents[0] ? new Date(documents[0].createdAt).toLocaleDateString("fr-FR") : "Aucune";
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 pb-20">
-      <header className="bg-white/90 backdrop-blur border-b border-border/40 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-primary/10 bg-white shadow-sm">
-              <img src="/favicon.svg" alt="Heureka Citoyen" className="h-8 w-8 rounded-lg" />
-            </div>
-            <div className="leading-tight">
-              <p className="font-bold text-primary tracking-tight">Heureka Citoyen</p>
-              <p className="text-xs text-muted-foreground">Guichet numérique urbanisme • {communeName}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium hidden sm:block">{user?.name}</span>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/account">Mon compte</Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
+    <AppShell className="bg-gradient-to-b from-slate-50 via-white to-slate-100 pb-20" mainClassName="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8 w-full">
         <section className="rounded-3xl border border-primary/10 bg-white shadow-sm p-6 md:p-8">
           <div className="flex flex-col lg:flex-row gap-6 lg:items-center lg:justify-between">
             <div className="space-y-4 max-w-3xl">
@@ -324,7 +304,6 @@ export default function CitoyenPage() {
             </div>
           </section>
         )}
-      </main>
-    </div>
+    </AppShell>
   );
 }

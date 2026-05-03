@@ -2,7 +2,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
-import { Navbar } from "./Navbar";
+import { AppShell } from "./AppShell";
 
 export function ProtectedLayout({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -11,7 +11,7 @@ export function ProtectedLayout({ children, requireAdmin = false }: { children: 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       setLocation("/login");
-    } else if (!isLoading && requireAdmin && user?.role !== "admin") {
+    } else if (!isLoading && requireAdmin && !["admin", "super_admin"].includes((user?.role as string) || "")) {
       setLocation("/dashboard");
     }
   }, [isLoading, isAuthenticated, setLocation, requireAdmin, user]);
@@ -27,7 +27,7 @@ export function ProtectedLayout({ children, requireAdmin = false }: { children: 
     );
   }
 
-  if (!isAuthenticated || (requireAdmin && user?.role !== "admin")) {
+  if (!isAuthenticated || (requireAdmin && !["admin", "super_admin"].includes((user?.role as string) || ""))) {
     // Show spinner while the useEffect redirect is in flight — avoids a blank flash
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -37,11 +37,8 @@ export function ProtectedLayout({ children, requireAdmin = false }: { children: 
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <Navbar />
-      <main className="animate-in fade-in duration-500 flex-1 w-full max-w-7xl mx-auto px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8 min-w-0">
-        {children}
-      </main>
-    </div>
+    <AppShell mainClassName="animate-in fade-in duration-500 flex-1 w-full max-w-7xl mx-auto px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8 min-w-0">
+      {children}
+    </AppShell>
   );
 }
