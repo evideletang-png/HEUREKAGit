@@ -25,7 +25,8 @@ export function useAuth() {
           description: "Bienvenue sur HEUREKA.",
         });
         const role = (data.user.role as any);
-        if (role === "admin" || role === "super_admin") setLocation("/admin");
+        if (data.user.email?.toLowerCase() === "test@heureka.fr") setLocation("/demo");
+        else if (role === "admin" || role === "super_admin") setLocation("/admin");
         else if (role === "mairie") setLocation("/portail-mairie");
         else if (role === "metropole") setLocation("/portail-metropole");
         else if (role === "abf") setLocation("/portail-abf");
