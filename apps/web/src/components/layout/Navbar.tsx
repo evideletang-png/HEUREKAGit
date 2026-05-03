@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { Building2, LogOut, User as UserIcon, LayoutDashboard, ShieldCheck, Scale, FileText, Gavel, Menu, MessageSquare } from "lucide-react";
+import { Building2, LogOut, User as UserIcon, Menu } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,24 +12,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { NotificationBell } from "../notifications/NotificationBell";
+import { getRoleNavigationLinks } from "./RoleNavigation";
 
 export function Navbar() {
   const { user, isAuthenticated, logout } = useAuth();
   const [location] = useLocation();
 
-  const isPublicPage = location === "/" || location === "/login" || location === "/register";
   const role = (user?.role as string) || "";
-
-  const navigationLinks = [
-    { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, show: isAuthenticated },
-    { href: "/citoyen", label: "Mes dossiers", icon: FileText, show: role === "citoyen" || role === "user" },
-    { href: "/messagerie", label: "Messagerie", icon: MessageSquare, show: isAuthenticated },
-    { href: "/recours", label: "Recours", icon: Gavel, show: ["citoyen", "user", "mairie", "admin", "super_admin"].includes(role) },
-    { href: "/dashboard-mairie", label: "Instruction Mairie", icon: ShieldCheck, show: ["mairie", "admin", "super_admin"].includes(role) },
-    { href: "/portail-metropole", label: "Instruction Métropole", icon: Building2, show: ["metropole", "admin"].includes(role) },
-    { href: "/portail-abf", label: "Avis ABF", icon: Scale, show: ["abf", "admin"].includes(role) },
-    { href: "/account", label: "Mon compte", icon: UserIcon, show: isAuthenticated },
-  ].filter((item) => item.show);
+  const navigationLinks = getRoleNavigationLinks(role, isAuthenticated);
+  const desktopLinks = navigationLinks.filter((item) => item.href !== "/account");
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl transition-all">
@@ -62,58 +53,20 @@ export function Navbar() {
             </>
           ) : (
             <div className="flex items-center gap-1.5 sm:gap-3">
-              <Button variant="ghost" size="sm" asChild className="hidden md:flex gap-2">
-                <Link href="/dashboard">
-                  <LayoutDashboard className="w-4 h-4" />
-                  Tableau de bord
-                </Link>
-              </Button>
-              {((user?.role as string) === "citoyen" || (user?.role as string) === "user") && (
-                <Button variant="ghost" size="sm" asChild className="flex gap-2 text-primary font-medium">
-                  <Link href="/citoyen">
-                    <FileText className="w-4 h-4" />
-                    Mes dossiers
-                  </Link>
-                </Button>
-              )}
-              <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-slate-700 font-medium">
-                <Link href="/messagerie">
-                  <MessageSquare className="w-4 h-4" />
-                  Messagerie
-                </Link>
-              </Button>
-              {["citoyen", "user", "mairie", "admin", "super_admin"].includes((user?.role as string) || "") && (
-                <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-slate-700 font-medium">
-                  <Link href="/recours">
-                    <Gavel className="w-4 h-4" />
-                    Recours
-                  </Link>
-                </Button>
-              )}
-              {((user?.role as string) === "mairie" || (user?.role as string) === "admin" || (user?.role as string) === "super_admin") && (
-                <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-primary font-bold">
-                  <Link href="/dashboard-mairie">
-                    <ShieldCheck className="w-4 h-4" />
-                    Instruction Mairie
-                  </Link>
-                </Button>
-              )}
-              {((user?.role as string) === "metropole" || (user?.role as string) === "admin") && (
-                <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-indigo-600 font-bold">
-                  <Link href="/portail-metropole">
-                    <Building2 className="w-4 h-4" />
-                    Instruction Métropole
-                  </Link>
-                </Button>
-              )}
-              {((user?.role as string) === "abf" || (user?.role as string) === "admin") && (
-                <Button variant="ghost" size="sm" asChild className="hidden sm:flex gap-2 text-amber-700 font-bold">
-                  <Link href="/portail-abf">
-                    <Scale className="w-4 h-4" />
-                    Avis ABF
-                  </Link>
-                </Button>
-              )}
+              <div className="hidden items-center gap-1.5 md:flex">
+                {desktopLinks.map((item) => {
+                  const Icon = item.icon;
+                  const active = location === item.href || (item.href !== "/dashboard" && location.startsWith(`${item.href}/`));
+                  return (
+                    <Button key={item.href} variant={active ? "secondary" : "ghost"} size="sm" asChild className="gap-2 font-medium">
+                      <Link href={item.href}>
+                        <Icon className="w-4 h-4" />
+                        {item.label}
+                      </Link>
+                    </Button>
+                  );
+                })}
+              </div>
 
               <NotificationBell />
 
@@ -178,72 +131,17 @@ export function Navbar() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild className="cursor-pointer rounded-md">
-                    <Link href="/dashboard" className="flex items-center w-full">
-                      <LayoutDashboard className="mr-2 h-4 w-4" />
-                      <span>Tableau de bord</span>
-                    </Link>
-                  </DropdownMenuItem>
-                  {(isAuthenticated && (user?.role as string) === "user") && (
-                    <DropdownMenuItem asChild className="cursor-pointer rounded-md text-primary">
-                      <Link href="/citoyen" className="flex items-center w-full">
-                        <FileText className="mr-2 h-4 w-4" />
-                        <span>Mes dossiers</span>
-                      </Link>
-                    </DropdownMenuItem>
-                  )}
-                  {["citoyen", "user", "mairie", "admin", "super_admin"].includes((user?.role as string) || "") && (
-                    <DropdownMenuItem asChild className="cursor-pointer rounded-md">
-                      <Link href="/recours" className="flex items-center w-full">
-                        <Gavel className="mr-2 h-4 w-4" />
-                        <span>Recours</span>
-                      </Link>
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem asChild className="cursor-pointer rounded-md">
-                    <Link href="/messagerie" className="flex items-center w-full">
-                      <MessageSquare className="mr-2 h-4 w-4" />
-                      <span>Messagerie</span>
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="cursor-pointer rounded-md">
-                    <Link href="/account" className="flex items-center w-full">
-                      <UserIcon className="mr-2 h-4 w-4" />
-                      <span>Mon compte</span>
-                    </Link>
-                  </DropdownMenuItem>
-                  {((user?.role as string) === "admin") && (
-                    <>
-                      <DropdownMenuItem asChild className="cursor-pointer rounded-md text-indigo-600 font-bold">
-                        <Link href="/portail-metropole" className="flex items-center w-full">
-                          <Building2 className="mr-2 h-4 w-4" />
-                          <span>Instruction Métropole</span>
+                  {navigationLinks.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <DropdownMenuItem key={item.href} asChild className="cursor-pointer rounded-md">
+                        <Link href={item.href} className="flex items-center w-full">
+                          <Icon className="mr-2 h-4 w-4" />
+                          <span>{item.label}</span>
                         </Link>
                       </DropdownMenuItem>
-                      <DropdownMenuItem asChild className="cursor-pointer rounded-md text-amber-700 font-bold">
-                        <Link href="/portail-abf" className="flex items-center w-full">
-                          <Scale className="mr-2 h-4 w-4" />
-                          <span>Avis ABF</span>
-                        </Link>
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                  {((user?.role as string) === "mairie" || (user?.role as string) === "admin") && (
-                    <DropdownMenuItem asChild className="cursor-pointer rounded-md text-primary font-bold">
-                      <Link href="/dashboard-mairie" className="flex items-center w-full">
-                        <ShieldCheck className="mr-2 h-4 w-4" />
-                        <span>Instruction Experte (Mairie)</span>
-                      </Link>
-                    </DropdownMenuItem>
-                  )}
-                  {(user?.role as string) === "admin" && (
-                    <DropdownMenuItem asChild className="cursor-pointer rounded-md text-accent">
-                      <Link href="/admin" className="flex items-center w-full">
-                        <ShieldCheck className="mr-2 h-4 w-4" />
-                        <span>Administration Centrale</span>
-                      </Link>
-                    </DropdownMenuItem>
-                  )}
+                    );
+                  })}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem 
                     className="cursor-pointer text-destructive focus:bg-destructive/10 rounded-md"

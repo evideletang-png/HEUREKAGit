@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { Navbar } from "@/components/layout/Navbar";
+import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,9 +57,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
   );
 
   return (
-    <div className="min-h-screen bg-[#FDFCFB]">
-      <Navbar />
-      <main className="container mx-auto py-8 px-4 max-w-7xl">
+    <AppShell className="bg-[#FDFCFB]" mainClassName="container mx-auto py-8 px-4 max-w-7xl w-full">
         {selectedId ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <Button variant="ghost" onClick={() => setLocation("/portail-abf")} className="gap-2 -ml-2 text-amber-700 hover:text-amber-900">
@@ -145,8 +143,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
             </Card>
           </div>
         )}
-      </main>
-    </div>
+    </AppShell>
   );
 }
 

@@ -9,6 +9,7 @@ import { Building2, ArrowLeft, Upload, FileText, X, CheckCircle2, Search, Loader
 import { useMutation } from "@tanstack/react-query";
 import { useGeocodeAddress } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { AppShell } from "@/components/layout/AppShell";
 
 export default function CitoyenNewDossierPage() {
   const [, setLocation] = useLocation();
@@ -84,9 +85,9 @@ export default function CitoyenNewDossierPage() {
   };
 
   return (
-    <div className="min-h-screen bg-muted/20 pb-20">
-      <header className="bg-white border-b border-border/40 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-4">
+    <AppShell className="bg-muted/20 pb-20" mainClassName="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 w-full">
+      <div className="mb-6 rounded-lg border border-border/40 bg-white p-3 shadow-sm">
+        <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild>
             <Link href="/citoyen">
               <ArrowLeft className="w-5 h-5" />
@@ -99,10 +100,9 @@ export default function CitoyenNewDossierPage() {
             <CardTitle className="text-lg">Nouveau Dépôt de Dossier</CardTitle>
           </div>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pt-10">
-        <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
           <Card className="border-none shadow-md">
             <CardHeader>
               <CardTitle className="text-xl">1. Informations du Projet</CardTitle>
@@ -265,8 +265,7 @@ export default function CitoyenNewDossierPage() {
               )}
             </Button>
           </div>
-        </form>
-      </main>
-    </div>
+      </form>
+    </AppShell>
   );
 }
