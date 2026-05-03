@@ -2,7 +2,6 @@ import { Link, useLocation } from "wouter";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BarChart3,
   Bell,
   CheckCircle2,
   Clock3,
@@ -10,7 +9,6 @@ import {
   Download,
   FileText,
   Mail,
-  MessageSquare,
   MoreVertical,
   Plus,
   Search,
@@ -26,7 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { AppShell } from "@/components/layout/AppShell";
+import { MairieNavigation } from "@/components/layout/MairieNavigation";
 
 type MairieDossier = {
   id: string;
@@ -149,43 +147,14 @@ function getDossierUrl(row: MairieDossier) {
   return row.id.startsWith("demo-") ? "/dossier/d2" : `/dossier/${encodeURIComponent(row.id)}`;
 }
 
-function MairieSectionNav() {
-  const [location] = useLocation();
-  const navItems = [
-    { href: "/dashboard-mairie", label: "Tableau de bord", icon: FileText },
-    { href: "/dashboard-mairie/messagerie", label: "Messagerie", icon: MessageSquare },
-    { href: "/dashboard-mairie/statistiques", label: "Statistiques", icon: BarChart3 },
-    { href: "/dashboard-mairie/parametres", label: "Paramètres", icon: Settings },
-  ];
-
-  return (
-    <nav className="mb-8 flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-      {navItems.map((item) => {
-        const Icon = item.icon;
-        const active = location === item.href;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors sm:px-4 ${
-              active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-950"
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
 function MairieShell({ children }: { children: React.ReactNode }) {
   return (
-    <AppShell className="bg-[#f7f7f6] text-slate-950" mainClassName="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
-      <MairieSectionNav />
-      {children}
-    </AppShell>
+    <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
+      <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
+        <MairieNavigation />
+        {children}
+      </main>
+    </div>
   );
 }
 
@@ -550,8 +519,6 @@ function ParametresView() {
   const { toast } = useToast();
   const assignedCommunes = useMemo(() => parseCommunes((user as any)?.communes), [user]);
   const selectedCommune = assignedCommunes[0] || "all";
-  const profileName = user?.name || "Sophie Laurent";
-  const profileEmail = user?.email || "s.laurent@mairie.fr";
   const { data: settingsData } = useQuery<{ settings: MairieSettings | null }>({
     queryKey: ["mairie-dashboard-settings", selectedCommune],
     queryFn: () => apiFetch(`/api/mairie/settings/${encodeURIComponent(selectedCommune)}`),
@@ -598,16 +565,8 @@ function ParametresView() {
   return (
     <MairieShell>
       <h1 className="text-3xl font-bold tracking-tight">Paramètres</h1>
-      <p className="mt-2 text-base text-slate-600">Configuration de votre compte et notifications</p>
+      <p className="mt-2 text-base text-slate-600">Réglages de fonctionnement du portail Mairie.</p>
       <div className="mt-9 grid gap-6">
-        <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-5 flex items-center gap-2 text-xl font-bold"><User className="h-5 w-5" /> Profil</h2>
-          <div className="space-y-4">
-            <label className="block text-sm font-medium">Nom<Input className="mt-2 rounded-lg border-slate-300" defaultValue={profileName} /></label>
-            <label className="block text-sm font-medium">Service<Input className="mt-2 rounded-lg border-slate-300" defaultValue="Service Urbanisme" /></label>
-            <label className="block text-sm font-medium">Email<Input className="mt-2 rounded-lg border-slate-300" defaultValue={profileEmail} /></label>
-          </div>
-        </section>
         <SettingsBlock title="Notifications" icon={Bell} items={["Nouveau dossier déposé", "Avis reçu d'un service consulté", "Rappel de délai d'instruction"]} checked={[true, true, false]} />
         <SettingsBlock title="Notifications par email" icon={Mail} items={["Résumé quotidien", "Résumé hebdomadaire"]} checked={[true, false]} />
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
