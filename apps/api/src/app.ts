@@ -35,19 +35,18 @@ app.get("/api/health", (_req, res) => {
 // Serve built frontend (co-hosted deployment)
 const frontendDist = path.resolve(__dirname, "../../web/dist/public");
 
-// Temporary debug — visit /api/debug/frontend to see what files are on disk
-app.get("/api/debug/frontend", (_req, res) => {
-  import("fs").then((fs) => {
-    const exists = fs.existsSync(frontendDist);
-    const files = exists ? fs.readdirSync(frontendDist) : [];
-    const assetsDir = path.join(frontendDist, "assets");
-    const assets = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir).slice(0, 20) : [];
-    const indexHtml = (exists && files.includes("index.html"))
-      ? fs.readFileSync(path.join(frontendDist, "index.html"), "utf-8")
-      : "(not found)";
-    res.json({ frontendDist, exists, files, assets, indexHtml });
+if (process.env.NODE_ENV !== "production") {
+  // Debug local uniquement : ne jamais exposer index.html en production.
+  app.get("/api/debug/frontend", (_req, res) => {
+    import("fs").then((fs) => {
+      const exists = fs.existsSync(frontendDist);
+      const files = exists ? fs.readdirSync(frontendDist) : [];
+      const assetsDir = path.join(frontendDist, "assets");
+      const assets = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir).slice(0, 20) : [];
+      res.json({ frontendDist, exists, files, assets });
+    });
   });
-});
+}
 
 app.use("/api", router);
 

@@ -1,25 +1,13 @@
 import { db, dossiersTable, dossierEventsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../utils/logger.js";
+import { DOSSIER_STATUS } from "../constants/dossierStatus.js";
 
 /**
  * Workflow Manager Service
  * Handles state transitions for dossiers and historization.
  */
-export const DOSSIER_STATUS = {
-  BROUILLON: "BROUILLON",
-  DEPOSE: "DEPOSE",
-  PRE_INSTRUCTION: "PRE_INSTRUCTION",
-  INCOMPLET: "INCOMPLET",
-  TRANSMIS_METROPOLE: "TRANSMIS_METROPOLE",
-  EN_INSTRUCTION: "EN_INSTRUCTION",
-  ATTENTE_ABF: "ATTENTE_ABF",
-  AVIS_ABF_RECU: "AVIS_ABF_RECU",
-  DECISION_EN_COURS: "DECISION_EN_COURS",
-  ACCEPTE: "ACCEPTE",
-  REFUSE: "REFUSE",
-  ACCORD_PRESCRIPTION: "ACCORD_PRESCRIPTION"
-};
+export { DOSSIER_STATUS };
 
 export class WorkflowService {
   /**

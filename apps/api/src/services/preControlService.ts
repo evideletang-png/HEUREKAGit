@@ -9,7 +9,7 @@ export interface PreControlReport {
   pieces_manquantes: Array<{ code: string; nom: string; motif: string }>;
   pieces_incorrectes: Array<{ code: string; nom: string; motif: string }>;
   incoherences: string[];
-  suggestedAction: string; // e.g., "Passer en INCOMPLET"
+  suggestedAction: string; // ex. : "Passer en dossier incomplet"
 }
 
 export async function executePreControl(dossierId: string): Promise<PreControlReport> {
@@ -42,7 +42,7 @@ export async function executePreControl(dossierId: string): Promise<PreControlRe
     pieces_manquantes: [],
     pieces_incorrectes: [],
     incoherences: [],
-    suggestedAction: "Passer en INCOMPLET"
+    suggestedAction: "Passer en dossier incomplet"
   };
 
   let validCount = 0;
@@ -81,9 +81,9 @@ export async function executePreControl(dossierId: string): Promise<PreControlRe
 
   // 5. Workflow suggestion logic
   if (percentage === 100 && report.pieces_incorrectes.length === 0) {
-    report.suggestedAction = "Passer en EN_COURS (Pré-contrôle validé)";
+    report.suggestedAction = "Passer en instruction démarrée (pré-contrôle validé)";
   } else {
-    report.suggestedAction = "Passer en INCOMPLET (Notification à envoyer au pétitionnaire)";
+    report.suggestedAction = "Passer en dossier incomplet (notification à envoyer au pétitionnaire)";
   }
 
   return report;

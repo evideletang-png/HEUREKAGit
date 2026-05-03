@@ -13,7 +13,7 @@ export function DeadlineWidget({ deadline, isTacite }: { deadline?: string | Dat
         Délai d'instruction
       </div>
       <p className="mt-3 text-2xl font-bold">{formatDate(deadline)}</p>
-      <p className="mt-2 text-sm font-medium">{isTacite ? "Risque permis tacite" : "OK"}</p>
+      <p className="mt-2 text-sm font-medium">{isTacite ? "Risque de décision tacite" : "OK"}</p>
     </div>
   );
 }

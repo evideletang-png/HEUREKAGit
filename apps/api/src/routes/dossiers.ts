@@ -5,8 +5,28 @@ import { eq, desc, and, sql, asc } from "drizzle-orm";
 import { authenticate, requireMairie, type AuthRequest } from "../middlewares/authenticate.js";
 import { NotificationService } from "../services/notificationService.js";
 import { ConversationService } from "../services/conversationService.js";
+import { DOSSIER_STATUS } from "../constants/dossierStatus.js";
+import { createInstructionEvent, INSTRUCTION_EVENT_TYPES } from "../services/instructionEventsService.js";
+import { refreshInstructionDeadline } from "../services/instructionDeadlineService.js";
 
 const router: IRouter = Router();
+
+const CITIZEN_EDITABLE_FIELDS = new Set(["typeProcedure", "title", "address", "commune", "metadata"]);
+const MAIRIE_EDITABLE_FIELDS = new Set(["typeProcedure", "title", "address", "commune", "metadata"]);
+const FORBIDDEN_DIRECT_FIELDS = new Set([
+  "status",
+  "instructionStatus",
+  "assignedMetropoleId",
+  "assignedAbfId",
+  "isTacite",
+  "dateLimiteInstruction",
+  "timeline",
+  "instructionStartedAt",
+]);
+
+function pickAllowedUpdates(body: Record<string, unknown>, allowedFields: Set<string>) {
+  return Object.fromEntries(Object.entries(body).filter(([key]) => allowedFields.has(key)));
+}
 
 function parseCommunes(raw: string | null | undefined): string[] {
   if (!raw) return [];
@@ -199,7 +219,9 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
     address,
     commune,
     metadata: metadata || {},
-    status: "DEPOSE",
+    status: DOSSIER_STATUS.DEPOSE,
+    instructionStatus: "depose",
+    dateDepot: new Date(),
   }).returning();
 
   return res.status(201).json({ dossier });
@@ -210,11 +232,31 @@ router.patch("/:id", authenticate, async (req: AuthRequest, res) => {
   if (!req.user) return res.status(401).json({ error: "UNAUTHORIZED" });
   const { id } = req.params;
   const { userId } = req.user;
-  const updates = req.body;
+  const body = (req.body || {}) as Record<string, unknown>;
+  const role = (req.user.role || "").toLowerCase();
+  const allowedFields = role === "mairie" || role === "admin" ? MAIRIE_EDITABLE_FIELDS : CITIZEN_EDITABLE_FIELDS;
+  const updates = pickAllowedUpdates(body, allowedFields);
+  const receivedKeys = Object.keys(body);
+  const forbiddenKeys = receivedKeys.filter((key) => FORBIDDEN_DIRECT_FIELDS.has(key) || !allowedFields.has(key));
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({
+      error: "NO_ALLOWED_FIELDS",
+      message: forbiddenKeys.length > 0
+        ? "Aucun champ fourni ne peut être modifié directement sur ce dossier."
+        : "Aucun champ modifiable fourni.",
+      forbiddenFields: forbiddenKeys,
+      allowedFields: Array.from(allowedFields),
+    });
+  }
+
+  const whereClause = role === "mairie" || role === "admin"
+    ? eq(dossiersTable.id, id as any)
+    : and(eq(dossiersTable.id, id as any), eq(dossiersTable.userId, userId));
 
   const [dossier] = await db.update(dossiersTable)
     .set({ ...updates, updatedAt: new Date() })
-    .where(and(eq(dossiersTable.id, id as any), eq(dossiersTable.userId, userId)))
+    .where(whereClause)
     .returning();
 
   if (!dossier) return res.status(404).json({ error: "Dossier introuvable" });
@@ -237,7 +279,7 @@ router.patch("/:id/submit", authenticate, async (req: AuthRequest, res) => {
   try {
     // 1. Execute Pre-Control
     const preControlReport = await executePreControl(id as string);
-    const newStatus = preControlReport.completude === "100%" ? "EN_COURS" : "INCOMPLET";
+    const newStatus = preControlReport.completude === "100%" ? DOSSIER_STATUS.EN_INSTRUCTION : DOSSIER_STATUS.INCOMPLET;
 
     // 2. Update Dossier
     const [dossier] = await db.update(dossiersTable)
@@ -250,7 +292,7 @@ router.patch("/:id/submit", authenticate, async (req: AuthRequest, res) => {
       .returning();
 
     // Notify Mairie agents
-    if (newStatus === "EN_COURS") {
+    if (newStatus === DOSSIER_STATUS.EN_INSTRUCTION) {
       await NotificationService.notifyRoleInCommune({
         role: "mairie",
         commune: dossier.commune || "",
@@ -284,19 +326,21 @@ router.patch("/:id/start-instruction", authenticate, requireMairie, async (req: 
 
   const [dossier] = await db.update(dossiersTable)
     .set({ 
-      status: "EN_COURS", 
+      status: DOSSIER_STATUS.EN_INSTRUCTION,
+      instructionStatus: "instruction_demarre",
       instructionStartedAt: new Date(),
-      timeline: [{ 
-        event: "Instruction démarrée", 
-        date: new Date().toISOString(), 
-        author: req.user!.email || "Mairie" 
-      }],
       updatedAt: new Date() 
     })
     .where(eq(dossiersTable.id, id as any))
     .returning();
 
   if (!dossier) return res.status(404).json({ error: "Dossier introuvable" });
+
+  await createInstructionEvent(id as string, INSTRUCTION_EVENT_TYPES.INSTRUCTION_DEMARREE, {
+    description: "Instruction démarrée",
+    author: req.user!.email || "Mairie",
+  });
+  await refreshInstructionDeadline(id as string);
 
   return res.json({ dossier });
 });
@@ -422,7 +466,7 @@ router.post("/:id/messages", authenticate, async (req: AuthRequest, res) => {
        
        // Force dossier status to incomplete if pieces requested
        await db.update(dossiersTable)
-         .set({ status: "INCOMPLET", updatedAt: new Date() })
+         .set({ status: DOSSIER_STATUS.INCOMPLET, updatedAt: new Date() })
          .where(eq(dossiersTable.id, id as string));
      }
   }
