@@ -18,6 +18,7 @@ export * from "./municipalitySettings";
 export * from "./globalConfig";
 export * from "./baseIAEmbeddings";
 export * from "./dossierEvents";
+export * from "./instructionEvents";
 export * from "./communes";
 export * from "./notifications";
 export * from "./geocodingCache";
