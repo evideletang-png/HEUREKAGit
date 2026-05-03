@@ -19,7 +19,10 @@ export function Navbar() {
   const [location] = useLocation();
 
   const role = (user?.role as string) || "";
-  const navigationLinks = getRoleNavigationLinks(role, isAuthenticated);
+  const baseNavigationLinks = getRoleNavigationLinks(role, isAuthenticated);
+  const navigationLinks = user?.email?.toLowerCase() === "test@heureka.fr"
+    ? [{ href: "/demo", label: "Mode démo", icon: Building2, roles: [role] }, ...baseNavigationLinks]
+    : baseNavigationLinks;
   const desktopLinks = navigationLinks.filter((item) => item.href !== "/account");
 
   return (
