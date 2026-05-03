@@ -1313,7 +1313,7 @@ export async function extractRelevantRules(
   // This is the canonical PLU knowledge source; rawText is supplementary
   if (cityName) {
     try {
-      const municipalityAliases = uniqueMunicipalityAliases(cityName, jurisdictionContext);
+      const municipalityAliases = await uniqueMunicipalityAliases(cityName, jurisdictionContext);
       const zoneSearchKeywords = await loadZoneSearchKeywords({ municipalityAliases, zoneCode });
       const queryStr = [
         `Règles d'urbanisme zone ${zoneCode}`,

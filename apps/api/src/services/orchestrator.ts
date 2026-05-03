@@ -39,6 +39,7 @@ import { loadZoneSegmentsForCommuneZone } from "./expertZoneAnalysisService.js";
 
 import { geocodeAddress } from "./geocoding.js";
 import { getZoningByCoords } from "./planning.js";
+import { fetchGeoConstraints } from "./geoConstraintsService.js";
 import { getParcelByCoords, getBuildingsByParcel } from "./parcel.js";
 import type { ParcelData } from "./parcel.js";
 import { DVFService } from "./dvfService.js";
@@ -887,7 +888,7 @@ export async function orchestrateDossierAnalysis(
             const geoConstraints = await fetchGeoConstraints(
               bestMatch.lat,
               bestMatch.lng,
-              parcelData.geometryJson
+              parcelData.geometryJson as object | undefined
             );
 
             if (geoConstraints.length > 0) {
@@ -896,7 +897,7 @@ export async function orchestrateDossierAnalysis(
 
               // Insert new constraints
               await db.insert(constraintsTable).values(
-                geoConstraints.map(c => ({
+                geoConstraints.map((c) => ({
                   analysisId,
                   category: c.category,
                   title: c.title,
@@ -908,7 +909,7 @@ export async function orchestrateDossierAnalysis(
               logger.info(`[Orchestrator] Persisted ${geoConstraints.length} geo constraints for analysis ${analysisId}`);
             }
           } catch (geoErr) {
-            logger.warn("[Orchestrator] Geo constraints fetch failed (non-critical):", geoErr);
+            logger.warn("[Orchestrator] Geo constraints fetch failed (non-critical):", { error: geoErr instanceof Error ? geoErr.message : String(geoErr) });
           }
         }
       }

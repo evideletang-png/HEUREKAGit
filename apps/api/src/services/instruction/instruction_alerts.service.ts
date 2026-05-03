@@ -22,7 +22,7 @@ export function generateAlerts(dossier: InstructionDossierLike): { alerts: Instr
   if (isTacite(dossier)) {
     alerts.push({
       type: "tacite_risk",
-      message: "Le délai est dépassé, un permis tacite peut être né.",
+      message: "Le délai d'instruction est dépassé, il existe un risque de décision tacite.",
       severity: "critical",
       source: "system",
     });

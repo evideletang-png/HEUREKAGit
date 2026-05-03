@@ -288,7 +288,7 @@ export default function DossierMairieDetailPage() {
                     Statut : {instruction.instructionStatus || "depose"}
                   </span>
                   <span className={`rounded-full px-4 py-2 text-sm font-bold ${instruction.isTacite ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
-                    {instruction.isTacite ? "Permis tacite possible" : "Instruction suivie"}
+                    {instruction.isTacite ? "Risque de décision tacite" : "Instruction suivie"}
                   </span>
                 </div>
                 <InstructionTimeline

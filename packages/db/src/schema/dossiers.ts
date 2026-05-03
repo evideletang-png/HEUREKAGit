@@ -7,8 +7,9 @@ export const dossiersTable = pgTable("dossiers", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: text("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   typeProcedure: text("type_procedure").notNull(), // PC, DP, PA, PD, CUa, CUb
-  status: text("status").notNull().default("BROUILLON"), 
-  // BROUILLON, DEPOSE, PRE_INSTRUCTION, INCOMPLET, TRANSMIS_METROPOLE, EN_INSTRUCTION, ATTENTE_ABF, AVANT_PROJET, AVIS_ABF_RECU, DECISION_EN_COURS, ACCEPTE, REFUSE, ACCORD_PRESCRIPTION
+  status: text("status").notNull().default("BROUILLON"),
+  // Statuts métier dossier : BROUILLON, DEPOSE, PRE_INSTRUCTION, INCOMPLET, TRANSMIS_METROPOLE,
+  // EN_INSTRUCTION, ATTENTE_ABF, AVIS_ABF_RECU, DECISION_EN_COURS, ACCEPTE, REFUSE, ACCORD_PRESCRIPTION.
   instructionStatus: text("instruction_status").notNull().default("depose"),
   dateDepot: timestamp("date_depot"),
   dateCompletude: timestamp("date_completude"),

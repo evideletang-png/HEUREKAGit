@@ -2214,7 +2214,7 @@ async function materializeConsolidatedMarkdownDocuments(args: {
     });
 
     const [townHallDoc] = await db.insert(townHallDocumentsTable).values({
-      userId: args.userId || null,
+      userId: args.userId || "SYSTEM",
       commune: args.targetCommune,
       title: logicalDocument.title,
       fileName: logicalFileName,
