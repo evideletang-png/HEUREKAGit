@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { MairieNavigation } from "@/components/layout/MairieNavigation";
@@ -53,12 +54,44 @@ type DashboardStatusConfig = {
 
 type MairieSettings = {
   citizenPortalTownHallName?: string;
+  citizenPortalAddressLine1?: string;
+  citizenPortalPostalCode?: string;
+  citizenPortalCity?: string;
+  citizenPortalPhone?: string;
   citizenPortalEmail?: string;
   formulas?: {
     dashboardStatuses?: DashboardStatusConfig[];
+    letterSettings?: LetterSettingsConfig;
     [key: string]: any;
   } | null;
   [key: string]: any;
+};
+
+type LetterTemplateConfig = {
+  id: string;
+  title: string;
+  category: string;
+  body: string;
+  delegatedSignatureRequired: boolean;
+};
+
+type LetterSettingsConfig = {
+  letterhead: {
+    logoUrl: string;
+    institutionName: string;
+    address: string;
+    email: string;
+    phone: string;
+  };
+  signature: {
+    signerName: string;
+    signerTitle: string;
+    signerEmail: string;
+    signerPhone: string;
+    delegationEnabled: boolean;
+    delegatedToRole: string;
+  };
+  templates: LetterTemplateConfig[];
 };
 
 async function apiFetch(path: string) {
@@ -88,6 +121,37 @@ const defaultDashboardStatuses: DashboardStatusConfig[] = [
   { key: "consultation", label: "Consultation interne", active: true },
   { key: "notifier", label: "À notifier", active: true },
   { key: "notifie", label: "Notifié au demandeur", active: true },
+];
+
+const dynamicLetterFields = [
+  "{{institution.nom}}",
+  "{{institution.logo}}",
+  "{{institution.adresse}}",
+  "{{dossier.numero}}",
+  "{{dossier.type}}",
+  "{{dossier.demandeur}}",
+  "{{dossier.adresse}}",
+  "{{dossier.parcelle}}",
+  "{{decision.date}}",
+  "{{signature.nom}}",
+  "{{signature.fonction}}",
+];
+
+const defaultLetterTemplates: LetterTemplateConfig[] = [
+  {
+    id: "acceptation-pc",
+    title: "Acceptation - Permis de Construire",
+    category: "acceptation",
+    delegatedSignatureRequired: false,
+    body: "Madame, Monsieur,\n\nAprès instruction du dossier {{dossier.numero}}, la demande relative à {{dossier.adresse}} reçoit une décision favorable.\n\n{{signature.fonction}}\n{{signature.nom}}",
+  },
+  {
+    id: "refus-plu",
+    title: "Refus - Non-conformité PLU",
+    category: "refus",
+    delegatedSignatureRequired: true,
+    body: "Madame, Monsieur,\n\nAprès instruction du dossier {{dossier.numero}}, le projet présente une non-conformité au regard des règles applicables.\n\nUne validation de signature est requise avant notification.\n\n{{signature.fonction}}\n{{signature.nom}}",
+  },
 ];
 
 const conversations = [
@@ -145,6 +209,29 @@ function statusMatches(rowStatus: string | null | undefined, configuredStatus: D
 
 function getDossierUrl(row: MairieDossier) {
   return row.id.startsWith("demo-") ? "/dossier/d2" : `/dossier/${encodeURIComponent(row.id)}`;
+}
+
+function buildDefaultLetterSettings(user: any, selectedCommune: string, settings?: MairieSettings | null): LetterSettingsConfig {
+  const cityLine = [settings?.citizenPortalPostalCode, settings?.citizenPortalCity || selectedCommune].filter(Boolean).join(" ");
+  const address = [settings?.citizenPortalAddressLine1, cityLine].filter(Boolean).join(", ");
+  return {
+    letterhead: {
+      logoUrl: "",
+      institutionName: settings?.citizenPortalTownHallName || (selectedCommune === "all" ? "Mairie" : `Mairie de ${selectedCommune}`),
+      address,
+      email: settings?.citizenPortalEmail || "",
+      phone: settings?.citizenPortalPhone || "",
+    },
+    signature: {
+      signerName: user?.name || "",
+      signerTitle: "Service Urbanisme",
+      signerEmail: user?.email || "",
+      signerPhone: "",
+      delegationEnabled: true,
+      delegatedToRole: "admin, super_admin",
+    },
+    templates: defaultLetterTemplates,
+  };
 }
 
 function MairieShell({ children }: { children: React.ReactNode }) {
@@ -525,34 +612,39 @@ function ParametresView() {
     enabled: selectedCommune !== "all",
   });
   const [localStatuses, setLocalStatuses] = useState<DashboardStatusConfig[]>(defaultDashboardStatuses);
+  const [letterSettings, setLetterSettings] = useState<LetterSettingsConfig>(() => buildDefaultLetterSettings(user, selectedCommune));
 
   useEffect(() => {
     const configured = settingsData?.settings?.formulas?.dashboardStatuses;
     if (configured?.length) setLocalStatuses(configured);
-  }, [settingsData]);
+    setLetterSettings(settingsData?.settings?.formulas?.letterSettings || buildDefaultLetterSettings(user, selectedCommune, settingsData?.settings));
+  }, [selectedCommune, settingsData, user]);
+
+  const persistSettings = async () => {
+    if (selectedCommune === "all") throw new Error("Aucune commune sélectionnée");
+    const existing = settingsData?.settings || {};
+    const response = await fetch(`/api/mairie/settings/${encodeURIComponent(selectedCommune)}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...existing,
+        formulas: {
+          ...(existing.formulas || {}),
+          dashboardStatuses: localStatuses,
+          letterSettings,
+        },
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.message || "Impossible de sauvegarder les paramètres");
+    }
+    return response.json();
+  };
 
   const saveStatusesMutation = useMutation({
-    mutationFn: async () => {
-      if (selectedCommune === "all") throw new Error("Aucune commune sélectionnée");
-      const existing = settingsData?.settings || {};
-      const response = await fetch(`/api/mairie/settings/${encodeURIComponent(selectedCommune)}`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...existing,
-          formulas: {
-            ...(existing.formulas || {}),
-            dashboardStatuses: localStatuses,
-          },
-        }),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || "Impossible de sauvegarder les statuts");
-      }
-      return response.json();
-    },
+    mutationFn: persistSettings,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["mairie-dashboard-settings", selectedCommune] });
       toast({ title: "Statuts sauvegardés", description: "Les filtres actifs du dashboard ont été mis à jour." });
@@ -561,6 +653,41 @@ function ParametresView() {
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
     },
   });
+
+  const saveAllSettingsMutation = useMutation({
+    mutationFn: persistSettings,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["mairie-dashboard-settings", selectedCommune] });
+      toast({ title: "Paramètres sauvegardés", description: "Les modèles, l'en-tête et la signature institutionnelle ont été mis à jour." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateTemplate = (templateId: string, updates: Partial<LetterTemplateConfig>) => {
+    setLetterSettings((current) => ({
+      ...current,
+      templates: current.templates.map((template) => template.id === templateId ? { ...template, ...updates } : template),
+    }));
+  };
+
+  const addTemplate = () => {
+    const nextIndex = letterSettings.templates.length + 1;
+    setLetterSettings((current) => ({
+      ...current,
+      templates: [
+        ...current.templates,
+        {
+          id: `modele-${Date.now()}`,
+          title: `Nouveau modèle ${nextIndex}`,
+          category: "personnalise",
+          delegatedSignatureRequired: false,
+          body: "Madame, Monsieur,\n\nVotre dossier {{dossier.numero}} a été instruit par {{institution.nom}}.\n\n{{signature.fonction}}\n{{signature.nom}}",
+        },
+      ],
+    }));
+  };
 
   return (
     <MairieShell>
@@ -598,27 +725,84 @@ function ParametresView() {
           </div>
         </section>
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <h2 className="flex items-center gap-2 text-xl font-bold"><FileText className="h-5 w-5" /> Modèles de courrier</h2>
-            <Button variant="outline" className="gap-2 rounded-lg"><Plus className="h-4 w-4" /> Nouveau modèle</Button>
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-xl font-bold"><FileText className="h-5 w-5" /> Modèles de courrier institutionnels</h2>
+              <p className="mt-1 text-sm text-slate-500">Configurés par institution pendant l'onboarding, avec champs dynamiques, logo et circuit de signature.</p>
+            </div>
+            <Button variant="outline" className="gap-2 rounded-lg" onClick={addTemplate}><Plus className="h-4 w-4" /> Nouveau modèle</Button>
           </div>
-          <p className="mb-3 text-sm font-medium">Modèles disponibles</p>
-          {[
-            ["Acceptation - Permis de Construire", "acceptation", "bg-emerald-100 text-emerald-700"],
-            ["Refus - Non-conformité PLU", "refus", "bg-red-100 text-red-700"],
-          ].map(([title, badge, color]) => (
-            <button key={title} className="mb-2 flex w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-4 text-left">
-              <span><span className="block font-bold">{title}</span><span className={`mt-2 inline-flex rounded px-2 py-0.5 text-sm ${color}`}>{badge}</span></span>
-              <MoreVertical className="h-5 w-5 text-slate-400" />
-            </button>
-          ))}
-          <div className="mt-4 flex h-28 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-500">
-            <FileText className="mb-2 h-8 w-8" />
-            <p className="font-bold">Sélectionnez un modèle</p>
-            <p>ou créez-en un nouveau</p>
+
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-bold">En-tête institutionnel</h3>
+              <p className="mt-1 text-sm text-slate-500">Cet encart apparaîtra en haut des courriers générés.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-medium">Logo de la mairie (URL)<Input className="mt-2 rounded-lg border-slate-300" value={letterSettings.letterhead.logoUrl} onChange={(event) => setLetterSettings((current) => ({ ...current, letterhead: { ...current.letterhead, logoUrl: event.target.value } }))} placeholder="https://.../logo.png" /></label>
+                <label className="text-sm font-medium">Institution<Input className="mt-2 rounded-lg border-slate-300" value={letterSettings.letterhead.institutionName} onChange={(event) => setLetterSettings((current) => ({ ...current, letterhead: { ...current.letterhead, institutionName: event.target.value } }))} /></label>
+                <label className="text-sm font-medium sm:col-span-2">Adresse<Input className="mt-2 rounded-lg border-slate-300" value={letterSettings.letterhead.address} onChange={(event) => setLetterSettings((current) => ({ ...current, letterhead: { ...current.letterhead, address: event.target.value } }))} /></label>
+                <label className="text-sm font-medium">E-mail institutionnel<Input className="mt-2 rounded-lg border-slate-300" value={letterSettings.letterhead.email} onChange={(event) => setLetterSettings((current) => ({ ...current, letterhead: { ...current.letterhead, email: event.target.value } }))} /></label>
+                <label className="text-sm font-medium">Téléphone<Input className="mt-2 rounded-lg border-slate-300" value={letterSettings.letterhead.phone} onChange={(event) => setLetterSettings((current) => ({ ...current, letterhead: { ...current.letterhead, phone: event.target.value } }))} /></label>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-bold">Champs dynamiques à insérer</h3>
+              <p className="mt-1 text-sm text-slate-500">À copier dans le corps du modèle. Ils seront remplacés à la génération.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {dynamicLetterFields.map((field) => (
+                  <button key={field} type="button" className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400">
+                    {field}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4">
+            {letterSettings.templates.map((template) => (
+              <div key={template.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="grid gap-3 lg:grid-cols-[1fr_180px_auto] lg:items-end">
+                  <label className="text-sm font-medium">Nom du modèle<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={template.title} onChange={(event) => updateTemplate(template.id, { title: event.target.value })} /></label>
+                  <label className="text-sm font-medium">Catégorie<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={template.category} onChange={(event) => updateTemplate(template.id, { category: event.target.value })} /></label>
+                  <Button variant="ghost" size="icon" className="justify-self-start text-slate-400 lg:justify-self-end"><MoreVertical className="h-5 w-5" /></Button>
+                </div>
+                <label className="mt-3 block text-sm font-medium">Corps du courrier<Textarea className="mt-2 min-h-32 rounded-lg border-slate-300 bg-white" value={template.body} onChange={(event) => updateTemplate(template.id, { body: event.target.value })} /></label>
+                <label className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <Checkbox checked={template.delegatedSignatureRequired} onCheckedChange={(checked) => updateTemplate(template.id, { delegatedSignatureRequired: checked === true })} />
+                  Signature déléguée requise pour ce modèle
+                </label>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.85fr]">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-bold">Encart de signature</h3>
+              <p className="mt-1 text-sm text-slate-500">Prérempli avec les coordonnées de la personne connectée.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-medium">Signataire<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={letterSettings.signature.signerName} onChange={(event) => setLetterSettings((current) => ({ ...current, signature: { ...current.signature, signerName: event.target.value } }))} /></label>
+                <label className="text-sm font-medium">Fonction<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={letterSettings.signature.signerTitle} onChange={(event) => setLetterSettings((current) => ({ ...current, signature: { ...current.signature, signerTitle: event.target.value } }))} /></label>
+                <label className="text-sm font-medium">E-mail<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={letterSettings.signature.signerEmail} onChange={(event) => setLetterSettings((current) => ({ ...current, signature: { ...current.signature, signerEmail: event.target.value } }))} /></label>
+                <label className="text-sm font-medium">Téléphone<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={letterSettings.signature.signerPhone} onChange={(event) => setLetterSettings((current) => ({ ...current, signature: { ...current.signature, signerPhone: event.target.value } }))} /></label>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h3 className="font-bold">Parapheur en ligne intégré</h3>
+              <p className="mt-1 text-sm text-slate-500">Prévoit une demande de signature P/O vers un profil disposant de pouvoirs supérieurs.</p>
+              <label className="mt-4 flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                <Checkbox checked={letterSettings.signature.delegationEnabled} onCheckedChange={(checked) => setLetterSettings((current) => ({ ...current, signature: { ...current.signature, delegationEnabled: checked === true } }))} />
+                Autoriser la signature déléguée P/O
+              </label>
+              <label className="mt-3 block text-sm font-medium">Profils pouvant signer<Input className="mt-2 rounded-lg border-slate-300 bg-white" value={letterSettings.signature.delegatedToRole} onChange={(event) => setLetterSettings((current) => ({ ...current, signature: { ...current.signature, delegatedToRole: event.target.value } }))} placeholder="admin, super_admin" /></label>
+              <Button variant="outline" className="mt-4 w-full rounded-lg" disabled>
+                Demande de signature à venir
+              </Button>
+            </div>
           </div>
         </section>
-        <Button className="h-12 rounded-lg bg-slate-950 text-base font-bold text-white hover:bg-slate-800">
+        <Button className="h-12 rounded-lg bg-slate-950 text-base font-bold text-white hover:bg-slate-800" onClick={() => saveAllSettingsMutation.mutate()} disabled={saveAllSettingsMutation.isPending || selectedCommune === "all"}>
           Enregistrer les modifications
         </Button>
       </div>
