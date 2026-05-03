@@ -98,6 +98,9 @@ import { orchestrateDossierAnalysis } from "../services/orchestrator.js";
 import { MessagingService } from "../services/messagingService.js";
 import { ConversationService } from "../services/conversationService.js";
 import { WorkflowService, DOSSIER_STATUS } from "../services/workflowService.js";
+import { onDossierUpdated } from "../services/instruction/instruction_workflow.service.js";
+import { getTimeline } from "../services/instruction/instruction_events.service.js";
+import { markAsComplete, markAsIncomplete, updateInstructionStatus } from "../services/instruction/instruction_status.service.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
 import { AUTHORITY_POLICY } from "@workspace/ai-core";
 import { assessExtractedTextQuality, hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, repairExtractedText, scoreTextQuality } from "../services/textQualityService.js";
@@ -2523,6 +2526,11 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
         title: dossiersTable.title,
         typeProcedure: dossiersTable.typeProcedure,
         status: dossiersTable.status,
+        instructionStatus: dossiersTable.instructionStatus,
+        dateDepot: dossiersTable.dateDepot,
+        dateCompletude: dossiersTable.dateCompletude,
+        dateLimiteInstruction: dossiersTable.dateLimiteInstruction,
+        isTacite: dossiersTable.isTacite,
         createdAt: dossiersTable.createdAt,
         updatedAt: dossiersTable.updatedAt,
         commune: dossiersTable.commune,
@@ -2622,6 +2630,11 @@ router.get("/dossiers/:id", async (req: AuthRequest, res) => {
         title: dossiersTable.title,
         typeProcedure: dossiersTable.typeProcedure,
         status: dossiersTable.status,
+        instructionStatus: dossiersTable.instructionStatus,
+        dateDepot: dossiersTable.dateDepot,
+        dateCompletude: dossiersTable.dateCompletude,
+        dateLimiteInstruction: dossiersTable.dateLimiteInstruction,
+        isTacite: dossiersTable.isTacite,
         commune: dossiersTable.commune,
         address: dossiersTable.address,
         parcelRef: sql`metadata->>'parcel_ref'`,
@@ -2715,6 +2728,75 @@ router.get("/dossiers/:id/timeline", async (req: AuthRequest, res) => {
       .orderBy(desc(dossierEventsTable.createdAt));
     return res.json({ events });
   } catch (err) {
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/dossiers/:id/instruction", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const [dossier] = await db.select().from(dossiersTable).where(eq(dossiersTable.id, id as string)).limit(1);
+    if (!dossier) return res.status(404).json({ error: "NOT_FOUND", message: "Dossier introuvable." });
+
+    const [snapshot, timeline] = await Promise.all([
+      onDossierUpdated(dossier),
+      getTimeline(id as string),
+    ]);
+
+    const aiAlerts = [
+      ...(snapshot.isTacite ? [{
+        type: "legal_warning",
+        message: "Vérifier l'existence possible d'une décision tacite avant toute action défavorable.",
+        severity: "warning",
+        source: "ai",
+      }] : []),
+    ];
+
+    return res.json({
+      instruction: {
+        ...snapshot,
+        alerts: [...snapshot.alerts, ...aiAlerts],
+      },
+      timeline: timeline.map((event) => ({
+        ...event,
+        description: (event.metadata as any)?.description || event.type,
+      })),
+    });
+  } catch (err) {
+    logger.error("[mairie/dossiers/:id/instruction]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/dossiers/:id/instruction/status", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const status = typeof req.body?.status === "string" ? req.body.status : "";
+    if (!status.trim()) return res.status(400).json({ error: "BAD_REQUEST", message: "Statut requis." });
+    const dossier = await updateInstructionStatus(id as string, status.trim());
+    return res.json({ dossier });
+  } catch (err) {
+    logger.error("[mairie/dossiers/:id/instruction/status]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/dossiers/:id/instruction/complete", async (req: AuthRequest, res) => {
+  try {
+    const dossier = await markAsComplete(req.params.id as string);
+    return res.json({ dossier });
+  } catch (err) {
+    logger.error("[mairie/dossiers/:id/instruction/complete]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.post("/dossiers/:id/instruction/incomplete", async (req: AuthRequest, res) => {
+  try {
+    const dossier = await markAsIncomplete(req.params.id as string);
+    return res.json({ dossier });
+  } catch (err) {
+    logger.error("[mairie/dossiers/:id/instruction/incomplete]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
   }
 });

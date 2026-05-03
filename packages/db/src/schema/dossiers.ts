@@ -9,6 +9,11 @@ export const dossiersTable = pgTable("dossiers", {
   typeProcedure: text("type_procedure").notNull(), // PC, DP, PA, PD, CUa, CUb
   status: text("status").notNull().default("BROUILLON"), 
   // BROUILLON, DEPOSE, PRE_INSTRUCTION, INCOMPLET, TRANSMIS_METROPOLE, EN_INSTRUCTION, ATTENTE_ABF, AVANT_PROJET, AVIS_ABF_RECU, DECISION_EN_COURS, ACCEPTE, REFUSE, ACCORD_PRESCRIPTION
+  instructionStatus: text("instruction_status").notNull().default("depose"),
+  dateDepot: timestamp("date_depot"),
+  dateCompletude: timestamp("date_completude"),
+  dateLimiteInstruction: timestamp("date_limite_instruction"),
+  isTacite: boolean("is_tacite").notNull().default(false),
   
   dossierNumber: text("dossier_number"),
   title: text("title").notNull(),

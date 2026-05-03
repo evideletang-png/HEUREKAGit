@@ -20,6 +20,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
+import { DeadlineWidget } from "@/components/instruction/DeadlineWidget";
+import { InstructionTimeline } from "@/components/instruction/InstructionTimeline";
+import { LegalAlerts, type LegalAlert } from "@/components/instruction/LegalAlerts";
 
 type DossierDetail = {
   id: string;
@@ -34,6 +37,11 @@ type DossierDetail = {
   createdAt?: string | null;
   updatedAt?: string | null;
   metadata?: Record<string, any> | null;
+  instructionStatus?: string | null;
+  dateDepot?: string | null;
+  dateCompletude?: string | null;
+  dateLimiteInstruction?: string | null;
+  isTacite?: boolean | null;
   documents?: Array<{
     id: string;
     title?: string | null;
@@ -43,6 +51,24 @@ type DossierDetail = {
     createdAt?: string | null;
   }>;
   messages?: Array<{ id: string | number; content?: string | null; createdAt?: string | null }>;
+};
+
+type InstructionPayload = {
+  instruction: {
+    instructionStatus?: string | null;
+    dateDepot?: string | null;
+    dateCompletude?: string | null;
+    dateLimiteInstruction?: string | null;
+    isTacite?: boolean;
+    alerts?: LegalAlert[];
+  };
+  timeline: Array<{
+    id: string;
+    type?: string;
+    description?: string;
+    createdAt?: string;
+    metadata?: Record<string, any> | null;
+  }>;
 };
 
 async function apiFetch(path: string) {
@@ -70,6 +96,11 @@ const demoDossier: DossierDetail = {
     surfacePlancher: 120,
     pluAnalysis: { zone: "UB" },
   },
+  instructionStatus: "complet",
+  dateDepot: "2026-03-15",
+  dateCompletude: "2026-03-18",
+  dateLimiteInstruction: "2026-05-18",
+  isTacite: false,
   documents: [
     { id: "cerfa", title: "Formulaire CERFA", documentType: "cerfa" },
     { id: "plan", title: "Plan de masse", documentType: "plan" },
@@ -163,8 +194,25 @@ export default function DossierMairieDetailPage() {
     queryFn: () => apiFetch(`/api/mairie/dossiers/${encodeURIComponent(id || "")}`),
     enabled: !!id && !id.startsWith("demo-") && id !== "d2",
   });
+  const instructionQuery = useQuery<InstructionPayload>({
+    queryKey: ["mairie-dossier-instruction", id],
+    queryFn: () => apiFetch(`/api/mairie/dossiers/${encodeURIComponent(id || "")}/instruction`),
+    enabled: !!id && !id.startsWith("demo-") && id !== "d2",
+  });
 
   const dossier = query.data || demoDossier;
+  const instruction = instructionQuery.data?.instruction || {
+    instructionStatus: dossier.instructionStatus || demoDossier.instructionStatus,
+    dateDepot: dossier.dateDepot || dossier.createdAt || demoDossier.dateDepot,
+    dateCompletude: dossier.dateCompletude || demoDossier.dateCompletude,
+    dateLimiteInstruction: dossier.dateLimiteInstruction || demoDossier.dateLimiteInstruction,
+    isTacite: !!dossier.isTacite,
+    alerts: [],
+  };
+  const instructionTimeline = instructionQuery.data?.timeline || [
+    { id: "depot", type: "depot", description: "Dossier déposé", createdAt: instruction.dateDepot || demoDossier.dateDepot },
+    { id: "completude", type: "piece_recue", description: "Dossier complet", createdAt: instruction.dateCompletude || demoDossier.dateCompletude },
+  ];
   const zone = dossier.metadata?.zoneCode || dossier.metadata?.zone_code || dossier.metadata?.pluAnalysis?.zone || "UB";
   const surface = dossier.metadata?.surfacePlancher || dossier.metadata?.surface_plancher || dossier.metadata?.requested_surface_m2 || 120;
   const documents = dossier.documents?.length ? dossier.documents : demoDossier.documents || [];
@@ -234,6 +282,32 @@ export default function DossierMairieDetailPage() {
 
           {tab === "instruction" && (
             <div className="grid gap-6 xl:grid-cols-2">
+              <InfoCard title="Instruction">
+                <div className="mb-5 flex flex-wrap items-center gap-3">
+                  <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
+                    Statut : {instruction.instructionStatus || "depose"}
+                  </span>
+                  <span className={`rounded-full px-4 py-2 text-sm font-bold ${instruction.isTacite ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
+                    {instruction.isTacite ? "Permis tacite possible" : "Instruction suivie"}
+                  </span>
+                </div>
+                <InstructionTimeline
+                  events={instructionTimeline}
+                  dates={[
+                    { label: "Dépôt", value: instruction.dateDepot },
+                    { label: "Complétude", value: instruction.dateCompletude },
+                    { label: "Limite", value: instruction.dateLimiteInstruction },
+                  ]}
+                />
+              </InfoCard>
+
+              <InfoCard title="Délais & Alertes">
+                <div className="space-y-5">
+                  <DeadlineWidget deadline={instruction.dateLimiteInstruction} isTacite={instruction.isTacite} />
+                  <LegalAlerts alerts={instruction.alerts || []} />
+                </div>
+              </InfoCard>
+
               <InfoCard title="Informations du projet">
                 <div className="grid gap-5 sm:grid-cols-2">
                   {projectFacts.map(([label, value]) => (
