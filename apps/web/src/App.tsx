@@ -26,6 +26,12 @@ import TasksPage from "@/pages/tasks";
 import AppealsPage from "@/pages/appeals";
 import AppealDetailPage from "@/pages/appeal-detail";
 import MessagingPage from "@/pages/messaging";
+import DemoHome from "@/pages/demo/demo-home";
+import DemoCitoyen from "@/pages/demo/demo-citoyen";
+import DemoMairie from "@/pages/demo/demo-mairie";
+import DemoMetropole from "@/pages/demo/demo-metropole";
+import DemoAbf from "@/pages/demo/demo-abf";
+import DemoSdis from "@/pages/demo/demo-sdis";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +74,13 @@ function Router() {
       <Route path="/messagerie" component={MessagingPage} />
       <Route path="/recours" component={AppealsPage} />
       <Route path="/recours/:id" component={AppealDetailPage} />
+
+      <Route path="/demo" component={DemoHome} />
+      <Route path="/demo/citoyen" component={DemoCitoyen} />
+      <Route path="/demo/mairie" component={DemoMairie} />
+      <Route path="/demo/metropole" component={DemoMetropole} />
+      <Route path="/demo/abf" component={DemoAbf} />
+      <Route path="/demo/sdis" component={DemoSdis} />
 
       <Route component={NotFound} />
     </Switch>
