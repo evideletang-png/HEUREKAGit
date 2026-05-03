@@ -11,8 +11,6 @@ import {
   MessageSquare,
   Plus,
   Send,
-  Settings,
-  User,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { DeadlineWidget } from "@/components/instruction/DeadlineWidget";
 import { InstructionTimeline } from "@/components/instruction/InstructionTimeline";
 import { LegalAlerts, type LegalAlert } from "@/components/instruction/LegalAlerts";
-import { AppShell } from "@/components/layout/AppShell";
+import { MairieNavigation } from "@/components/layout/MairieNavigation";
 
 type DossierDetail = {
   id: string;
@@ -120,37 +118,14 @@ function statusClass(status?: string | null) {
   return "bg-slate-100 text-slate-700";
 }
 
-function MairieDetailSectionNav() {
-  const [location] = useLocation();
-  const navItems = [
-    { href: "/dashboard-mairie", label: "Tableau de bord", icon: FileText },
-    { href: "/dashboard-mairie/messagerie", label: "Messagerie", icon: MessageSquare },
-    { href: "/dashboard-mairie/statistiques", label: "Statistiques", icon: Map },
-    { href: "/dashboard-mairie/parametres", label: "Paramètres", icon: Settings },
-  ];
-
-  return (
-    <nav className="mb-8 flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-      {navItems.map((item) => {
-        const Icon = item.icon;
-        const active = location === item.href;
-        return (
-          <Link key={item.href} href={item.href} className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors sm:px-4 ${active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-950"}`}>
-            <Icon className="h-4 w-4" />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
 function MairieDetailShell({ children }: { children: React.ReactNode }) {
   return (
-    <AppShell className="bg-[#f7f7f6] text-slate-950" mainClassName="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
-      <MairieDetailSectionNav />
-      {children}
-    </AppShell>
+    <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
+      <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
+        <MairieNavigation />
+        {children}
+      </main>
+    </div>
   );
 }
 
