@@ -7,6 +7,7 @@ export const userAssignmentsTable = pgTable("user_assignments", {
   userId: text("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   actorType: text("actor_type").notNull(),
   roleKey: text("role_key").notNull(),
+  profileKey: text("profile_key"),
   scopeType: text("scope_type").notNull(),
   scopeId: text("scope_id"),
   permissions: jsonb("permissions").$type<string[]>().notNull().default([]),

@@ -204,6 +204,13 @@
       "when": 1775782800000,
       "tag": "0028_user_assignments",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1775790000000,
+      "tag": "0029_permission_profiles",
+      "breakpoints": true
     }
   ]
 }
