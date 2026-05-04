@@ -90,6 +90,7 @@ export function normalizeProcedureType(value: string | null | undefined) {
 export function getRequiredPieces(args: {
   procedureType: string;
   parcelAnalysis?: ParcelAnalysisLike | null;
+  zone?: { zoneCode?: string | null; zoneType?: string | null; constraints?: unknown[] } | null;
   constraints?: unknown[];
 }) {
   const procedureType = normalizeProcedureType(args.procedureType);
@@ -110,7 +111,10 @@ export function getRequiredPieces(args: {
   if (/(cavit|géotech|geotech|mouvement)/i.test(context)) {
     conditionalPieces.push({ code: "CAVITES-1", label: "Étude ou justificatif géotechnique", level: "à vérifier", reason: "Cavités ou mouvement de terrain potentiels" });
   }
-  if (!args.parcelAnalysis?.zoneCode) warnings.push("Zone PLU non déterminée : certaines pièces locales restent à vérifier.");
+  if (/(spr|abf|patrimoine)/i.test(JSON.stringify(args.zone || {}).toLowerCase())) {
+    conditionalPieces.push({ code: "ZONE-PATRIMOINE", label: "Justification d'insertion patrimoniale", level: "déclenchée par contexte local", reason: "Contrainte de zone ou document lié" });
+  }
+  if (!args.parcelAnalysis?.zoneCode && !args.zone?.zoneCode) warnings.push("Zone PLU non déterminée : certaines pièces locales restent à vérifier.");
 
   return {
     requiredPieces,

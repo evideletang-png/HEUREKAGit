@@ -191,7 +191,7 @@ type BuildabilitySourceDetail = {
 };
 
 type BuildabilitySourceMeta = {
-  structuredRuleSource: "published_calibration" | "structured_urban_rules" | "none";
+  structuredRuleSource: "zone_regulatory_rules" | "published_calibration" | "structured_urban_rules" | "none";
   totalStructuredRules: number;
   publishedRuleCount: number;
   coveredFieldCount: number;

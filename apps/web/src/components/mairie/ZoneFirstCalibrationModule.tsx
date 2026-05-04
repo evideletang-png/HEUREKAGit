@@ -22,6 +22,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { ZoneCalibrationWorkspace } from "@/components/mairie/ZoneCalibrationWorkspace";
+import { NotebookImportPanel } from "@/components/reglement/NotebookImportPanel";
+import { ZoneDetail } from "@/components/reglement/ZoneDetail";
 
 type DocumentSummary = {
   id: string;
@@ -209,7 +211,7 @@ export function ZoneFirstCalibrationModule({
   const [location, setLocation] = useLocation();
   const zoneRouteMatch = location.match(/^\/portail-mairie\/base-ia\/zones\/([^/?#]+)/);
   const activeZoneId = zoneRouteMatch ? decodeURIComponent(zoneRouteMatch[1]) : null;
-  const [activeTab, setActiveTab] = useState<"documents" | "zones" | "effective">("zones");
+  const [activeTab, setActiveTab] = useState<"map" | "zones" | "summary" | "documents" | "controls">("zones");
   const [zoneForm, setZoneForm] = useState({
     zoneCode: "",
     zoneLabel: "",
@@ -241,6 +243,18 @@ export function ZoneFirstCalibrationModule({
     enabled: currentCommune !== "all",
   });
 
+  const { data: reglementSummaryData } = useQuery<any>({
+    queryKey: ["reglement-summary", currentCommune],
+    queryFn: () => apiFetch(`/api/reglement/summary?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all" && !activeZoneId,
+  });
+
+  const { data: reglementZonesData } = useQuery<any>({
+    queryKey: ["reglement-zones", currentCommune],
+    queryFn: () => apiFetch(`/api/reglement/zones?commune=${encodeURIComponent(currentCommune)}`),
+    enabled: currentCommune !== "all" && !activeZoneId,
+  });
+
   const { data: detectedZonesData } = useQuery<DetectedZoneReviewData>({
     queryKey: ["reg-calibration-zone-reviews", currentCommune],
     queryFn: () => apiFetch(`/api/mairie/plu-zone-reviews?commune=${encodeURIComponent(currentCommune)}`),
@@ -269,6 +283,8 @@ export function ZoneFirstCalibrationModule({
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-zone-reviews", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-library", currentCommune] });
     queryClient.invalidateQueries({ queryKey: ["reg-calibration-permissions", currentCommune] });
+    queryClient.invalidateQueries({ queryKey: ["reglement-summary", currentCommune] });
+    queryClient.invalidateQueries({ queryKey: ["reglement-zones", currentCommune] });
   };
 
   const createZoneMutation = useMutation({
@@ -450,15 +466,22 @@ export function ZoneFirstCalibrationModule({
   const showReadOnlyWarning = currentCommune !== "all" && permissionsFetched && !loadingPermissions && !canEditCalibration;
 
   if (activeZoneId) {
-    return <ZoneCalibrationWorkspace currentCommune={currentCommune} zoneId={activeZoneId} />;
+    return (
+      <div className="space-y-6">
+        <ZoneDetail zoneId={activeZoneId} />
+        <ZoneCalibrationWorkspace currentCommune={currentCommune} zoneId={activeZoneId} />
+      </div>
+    );
   }
 
   return (
-    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "documents" | "zones" | "effective")} className="space-y-6">
+    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "map" | "zones" | "summary" | "documents" | "controls")} className="space-y-6">
       <TabsList className="w-full justify-start rounded-2xl bg-muted/40 p-1">
+        <TabsTrigger value="map" className="min-w-fit whitespace-nowrap px-4">Carte des zones</TabsTrigger>
+        <TabsTrigger value="zones" className="min-w-fit whitespace-nowrap px-4">Zones</TabsTrigger>
+        <TabsTrigger value="summary" className="min-w-fit whitespace-nowrap px-4">Récap global</TabsTrigger>
         <TabsTrigger value="documents" className="min-w-fit whitespace-nowrap px-4">Documents</TabsTrigger>
-        <TabsTrigger value="zones" className="min-w-fit whitespace-nowrap px-4">Zones & calibration</TabsTrigger>
-        <TabsTrigger value="effective" className="min-w-fit whitespace-nowrap px-4">Règles effectives</TabsTrigger>
+        <TabsTrigger value="controls" className="min-w-fit whitespace-nowrap px-4">Contrôles réglementaires</TabsTrigger>
       </TabsList>
 
       <Card className="border-primary/10 shadow-sm">
@@ -490,7 +513,72 @@ export function ZoneFirstCalibrationModule({
         </CardContent>
       </Card>
 
+      <TabsContent value="map" className="space-y-4">
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4 text-primary" />
+              Carte des zones
+            </CardTitle>
+            <CardDescription>
+              Vue zone-centric : la parcelle détermine la zone, puis les règles et documents sources rattachés.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {(reglementZonesData?.zones || activeZones).map((zone: any) => (
+              <button
+                key={zone.id}
+                type="button"
+                className="rounded-xl border bg-background p-4 text-left transition hover:border-primary/50"
+                onClick={() => setLocation(`/portail-mairie/base-ia/zones/${zone.id}?commune=${encodeURIComponent(currentCommune)}`)}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">{zone.zoneCode}</Badge>
+                  <Badge variant={zone.status === "validated" ? "default" : "secondary"}>{zone.status === "validated" ? "validée" : "brouillon"}</Badge>
+                </div>
+                <p className="mt-2 font-medium">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
+                <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{zone.summary || zone.guidanceNotes || "Aucun résumé."}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge variant="secondary">{zone.ruleCount || 0} règle(s)</Badge>
+                  <Badge variant="secondary">{zone.controlCount || 0} contrôle(s)</Badge>
+                  <Badge variant="secondary">{zone.documentCount || 0} source(s)</Badge>
+                </div>
+              </button>
+            ))}
+            {(reglementZonesData?.zones || activeZones).length === 0 && (
+              <div className="rounded-xl border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
+                Aucune zone détectée pour cette commune. Importe une analyse NotebookLM ou ajoute une zone en mode expert.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="summary" className="space-y-4">
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Récap global</CardTitle>
+            <CardDescription>Résumé consolidé à partir des zones, règles, contraintes et alertes.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">{reglementSummaryData?.summary?.globalSummary || "Aucun récapitulatif disponible."}</p>
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">Zones</div><div className="text-2xl font-bold">{reglementSummaryData?.summary?.counts?.zones ?? 0}</div></div>
+              <div className="rounded-xl border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">Validées</div><div className="text-2xl font-bold">{reglementSummaryData?.summary?.counts?.validatedZones ?? 0}</div></div>
+              <div className="rounded-xl border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">Règles</div><div className="text-2xl font-bold">{reglementSummaryData?.summary?.counts?.rules ?? 0}</div></div>
+              <div className="rounded-xl border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">Confiance</div><div className="text-2xl font-bold">{reglementSummaryData?.summary?.confidenceScore ?? 0}%</div></div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(reglementSummaryData?.summary?.dominantRules || []).map((item: any) => (
+                <Badge key={item.topic} variant="secondary">{item.topic} · {item.count}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
       <TabsContent value="documents" className="space-y-4">
+        <NotebookImportPanel commune={currentCommune} documents={documents} />
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -820,15 +908,15 @@ export function ZoneFirstCalibrationModule({
         </Card>
       </TabsContent>
 
-      <TabsContent value="effective" className="space-y-4">
+      <TabsContent value="controls" className="space-y-4">
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <BookOpen className="h-4 w-4 text-primary" />
-              Règles effectives par zone
+              Contrôles réglementaires par zone
             </CardTitle>
             <CardDescription>
-              Cette vue lecture seule ne montre que les règles publiées, prêtes à alimenter l’analyse et le back mairie.
+              Cette vue lecture seule montre les contrôles publiés ou effectifs, prêts à alimenter l’analyse et le back mairie.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
