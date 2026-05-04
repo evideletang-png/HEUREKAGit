@@ -12,6 +12,7 @@ import DashboardPage from "@/pages/dashboard";
 import NewAnalysisPage from "@/pages/new-analysis";
 import AnalysisDetailPage from "@/pages/analysis-detail";
 import AdminPage from "@/pages/admin";
+import AdminPermissionsPage from "@/pages/admin-permissions";
 import AccountPage from "@/pages/account";
 import MairiePage from "@/pages/mairie";
 import DashboardMairiePage from "@/pages/dashboard-mairie";
@@ -75,6 +76,7 @@ function Router() {
       <Route path="/analyses/:id" component={AnalysisDetailPage} />
       <Route path="/admin/communes" component={AdminCommunesPage} />
       <Route path="/admin/utilisateurs" component={AdminUtilisateursPage} />
+      <Route path="/admin/droits" component={AdminPermissionsPage} />
       <Route path="/admin/base-documentaire" component={AdminBaseDocumentairePage} />
       <Route path="/admin/regles-ia" component={AdminReglesIaPage} />
       <Route path="/admin/monitoring" component={AdminMonitoringPage} />

@@ -8,6 +8,7 @@ import { ConversationService } from "../services/conversationService.js";
 import { DOSSIER_STATUS } from "../constants/dossierStatus.js";
 import { createInstructionEvent, INSTRUCTION_EVENT_TYPES } from "../services/instructionEventsService.js";
 import { refreshInstructionDeadline } from "../services/instructionDeadlineService.js";
+import { AuthorizationService } from "../services/authorizationService.js";
 
 const router: IRouter = Router();
 
@@ -182,11 +183,8 @@ router.get("/:id", authenticate, async (req: AuthRequest, res) => {
 
   if (!dossier) return res.status(404).json({ error: "Dossier introuvable" });
 
-  // Access control: owner OR authorized mairie
-  if (dossier.userId !== userId) {
-    if (req.user!.role !== "mairie" && req.user!.role !== "admin") {
-      return res.status(403).json({ error: "FORBIDDEN" });
-    }
+  if (dossier.userId !== userId && !await AuthorizationService.canAccessDossier(userId, id as string)) {
+    return res.status(403).json({ error: "FORBIDDEN" });
   }
 
   if (!dossier) return res.status(404).json({ error: "Dossier introuvable" });
@@ -233,8 +231,9 @@ router.patch("/:id", authenticate, async (req: AuthRequest, res) => {
   const { id } = req.params;
   const { userId } = req.user;
   const body = (req.body || {}) as Record<string, unknown>;
-  const role = (req.user.role || "").toLowerCase();
-  const allowedFields = role === "mairie" || role === "admin" ? MAIRIE_EDITABLE_FIELDS : CITIZEN_EDITABLE_FIELDS;
+  const canWriteDossier = await AuthorizationService.hasPermission(userId, "dossier.write", { dossierId: id as string });
+  const canAccessDossier = await AuthorizationService.canAccessDossier(userId, id as string);
+  const allowedFields = canWriteDossier ? MAIRIE_EDITABLE_FIELDS : CITIZEN_EDITABLE_FIELDS;
   const updates = pickAllowedUpdates(body, allowedFields);
   const receivedKeys = Object.keys(body);
   const forbiddenKeys = receivedKeys.filter((key) => FORBIDDEN_DIRECT_FIELDS.has(key) || !allowedFields.has(key));
@@ -250,9 +249,13 @@ router.patch("/:id", authenticate, async (req: AuthRequest, res) => {
     });
   }
 
-  const whereClause = role === "mairie" || role === "admin"
+  const whereClause = canWriteDossier
     ? eq(dossiersTable.id, id as any)
     : and(eq(dossiersTable.id, id as any), eq(dossiersTable.userId, userId));
+
+  if (!canWriteDossier && !canAccessDossier) {
+    return res.status(403).json({ error: "FORBIDDEN", message: "Accès au dossier refusé." });
+  }
 
   const [dossier] = await db.update(dossiersTable)
     .set({ ...updates, updatedAt: new Date() })
@@ -323,6 +326,10 @@ router.get("/:id/precontrol", authenticate, async (req: AuthRequest, res) => {
 // PATCH /api/dossiers/:id/start-instruction
 router.patch("/:id/start-instruction", authenticate, requireMairie, async (req: AuthRequest, res) => {
   const { id } = req.params;
+  const canInstruct = await AuthorizationService.hasPermission(req.user!.userId, "dossier.instruct", { dossierId: id as string });
+  if (!canInstruct) {
+    return res.status(403).json({ error: "FORBIDDEN", message: "Droit d'instruction requis sur ce dossier." });
+  }
 
   const [dossier] = await db.update(dossiersTable)
     .set({ 

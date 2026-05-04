@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import {
   isProfessionalRouteActive,
   professionalNavigation,
@@ -15,7 +16,14 @@ type ProfessionalSidebarProps = {
 
 export function ProfessionalSidebar({ portalType, onNavigate }: ProfessionalSidebarProps) {
   const [location] = useLocation();
-  const sections = professionalNavigation[portalType];
+  const { user } = useAuth();
+  const permissions = new Set(((user as any)?.permissions || []).map(String));
+  const role = String((user as any)?.role || "");
+  const hasGlobalAccess = Boolean((user as any)?.hasGlobalAccess || role === "admin" || role === "super_admin");
+  const canSee = (permission?: string) => !permission || hasGlobalAccess || permissions.has(permission) || permissions.has("*");
+  const sections = professionalNavigation[portalType]
+    .map((section) => ({ ...section, items: section.items.filter((item) => canSee(item.permission)) }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <aside className="flex h-full flex-col border-r border-slate-200 bg-white">

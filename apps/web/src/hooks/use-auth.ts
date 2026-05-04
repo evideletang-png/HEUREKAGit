@@ -25,11 +25,13 @@ export function useAuth() {
           description: "Bienvenue sur HEUREKA.",
         });
         const role = (data.user.role as any);
+        const assignments = ((data.user as any).assignments || []) as Array<{ actorType?: string }>;
+        const actorTypes = new Set(assignments.map((assignment) => assignment.actorType).filter(Boolean));
         if (data.user.email?.toLowerCase() === "test@heureka.fr") setLocation("/demo");
         else if (role === "admin" || role === "super_admin") setLocation("/admin");
-        else if (role === "mairie") setLocation("/portail-mairie");
-        else if (role === "metropole") setLocation("/portail-metropole");
-        else if (role === "abf") setLocation("/portail-abf");
+        else if (actorTypes.has("collectivite") || role === "mairie") setLocation("/portail-mairie");
+        else if (actorTypes.has("metropole") || role === "metropole") setLocation("/portail-metropole");
+        else if (actorTypes.has("abf") || role === "abf") setLocation("/portail-abf");
         else if (role === "citoyen" || role === "user") setLocation("/citoyen");
         else setLocation("/dashboard");
       },
