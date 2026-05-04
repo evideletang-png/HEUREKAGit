@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { MairieNavigation } from "@/components/layout/MairieNavigation";
+import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2909,7 +2909,7 @@ export default function PortailMairiePage() {
   const [location, setLocation] = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeDossierTab, setActiveDossierTab] = useState<string>("summary");
-  const [activeTab, setActiveTab] = useState("dossiers");
+  const [activeTab, setActiveTab] = useState("plu");
 
   // Reset sub-tab when switching dossier
   useEffect(() => {
@@ -2963,7 +2963,8 @@ export default function PortailMairiePage() {
   useEffect(() => {
     if (!isLoading) {
       if (!isAuthenticated) { setLocation("/login"); return; }
-      if ((user?.role as string) !== "mairie" && user?.role !== "admin") { setLocation("/dashboard"); }
+      const role = (user?.role as string) || "";
+      if (role !== "mairie" && role !== "admin" && role !== "super_admin") { setLocation("/dashboard"); }
 
       const requestedCommune = typeof window !== "undefined"
         ? new URLSearchParams(window.location.search).get("commune")
@@ -2982,6 +2983,12 @@ export default function PortailMairiePage() {
 
   useEffect(() => {
     if (location.startsWith("/portail-mairie/base-ia/")) {
+      setActiveTab("plu");
+    } else if (location.startsWith("/portail-mairie/fiscalite")) {
+      setActiveTab("finance");
+    } else if (location.startsWith("/portail-mairie/regles-ia")) {
+      setActiveTab("config");
+    } else if (location === "/portail-mairie" || location === "/portail-mairie/base-ia") {
       setActiveTab("plu");
     }
   }, [location]);
@@ -3194,9 +3201,7 @@ export default function PortailMairiePage() {
   const comparison: ComparisonResult | null = comparisonRaw?.data ?? comparisonRaw;
 
   return (
-    <div className="min-h-screen bg-background">
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
-        <MairieNavigation />
+    <ProfessionalShell portalType="mairie" contentClassName="flex-1 w-full max-w-7xl mx-auto px-3 py-4 animate-in fade-in duration-500 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
         <div className="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 sm:h-12 sm:w-12">
             <Building className="w-6 h-6 text-primary" />
@@ -3210,14 +3215,13 @@ export default function PortailMairiePage() {
         {!selectedId ? (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
-              <TabsList className="w-full lg:max-w-[760px]">
-                <TabsTrigger value="dossiers">Dossiers CERFA</TabsTrigger>
-                <TabsTrigger value="plu" className="gap-2">Base IA (PLU)</TabsTrigger>
-                <TabsTrigger value="finance" className="gap-2"><Zap className="w-3.5 h-3.5" /> Fiscalité & Coûts</TabsTrigger>
-                <TabsTrigger value="config" className="gap-2"><Settings className="w-3.5 h-3.5" /> Config Prompt</TabsTrigger>
+              <TabsList className="w-full lg:max-w-[620px]">
+                <TabsTrigger value="plu" className="gap-2">Règlement (PLU)</TabsTrigger>
+                <TabsTrigger value="finance" className="gap-2"><Zap className="w-3.5 h-3.5" /> Fiscalité</TabsTrigger>
+                <TabsTrigger value="config" className="gap-2"><Settings className="w-3.5 h-3.5" /> Règles IA</TabsTrigger>
               </TabsList>
 
-              {communes.length > 0 && (activeTab === "dossiers" || activeTab === "plu" || activeTab === "config" || activeTab === "finance") && (
+              {communes.length > 0 && (activeTab === "plu" || activeTab === "config" || activeTab === "finance") && (
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                   <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Commune :</span>
                   <Select value={selectedCommune} onValueChange={setSelectedCommune}>
@@ -4233,7 +4237,6 @@ export default function PortailMairiePage() {
             ) : null}
           </div>
         )}
-      </main>
-    </div>
+    </ProfessionalShell>
   );
 }

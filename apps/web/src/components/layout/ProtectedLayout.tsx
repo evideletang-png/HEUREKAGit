@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { AppShell } from "./AppShell";
-import { MairieNavigation } from "./MairieNavigation";
+import { ProfessionalShell } from "./ProfessionalShell";
 
 export function ProtectedLayout({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -39,12 +39,9 @@ export function ProtectedLayout({ children, requireAdmin = false }: { children: 
 
   if (["mairie", "admin", "super_admin"].includes((user?.role as string) || "")) {
     return (
-      <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
-        <main className="animate-in fade-in duration-500 flex-1 w-full max-w-7xl mx-auto px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8 min-w-0">
-          <MairieNavigation />
-          {children}
-        </main>
-      </div>
+      <ProfessionalShell portalType={requireAdmin ? "admin" : "mairie"} contentClassName="animate-in fade-in duration-500 flex-1 w-full max-w-7xl mx-auto px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8 min-w-0">
+        {children}
+      </ProfessionalShell>
     );
   }
 

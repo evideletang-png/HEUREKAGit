@@ -32,6 +32,26 @@ import DemoMairie from "@/pages/demo/demo-mairie";
 import DemoMetropole from "@/pages/demo/demo-metropole";
 import DemoAbf from "@/pages/demo/demo-abf";
 import DemoSdis from "@/pages/demo/demo-sdis";
+import { professionalPlaceholderFromRoute } from "@/pages/professional-placeholder";
+
+const MairieDocumentsOpposablesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/documents-opposables");
+const MairieControlesReglementairesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/controles-reglementaires");
+const MairieServicesConsultesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/services-consultes");
+const MetropoleDossiersPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/dossiers-mutualises");
+const MetropoleReglementPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/reglement-intercommunal");
+const MetropoleDocumentsPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/documents-opposables");
+const MetropoleControlesPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/controles-reglementaires");
+const MetropoleServicesPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/services-consultes");
+const MetropoleSettingsPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/parametres");
+const AbfDossiersPage = professionalPlaceholderFromRoute("abf", "/portail-abf/dossiers-consultes");
+const AbfPrescriptionsPage = professionalPlaceholderFromRoute("abf", "/portail-abf/prescriptions-patrimoniales");
+const AbfSettingsPage = professionalPlaceholderFromRoute("abf", "/portail-abf/parametres");
+const AdminCommunesPage = professionalPlaceholderFromRoute("admin", "/admin/communes");
+const AdminUtilisateursPage = professionalPlaceholderFromRoute("admin", "/admin/utilisateurs");
+const AdminBaseDocumentairePage = professionalPlaceholderFromRoute("admin", "/admin/base-documentaire");
+const AdminReglesIaPage = professionalPlaceholderFromRoute("admin", "/admin/regles-ia");
+const AdminMonitoringPage = professionalPlaceholderFromRoute("admin", "/admin/monitoring");
+const AdminSettingsPage = professionalPlaceholderFromRoute("admin", "/admin/parametres");
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +73,12 @@ function Router() {
       <Route path="/dashboard" component={DashboardPage} />
       <Route path="/analyses/new" component={NewAnalysisPage} />
       <Route path="/analyses/:id" component={AnalysisDetailPage} />
+      <Route path="/admin/communes" component={AdminCommunesPage} />
+      <Route path="/admin/utilisateurs" component={AdminUtilisateursPage} />
+      <Route path="/admin/base-documentaire" component={AdminBaseDocumentairePage} />
+      <Route path="/admin/regles-ia" component={AdminReglesIaPage} />
+      <Route path="/admin/monitoring" component={AdminMonitoringPage} />
+      <Route path="/admin/parametres" component={AdminSettingsPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/account" component={AccountPage} />
       <Route path="/conformite" component={MairiePage} />
@@ -62,8 +88,23 @@ function Router() {
       <Route path="/dashboard-mairie" component={DashboardMairiePage} />
       <Route path="/dossier/:id" component={DossierMairieDetailPage} />
       <Route path="/portail-mairie/base-ia/zones/:zoneId" component={PortailMairiePage} />
+      <Route path="/portail-mairie/base-ia" component={PortailMairiePage} />
+      <Route path="/portail-mairie/fiscalite" component={PortailMairiePage} />
+      <Route path="/portail-mairie/regles-ia" component={PortailMairiePage} />
+      <Route path="/portail-mairie/documents-opposables" component={MairieDocumentsOpposablesPage} />
+      <Route path="/portail-mairie/controles-reglementaires" component={MairieControlesReglementairesPage} />
+      <Route path="/portail-mairie/services-consultes" component={MairieServicesConsultesPage} />
       <Route path="/portail-mairie/:id?" component={PortailMairiePage} />
+      <Route path="/portail-metropole/dossiers-mutualises" component={MetropoleDossiersPage} />
+      <Route path="/portail-metropole/reglement-intercommunal" component={MetropoleReglementPage} />
+      <Route path="/portail-metropole/documents-opposables" component={MetropoleDocumentsPage} />
+      <Route path="/portail-metropole/controles-reglementaires" component={MetropoleControlesPage} />
+      <Route path="/portail-metropole/services-consultes" component={MetropoleServicesPage} />
+      <Route path="/portail-metropole/parametres" component={MetropoleSettingsPage} />
       <Route path="/portail-metropole/:id?" component={PortailMetropolePage} />
+      <Route path="/portail-abf/dossiers-consultes" component={AbfDossiersPage} />
+      <Route path="/portail-abf/prescriptions-patrimoniales" component={AbfPrescriptionsPage} />
+      <Route path="/portail-abf/parametres" component={AbfSettingsPage} />
       <Route path="/portail-abf/:id?" component={PortailABFPage} />
 
       {/* Citizen Portal Routes */}
