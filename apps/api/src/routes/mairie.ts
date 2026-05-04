@@ -4477,8 +4477,8 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
 
     if (session.status === "processing" || session.status === "completed") {
       return res.json({
-        status: "processing",
-        message: "Document recu, indexation en cours.",
+        status: session.status,
+        message: session.status === "completed" ? "Document indexe." : "Document recu, indexation en cours.",
         documentId: session.townHallDocumentId,
       });
     }
@@ -4494,6 +4494,16 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
 
     const sessionPath = resolveTownHallUploadSessionPath(session.id);
     if (!fs.existsSync(sessionPath)) {
+      if (session.townHallDocumentId) {
+        await db.update(townHallUploadSessionsTable)
+          .set({ status: "processing", errorMessage: null, updatedAt: new Date() })
+          .where(eq(townHallUploadSessionsTable.id, session.id));
+        return res.json({
+          status: "processing",
+          message: "Document deja recu, indexation en cours.",
+          documentId: session.townHallDocumentId,
+        });
+      }
       await db.update(townHallUploadSessionsTable)
         .set({ status: "failed", errorMessage: "Fichier temporaire introuvable.", updatedAt: new Date() })
         .where(eq(townHallUploadSessionsTable.id, session.id));
@@ -4503,7 +4513,13 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
     const fileBuffer = fs.readFileSync(sessionPath);
     ensureTownHallUploadsDir();
     const persistentPath = path.join(PRIMARY_UPLOADS_DIR, session.storedFileName);
-    fs.renameSync(sessionPath, persistentPath);
+    try {
+      fs.renameSync(sessionPath, persistentPath);
+    } catch (renameErr: any) {
+      if (renameErr?.code !== "EXDEV") throw renameErr;
+      fs.copyFileSync(sessionPath, persistentPath);
+      fs.unlinkSync(sessionPath);
+    }
 
     const [doc] = await db.transaction(async (tx) => {
       const [createdDoc] = await tx.insert(townHallDocumentsTable).values({
@@ -4544,26 +4560,40 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
 
     res.json({ status: "processing", message: "Document recu, indexation en cours.", documentId: doc.id });
 
-    await queueTownHallDocumentIndexing({
-      docId: doc.id,
-      persistentPath,
-      mimeType: session.mimeType || "application/pdf",
-      originalName: session.originalFileName,
-      targetCommune: session.commune || "",
-      userId: req.user!.userId,
-      category: session.category,
-      subCategory: session.subCategory,
-      documentType: session.documentType,
-      requestedTags: parseDocumentTags(session.tags),
-      zone: session.zone,
-    });
+    void (async () => {
+      try {
+        await queueTownHallDocumentIndexing({
+          docId: doc.id,
+          persistentPath,
+          mimeType: session.mimeType || "application/pdf",
+          originalName: session.originalFileName,
+          targetCommune: session.commune || "",
+          userId: req.user!.userId,
+          category: session.category,
+          subCategory: session.subCategory,
+          documentType: session.documentType,
+          requestedTags: parseDocumentTags(session.tags),
+          zone: session.zone,
+        });
 
-    await db.update(townHallUploadSessionsTable)
-      .set({ status: "completed", updatedAt: new Date() })
-      .where(eq(townHallUploadSessionsTable.id, session.id));
+        await db.update(townHallUploadSessionsTable)
+          .set({ status: "completed", updatedAt: new Date(), errorMessage: null })
+          .where(eq(townHallUploadSessionsTable.id, session.id));
+      } catch (indexingErr) {
+        logger.error("[mairie/uploads/indexing]", indexingErr);
+        await db.update(townHallUploadSessionsTable)
+          .set({
+            status: "processing",
+            errorMessage: "Document recu, mais l'indexation devra etre relancee.",
+            updatedAt: new Date(),
+          })
+          .where(eq(townHallUploadSessionsTable.id, session.id));
+      }
+    })();
     return;
   } catch (err) {
     logger.error("[mairie/uploads/complete]", err);
+    if (res.headersSent) return;
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de finaliser cet upload." });
   }
 });
