@@ -1813,6 +1813,73 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </CardContent>
       </Card>
 
+      {visibleUploads.length > 0 && (
+        <Card className="border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Uploads en cours ou reprenables ({visibleUploads.length})
+            </CardTitle>
+            <CardDescription>
+              Une fois le fichier entierement recu par le serveur, l'indexation continue cote API. Si tu reviens sur cette page apres un refresh, l'upload reprend automatiquement depuis le dernier chunk valide.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {visibleUploads.map((upload) => {
+              const progress = upload.totalBytes > 0 ? Math.min(100, Math.round((upload.receivedBytes / upload.totalBytes) * 100)) : 0;
+              const isRecoverable = upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded";
+              return (
+                <div key={upload.sessionId} className="rounded-xl border bg-background p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{upload.fileName}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {upload.commune} · {formatUploadBytes(upload.receivedBytes)} / {formatUploadBytes(upload.totalBytes)}
+                      </p>
+                    </div>
+                    <Badge variant={upload.status === "failed" ? "destructive" : "secondary"} className="shrink-0">
+                      {upload.status === "failed" ? "Interrompu" : upload.status === "processing" ? "Indexation" : `${progress}%`}
+                    </Badge>
+                  </div>
+                  <Progress value={upload.status === "processing" ? 100 : progress} className="h-2" />
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] text-muted-foreground">
+                      {upload.errorMessage || (upload.status === "processing"
+                        ? "Le fichier est cote serveur. L'indexation peut continuer meme si tu quittes la page."
+                        : "Le navigateur memorise le fichier pour reprendre l'envoi apres refresh.")}
+                    </p>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {isRecoverable && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void resumeUpload(upload)}
+                          disabled={runningUploadIdsRef.current.has(upload.sessionId)}
+                        >
+                          Reprendre
+                        </Button>
+                      )}
+                      {(upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void deleteUploadSession(upload)}
+                          disabled={runningUploadIdsRef.current.has(upload.sessionId)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Supprimer
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
       {useRegulatoryCalibrationModule && currentCommune !== "all" && (
         <ZoneFirstCalibrationModule
           currentCommune={currentCommune}
@@ -2458,74 +2525,7 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
         </Card>
       )}
 
-      {visibleUploads.length > 0 && (
-        <Card className="border-primary/20">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Activity className="w-4 h-4 text-primary" />
-              Uploads en cours ou reprenables ({visibleUploads.length})
-            </CardTitle>
-            <CardDescription>
-              Une fois le fichier entierement recu par le serveur, l'indexation continue cote API. Si tu reviens sur cette page apres un refresh, l'upload reprend automatiquement depuis le dernier chunk valide.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {visibleUploads.map((upload) => {
-              const progress = upload.totalBytes > 0 ? Math.min(100, Math.round((upload.receivedBytes / upload.totalBytes) * 100)) : 0;
-              const isRecoverable = upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded";
-              return (
-                <div key={upload.sessionId} className="rounded-xl border bg-background p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{upload.fileName}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {upload.commune} · {formatUploadBytes(upload.receivedBytes)} / {formatUploadBytes(upload.totalBytes)}
-                      </p>
-                    </div>
-                    <Badge variant={upload.status === "failed" ? "destructive" : "secondary"} className="shrink-0">
-                      {upload.status === "failed" ? "Interrompu" : upload.status === "processing" ? "Indexation" : `${progress}%`}
-                    </Badge>
-                  </div>
-                  <Progress value={upload.status === "processing" ? 100 : progress} className="h-2" />
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] text-muted-foreground">
-                      {upload.errorMessage || (upload.status === "processing"
-                        ? "Le fichier est cote serveur. L'indexation peut continuer meme si tu quittes la page."
-                        : "Le navigateur memorise le fichier pour reprendre l'envoi apres refresh.")}
-                    </p>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {isRecoverable && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void resumeUpload(upload)}
-                          disabled={runningUploadIdsRef.current.has(upload.sessionId)}
-                        >
-                          Reprendre
-                        </Button>
-                      )}
-                      {(upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded") && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void deleteUploadSession(upload)}
-                          disabled={runningUploadIdsRef.current.has(upload.sessionId)}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Supprimer
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
-
-      {!useRegulatoryCalibrationModule && allDocs.length > 0 && (
+      {allDocs.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
@@ -2697,7 +2697,6 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
       </Accordion>
 
       {/* MODAL DE DÉTAILS ET PRÉVISUALISATION PDF */}
-      {!useRegulatoryCalibrationModule && (
       <Sheet open={!!selectedDoc} onOpenChange={(open) => !open && setSelectedDoc(null)}>
         <SheetContent side="right" className="sm:max-w-[80vw] p-0 overflow-hidden flex flex-col">
           <SheetHeader className="p-6 border-b bg-muted/10">
@@ -2936,7 +2935,6 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
           </div>
         </SheetContent>
       </Sheet>
-      )}
     </div>
   );
 }
