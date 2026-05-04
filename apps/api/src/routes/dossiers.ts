@@ -9,6 +9,7 @@ import { DOSSIER_STATUS } from "../constants/dossierStatus.js";
 import { createInstructionEvent, INSTRUCTION_EVENT_TYPES } from "../services/instructionEventsService.js";
 import { refreshInstructionDeadline } from "../services/instructionDeadlineService.js";
 import { AuthorizationService } from "../services/authorizationService.js";
+import { linkParcelAnalysisToDossier, normalizeParcelAnalysis } from "../services/dossierParcelLinkService.js";
 
 const router: IRouter = Router();
 
@@ -82,6 +83,17 @@ function toLegacyMessage(message: {
     mentions: [],
     createdAt: message.createdAt,
   };
+}
+
+function normalizeProcedureType(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "permis_de_construire") return "PC";
+  if (normalized === "declaration_prealable") return "DP";
+  if (normalized === "permis_amenager") return "PA";
+  if (normalized === "certificat_urbanisme") return "CUA";
+  if (normalized === "cua") return "CUA";
+  if (normalized === "cub") return "CUB";
+  return String(value || "").trim().toUpperCase();
 }
 
 // GET /api/dossiers
@@ -205,24 +217,41 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
     return res.status(400).json({ error: "Type de procédure et titre requis" });
   }
 
+  const normalizedTypeProcedure = normalizeProcedureType(typeProcedure);
+  const parcelAnalysis = metadata?.parcelAnalysis ? normalizeParcelAnalysis(metadata.parcelAnalysis) : null;
   const year = new Date().getFullYear();
   const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const dossierNumber = `${typeProcedure}-${year}-${random}`;
+  const dossierNumber = `${normalizedTypeProcedure}-${year}-${random}`;
 
   const [dossier] = await db.insert(dossiersTable).values({
     userId,
-    typeProcedure,
+    typeProcedure: normalizedTypeProcedure,
     dossierNumber,
     title,
-    address,
-    commune,
-    metadata: metadata || {},
+    address: address || metadata?.normalizedAddress || null,
+    commune: commune || parcelAnalysis?.commune || null,
+    metadata: {
+      ...(metadata || {}),
+      ...(parcelAnalysis ? { parcelAnalysis } : {}),
+    },
     status: DOSSIER_STATUS.DEPOSE,
     instructionStatus: "depose",
     dateDepot: new Date(),
   }).returning();
 
   return res.status(201).json({ dossier });
+});
+
+router.post("/:id/link-parcel-analysis", authenticate, async (req: AuthRequest, res) => {
+  if (!req.user) return res.status(401).json({ error: "UNAUTHORIZED" });
+  const { id } = req.params;
+  const [existing] = await db.select({ userId: dossiersTable.userId }).from(dossiersTable).where(eq(dossiersTable.id, id as any)).limit(1);
+  if (!existing) return res.status(404).json({ error: "NOT_FOUND", message: "Dossier introuvable." });
+  if (existing.userId !== req.user.userId && !await AuthorizationService.hasPermission(req.user.userId, "dossier.write", { dossierId: id as string })) {
+    return res.status(403).json({ error: "FORBIDDEN" });
+  }
+  const result = await linkParcelAnalysisToDossier(id as string, req.body?.parcelAnalysis || req.body);
+  return res.json(result);
 });
 
 // PATCH /api/dossiers/:id
@@ -288,6 +317,8 @@ router.patch("/:id/submit", authenticate, async (req: AuthRequest, res) => {
     const [dossier] = await db.update(dossiersTable)
       .set({ 
         status: newStatus, 
+        instructionStatus: newStatus === DOSSIER_STATUS.EN_INSTRUCTION ? "instruction_demarre" : "dossier_incomplet",
+        dateDepot: new Date(),
         updatedAt: new Date(),
         metadata: sql`jsonb_set(COALESCE(metadata, '{}'::jsonb), '{preControl}', ${JSON.stringify(preControlReport)}::jsonb)`
       })

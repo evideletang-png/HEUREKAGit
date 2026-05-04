@@ -271,7 +271,15 @@ function DossierPreview({ dossier, onClose }: { dossier: MairieDossier | null; o
   if (!dossier) return null;
 
   const deadline = deadlineInfo(dossier, 0);
-  const zone = dossier.metadata?.zoneCode || dossier.metadata?.zone_code || dossier.metadata?.pluAnalysis?.zone || "Zone non renseignée";
+  const parcelAnalysis = dossier.metadata?.parcelAnalysis || {};
+  const zone = dossier.metadata?.zoneCode
+    || dossier.metadata?.zone_code
+    || parcelAnalysis.zoneCode
+    || dossier.metadata?.pluAnalysis?.zone?.code
+    || dossier.metadata?.pluAnalysis?.zone
+    || "Zone non renseignée";
+  const zoneLabel = parcelAnalysis.zoneLabel || parcelAnalysis.zoningLabel || dossier.metadata?.pluAnalysis?.zone?.label;
+  const parcelRef = dossier.parcelRef || dossier.metadata?.parcel_ref || parcelAnalysis.parcelRef || parcelAnalysis.parcelId || "Parcelle non renseignée";
   const hasPlu = !!dossier.documentCount || !!dossier.metadata?.pluAnalysis;
   const timeline = [
     { label: "Dépôt", date: formatDate(dossier.createdAt || "2026-03-20"), done: true },
@@ -312,7 +320,7 @@ function DossierPreview({ dossier, onClose }: { dossier: MairieDossier | null; o
             </div>
             <div>
               <p className="text-sm font-semibold uppercase tracking-widest text-slate-500">Parcelle</p>
-              <p className="mt-2 text-lg font-medium">{dossier.parcelRef || dossier.metadata?.parcel_ref || "Parcelle non renseignée"} · {zone}</p>
+              <p className="mt-2 text-lg font-medium">{parcelRef} · {zone}{zoneLabel ? ` — ${zoneLabel}` : ""}</p>
             </div>
             <div>
               <p className="text-sm font-semibold uppercase tracking-widest text-slate-500">Échéance légale</p>

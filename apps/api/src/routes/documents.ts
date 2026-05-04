@@ -349,6 +349,7 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
         fileName: file.originalname,
         address: adresse || null,
         status: "processing",
+        pieceStatus: pieceCode ? "valide" : undefined,
       }).returning();
       return doc;
     }));
