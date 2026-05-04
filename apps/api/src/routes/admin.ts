@@ -236,37 +236,45 @@ router.post("/permission-profiles", async (req: AuthRequest, res) => {
 
 router.post("/assignments", async (req: AuthRequest, res) => {
   try {
-    const { userId, actorType, roleKey, profileKey, scopeType, scopeId, permissions } = req.body as {
+    const { userId, actorType, roleKey, profileKey, scopeType, scopeId, scopeIds, permissions } = req.body as {
       userId?: string;
       actorType?: ActorType;
       roleKey?: RoleKey;
       profileKey?: string | null;
       scopeType?: ScopeType;
       scopeId?: string | null;
+      scopeIds?: string[];
       permissions?: string[];
     };
 
     if (!userId || !actorType || !roleKey || !scopeType) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Utilisateur, profil, rôle et périmètre sont requis." });
     }
-    if (scopeType !== "global" && !scopeId) {
+    const requestedScopeIds = scopeType === "commune"
+      ? (Array.isArray(scopeIds) && scopeIds.length > 0 ? scopeIds : scopeId ? [scopeId] : [])
+      : [scopeType === "global" ? null : scopeId || null];
+
+    if (scopeType !== "global" && requestedScopeIds.filter(Boolean).length === 0) {
       return res.status(400).json({ error: "BAD_REQUEST", message: "Un identifiant de périmètre est requis." });
     }
 
     const [targetUser] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!targetUser) return res.status(404).json({ error: "NOT_FOUND", message: "Utilisateur introuvable." });
 
-    const assignment = await AuthorizationService.createAssignment({
-      userId,
-      actorType,
-      roleKey,
-      profileKey,
-      scopeType,
-      scopeId,
-      permissions: Array.isArray(permissions) ? permissions : [],
-    });
+    const createdAssignments = [];
+    for (const requestedScopeId of requestedScopeIds) {
+      createdAssignments.push(await AuthorizationService.createAssignment({
+        userId,
+        actorType,
+        roleKey,
+        profileKey,
+        scopeType,
+        scopeId: requestedScopeId,
+        permissions: Array.isArray(permissions) ? permissions : [],
+      }));
+    }
 
-    return res.status(201).json({ assignment });
+    return res.status(201).json({ assignment: createdAssignments[0], assignments: createdAssignments });
   } catch (err) {
     console.error("[admin/assignments POST]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
