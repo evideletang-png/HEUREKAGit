@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -10,6 +10,35 @@ import { useMutation } from "@tanstack/react-query";
 import { useGeocodeAddress } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { AppShell } from "@/components/layout/AppShell";
+import { DynamicPieceChecklist } from "@/components/dossiers/DynamicPieceChecklist";
+import { normalizeProcedureType } from "@/lib/pieceRequirements";
+
+const DOSSIER_TYPES = [
+  { value: "DP", label: "Déclaration préalable de travaux (DP)" },
+  { value: "PCMI", label: "Permis de construire maison individuelle (PCMI)" },
+  { value: "PC", label: "Permis de construire autre que maison individuelle (PC)" },
+  { value: "PA", label: "Permis d'aménager (PA)" },
+  { value: "PD", label: "Permis de démolir (PD)" },
+  { value: "CUA", label: "Certificat d'urbanisme d'information (CUa)" },
+  { value: "CUB", label: "Certificat d'urbanisme opérationnel (CUb)" },
+];
+
+function getAddressCoordinates(address: any) {
+  const lat = Number(address?.lat ?? address?.latitude ?? address?.y);
+  const lon = Number(address?.lon ?? address?.lng ?? address?.longitude ?? address?.x);
+  return {
+    lat: Number.isFinite(lat) ? lat : null,
+    lon: Number.isFinite(lon) ? lon : null,
+  };
+}
+
+function documentTypeForProcedure(type: string) {
+  const normalized = normalizeProcedureType(type);
+  if (normalized === "DP") return "declaration_prealable";
+  if (normalized === "PA") return "permis_amenager";
+  if (normalized === "CUA" || normalized === "CUB") return "certificat_urbanisme";
+  return "permis_de_construire";
+}
 
 export default function CitoyenNewDossierPage() {
   const [, setLocation] = useLocation();
@@ -17,13 +46,63 @@ export default function CitoyenNewDossierPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [address, setAddress] = useState("");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
-  const [docType, setDocType] = useState("permis_de_construire");
+  const [docType, setDocType] = useState("PCMI");
   const [title, setTitle] = useState("");
+  const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
+  const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
+  const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadParcelPreview() {
+      setParcelAnalysis(null);
+      setParcelAnalysisError(null);
+      if (!selectedAddress || selectedCoordinates.lat === null || selectedCoordinates.lon === null) return;
+      try {
+        const response = await fetch("/api/analyses/parcel-preview", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lat: selectedCoordinates.lat,
+            lng: selectedCoordinates.lon,
+            banId: selectedAddress.id,
+            label: selectedAddress.label,
+            banParcelles: selectedAddress.parcelles || selectedAddress.banParcelles || [],
+          }),
+        });
+        if (!response.ok) throw new Error("Analyse parcelle indisponible");
+        const preview = await response.json();
+        if (!cancelled) {
+          const primaryParcel = preview.primaryParcel || preview.parcels?.[0] || {};
+          setParcelAnalysis({
+            ...preview,
+            parcelRef: primaryParcel.parcelRef || primaryParcel.id || selectedAddress.parcelles?.[0] || null,
+            parcelId: primaryParcel.id || null,
+            section: primaryParcel.section || null,
+            number: primaryParcel.numero || primaryParcel.number || null,
+            commune: selectedAddress.city || preview.commune || null,
+            postcode: selectedAddress.postcode || null,
+            lat: selectedCoordinates.lat,
+            lon: selectedCoordinates.lon,
+            zoneCode: preview.zoningPreview?.zoneCode || null,
+            zoningLabel: preview.zoningPreview?.zoningLabel || null,
+            source: "parcel-analysis",
+          });
+        }
+      } catch (error) {
+        if (!cancelled) setParcelAnalysisError(error instanceof Error ? error.message : "Analyse parcelle indisponible");
+      }
+    }
+    loadParcelPreview();
+    return () => { cancelled = true; };
+  }, [selectedAddress, selectedCoordinates.lat, selectedCoordinates.lon]);
 
   const upload = useMutation({
-    mutationFn: async (formData: FormData) => {
+    mutationFn: async ({ formData, dossierId }: { formData: FormData; dossierId: string }) => {
+      formData.append("dossierId", dossierId);
       const r = await fetch("/api/documents/upload", {
         method: "POST",
         credentials: "include",
@@ -58,19 +137,50 @@ export default function CitoyenNewDossierPage() {
       return;
     }
 
-    const formData = new FormData();
-    files.forEach(file => formData.append("files", file));
-    formData.append("adresse", selectedAddress.label); // The API uses 'adresse' for geocoding
-    formData.append("commune", selectedAddress.city || "");
-    formData.append("title", title);
-    formData.append("documentType", docType);
-
     try {
-      await upload.mutateAsync(formData);
+      const createResponse = await fetch("/api/dossiers", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          typeProcedure: docType,
+          title,
+          address: selectedAddress.label,
+          commune: selectedAddress.city || parcelAnalysis?.commune || "",
+          metadata: {
+            normalizedAddress: selectedAddress.label,
+            address: {
+              label: selectedAddress.label,
+              city: selectedAddress.city || null,
+              postcode: selectedAddress.postcode || null,
+              lat: selectedCoordinates.lat,
+              lon: selectedCoordinates.lon,
+            },
+            parcelAnalysis,
+          },
+        }),
+      });
+      if (!createResponse.ok) throw new Error((await createResponse.json().catch(() => ({}))).message || "Création du dossier impossible.");
+      const created = await createResponse.json();
+      const dossierId = created.dossier.id as string;
+
+      const formData = new FormData();
+      files.forEach(file => formData.append("files", file));
+      formData.append("adresse", selectedAddress.label);
+      formData.append("commune", selectedAddress.city || parcelAnalysis?.commune || "");
+      formData.append("title", title);
+      formData.append("documentType", documentTypeForProcedure(docType));
+      await upload.mutateAsync({ formData, dossierId });
+
+      const submitResponse = await fetch(`/api/dossiers/${dossierId}/submit`, { method: "PATCH", credentials: "include" });
+      if (!submitResponse.ok) throw new Error((await submitResponse.json().catch(() => ({}))).message || "Soumission impossible.");
+      const submitted = await submitResponse.json();
       
       toast({
-        title: "Dossier déposé !",
-        description: "Votre dossier a été transmis avec succès et est en cours d'analyse.",
+        title: submitted.dossier?.status === "INCOMPLET" ? "Dossier transmis, pièces à compléter" : "Dossier déposé !",
+        description: submitted.dossier?.status === "INCOMPLET"
+          ? "Votre dossier a été transmis à la mairie. Des compléments pourront être demandés."
+          : "Votre dossier a été transmis avec succès et est en cours d'analyse.",
       });
       
       setLocation("/citoyen");
@@ -175,15 +285,31 @@ export default function CitoyenNewDossierPage() {
                     <SelectValue placeholder="Choisir le type de demande" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="permis_de_construire">Permis de Construire (PC)</SelectItem>
-                    <SelectItem value="declaration_prealable">Déclaration Préalable (DP)</SelectItem>
-                    <SelectItem value="certificat_urbanisme">Certificat d'Urbanisme (CU)</SelectItem>
-                    <SelectItem value="permis_amenager">Permis d'Aménager (PA)</SelectItem>
+                    {DOSSIER_TYPES.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             </CardContent>
           </Card>
+
+          {selectedAddress && (
+            <Card className="border-none shadow-md">
+              <CardHeader>
+                <CardTitle className="text-xl">Analyse de localisation</CardTitle>
+                <CardDescription>Ces informations alimentent la checklist et le dossier mairie.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-3">
+                <div><p className="text-xs font-medium text-muted-foreground">Commune</p><p className="font-semibold">{selectedAddress.city || "Non déterminée"}</p></div>
+                <div><p className="text-xs font-medium text-muted-foreground">Parcelle</p><p className="font-semibold">{parcelAnalysis?.parcelRef || "En recherche"}</p></div>
+                <div><p className="text-xs font-medium text-muted-foreground">Zone</p><p className="font-semibold">{parcelAnalysis?.zoneCode ? `Zone ${parcelAnalysis.zoneCode}` : "En recherche"}</p></div>
+                {parcelAnalysisError ? <p className="sm:col-span-3 text-sm text-amber-700">{parcelAnalysisError}. Le dossier sera transmis avec l'adresse et les coordonnées disponibles.</p> : null}
+              </CardContent>
+            </Card>
+          )}
+
+          <DynamicPieceChecklist procedureType={docType} parcelAnalysis={parcelAnalysis} />
 
           <Card className="border-none shadow-md">
             <CardHeader>

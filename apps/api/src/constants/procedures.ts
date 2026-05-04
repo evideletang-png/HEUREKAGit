@@ -14,10 +14,9 @@ export interface ProcedureType {
   pieces: DossierPiece[];
 }
 
-export const PROCEDURES: Record<string, ProcedureType> = {
-  PC: {
-    code: "PC",
-    label: "Permis de Construire (Maison Individuelle)",
+const PCMI_PROCEDURE: ProcedureType = {
+    code: "PCMI",
+    label: "Permis de construire maison individuelle",
     description: "Pour toute construction de maison individuelle ou ses annexes.",
     pieces: [
       { code: "CERFA", name: "Formulaire CERFA", description: "Le formulaire officiel complété et signé.", isMandatory: true },
@@ -34,6 +33,14 @@ export const PROCEDURES: Record<string, ProcedureType> = {
       { code: "PCMI14-2", name: "Attestation RE2020", description: "Respect de la réglementation environnementale.", isMandatory: false, condition: "RE2020" },
       { code: "ARCHI", name: "Attestation Architecte", description: "Si surface > 150m².", isMandatory: false, condition: "SURFACE_GT_150" },
     ]
+  };
+
+export const PROCEDURES: Record<string, ProcedureType> = {
+  PCMI: PCMI_PROCEDURE,
+  PC: {
+    ...PCMI_PROCEDURE,
+    code: "PC",
+    label: "Permis de construire autre que maison individuelle",
   },
   DP: {
     code: "DP",
@@ -48,8 +55,8 @@ export const PROCEDURES: Record<string, ProcedureType> = {
       { code: "DP5", name: "Plans des façades et toitures", description: "Si modification de l'aspect.", isMandatory: false },
     ]
   },
-  CUa: {
-    code: "CUa",
+  CUA: {
+    code: "CUA",
     label: "Certificat d'Urbanisme d'Information",
     description: "Pour connaître les règles d'urbanisme applicables.",
     pieces: [
@@ -58,8 +65,8 @@ export const PROCEDURES: Record<string, ProcedureType> = {
       { code: "CU2", name: "Notice descriptive", description: "Description succincte.", isMandatory: true },
     ]
   },
-  CUb: {
-    code: "CUb",
+  CUB: {
+    code: "CUB",
     label: "Certificat d'Urbanisme Opérationnel",
     description: "Pour savoir si un projet spécifique est réalisable.",
     pieces: [
@@ -93,3 +100,6 @@ export const PROCEDURES: Record<string, ProcedureType> = {
     ]
   }
 };
+
+PROCEDURES.CUa = PROCEDURES.CUA;
+PROCEDURES.CUb = PROCEDURES.CUB;

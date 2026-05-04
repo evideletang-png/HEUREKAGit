@@ -171,7 +171,19 @@ export default function DossierMairieDetailPage() {
     { id: "depot", type: "depot", description: "Dossier déposé", createdAt: instruction.dateDepot || demoDossier.dateDepot },
     { id: "completude", type: "piece_recue", description: "Dossier complet", createdAt: instruction.dateCompletude || demoDossier.dateCompletude },
   ];
-  const zone = dossier.metadata?.zoneCode || dossier.metadata?.zone_code || dossier.metadata?.pluAnalysis?.zone || "UB";
+  const parcelAnalysis = dossier.metadata?.parcelAnalysis || {};
+  const zone = dossier.metadata?.zoneCode
+    || dossier.metadata?.zone_code
+    || parcelAnalysis.zoneCode
+    || dossier.metadata?.pluAnalysis?.zone?.code
+    || dossier.metadata?.pluAnalysis?.zone
+    || "Non renseignée";
+  const zoneLabel = parcelAnalysis.zoneLabel || parcelAnalysis.zoningLabel || dossier.metadata?.pluAnalysis?.zone?.label;
+  const parcelRef = dossier.parcelRef || parcelAnalysis.parcelRef || dossier.metadata?.parcel_ref || dossier.metadata?.parcelRef || null;
+  const locationConstraints = [
+    ...(Array.isArray(parcelAnalysis.constraints) ? parcelAnalysis.constraints : []),
+    ...(Array.isArray(parcelAnalysis.overlays) ? parcelAnalysis.overlays : []),
+  ];
   const surface = dossier.metadata?.surfacePlancher || dossier.metadata?.surface_plancher || dossier.metadata?.requested_surface_m2 || 120;
   const documents = dossier.documents?.length ? dossier.documents : demoDossier.documents || [];
 
@@ -179,7 +191,7 @@ export default function DossierMairieDetailPage() {
     ["Type de demande", dossier.typeProcedure || "Permis de Construire"],
     ["Date de dépôt", formatDate(dossier.createdAt || demoDossier.createdAt)],
     ["Surface de plancher", `${surface} m²`],
-    ["Zonage PLU", `Zone ${zone}`],
+    ["Zonage PLU", zone === "Non renseignée" ? "Zone non renseignée" : `Zone ${zone}${zoneLabel ? ` — ${zoneLabel}` : ""}`],
   ], [dossier, surface, zone]);
 
   if (isLoading || query.isLoading) {
@@ -319,11 +331,25 @@ export default function DossierMairieDetailPage() {
           )}
 
           {tab === "parcelle" && (
-            <InfoCard title="Analyse de parcelle">
-              <div className="grid gap-5 sm:grid-cols-3">
-                <div><p className="text-sm text-slate-500">Parcelle</p><p className="mt-1 text-lg font-semibold">{dossier.parcelRef || "CD-0118"}</p></div>
-                <div><p className="text-sm text-slate-500">Zonage</p><p className="mt-1 text-lg font-semibold">Zone {zone}</p></div>
-                <div><p className="text-sm text-slate-500">Commune</p><p className="mt-1 text-lg font-semibold">{dossier.commune || "Gardanne"}</p></div>
+            <InfoCard title="Analyse de localisation">
+              {parcelRef || zone !== "Non renseignée" || parcelAnalysis.source ? (
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div><p className="text-sm text-slate-500">Adresse</p><p className="mt-1 text-lg font-semibold">{dossier.address || "Non renseignée"}</p></div>
+                  <div><p className="text-sm text-slate-500">Parcelle</p><p className="mt-1 text-lg font-semibold">{parcelRef || "Non renseignée"}</p></div>
+                  <div><p className="text-sm text-slate-500">Zone PLU</p><p className="mt-1 text-lg font-semibold">{zone === "Non renseignée" ? "Non renseignée" : `Zone ${zone}${zoneLabel ? ` — ${zoneLabel}` : ""}`}</p></div>
+                  <div><p className="text-sm text-slate-500">Commune</p><p className="mt-1 text-lg font-semibold">{parcelAnalysis.commune || dossier.commune || "Non renseignée"}</p></div>
+                  <div><p className="text-sm text-slate-500">Source</p><p className="mt-1 text-lg font-semibold">{parcelAnalysis.source || "Dossier"}</p></div>
+                  <div><p className="text-sm text-slate-500">Contraintes</p><p className="mt-1 text-lg font-semibold">{locationConstraints.length || "Aucune contrainte remontée"}</p></div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-slate-600">
+                  Analyse de localisation non disponible — relancer l'analyse.
+                </div>
+              )}
+              <div className="mt-5">
+                <Button variant="outline" className="rounded-lg" disabled>
+                  Relancer analyse parcelle
+                </Button>
               </div>
               <div className="mt-6 flex h-72 items-center justify-center rounded-lg bg-slate-100 text-slate-500">Carte parcellaire à venir</div>
             </InfoCard>
