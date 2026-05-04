@@ -218,6 +218,13 @@
       "when": 1775797200000,
       "tag": "0030_zone_centric_reglement",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1775804400000,
+      "tag": "0031_reglement_human_admin_columns",
+      "breakpoints": true
     }
   ]
 }
