@@ -16,6 +16,8 @@ export const townHallDocumentsTable = pgTable("town_hall_documents", {
   subCategory: text("sub_category"), // PLU, RISKS, HERITAGE, NETWORKS, etc.
   documentType: text("document_type"), // Written regulation, Zoning map, etc.
   explanatoryNote: text("explanatory_note"), // AI generated summary
+  notebookUrl: text("notebook_url"),
+  notebookSummary: text("notebook_summary"),
   tags: jsonb("tags").default([]),
   zone: text("zone"),
   isRegulatory: boolean("is_regulatory").default(true),

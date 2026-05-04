@@ -10,6 +10,8 @@ export const reglementAnalysisTable = pgTable("reglement_analysis", {
   source: text("source").notNull().default("manual"),
   rawContent: text("raw_content").notNull(),
   structuredContent: jsonb("structured_content").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  notebookUrl: text("notebook_url"),
+  notebookSummary: text("notebook_summary"),
   status: text("status").notNull().default("draft"),
   createdBy: text("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

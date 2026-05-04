@@ -2,6 +2,13 @@ ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "zone_type" 
 ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "summary" text;
 ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "geometry" jsonb;
 ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'draft' NOT NULL;
+ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "confidence_score" double precision DEFAULT 0.5;
+ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "linked_document_ids" jsonb DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "constraints" jsonb DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "notebook_url" text;
+ALTER TABLE "regulatory_calibration_zones" ADD COLUMN IF NOT EXISTS "notebook_summary" text;
+ALTER TABLE "town_hall_documents" ADD COLUMN IF NOT EXISTS "notebook_url" text;
+ALTER TABLE "town_hall_documents" ADD COLUMN IF NOT EXISTS "notebook_summary" text;
 
 CREATE TABLE IF NOT EXISTS "reglement_analysis" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -10,11 +17,16 @@ CREATE TABLE IF NOT EXISTS "reglement_analysis" (
   "source" text DEFAULT 'manual' NOT NULL,
   "raw_content" text NOT NULL,
   "structured_content" jsonb DEFAULT '{}'::jsonb NOT NULL,
+  "notebook_url" text,
+  "notebook_summary" text,
   "status" text DEFAULT 'draft' NOT NULL,
   "created_by" text,
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
+
+ALTER TABLE "reglement_analysis" ADD COLUMN IF NOT EXISTS "notebook_url" text;
+ALTER TABLE "reglement_analysis" ADD COLUMN IF NOT EXISTS "notebook_summary" text;
 
 CREATE TABLE IF NOT EXISTS "zone_regulatory_rules" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -25,6 +37,16 @@ CREATE TABLE IF NOT EXISTS "zone_regulatory_rules" (
   "rule_text" text NOT NULL,
   "conditions" text,
   "exceptions" text,
+  "raw_content" text,
+  "summary" text,
+  "value_min" double precision,
+  "value_max" double precision,
+  "value_exact" double precision,
+  "unit" text,
+  "destination" text,
+  "project_type" text,
+  "instructor_note" text,
+  "source_page" integer,
   "source_document_id" uuid,
   "source_excerpt" text,
   "confidence_score" double precision DEFAULT 0.5,
@@ -33,6 +55,17 @@ CREATE TABLE IF NOT EXISTS "zone_regulatory_rules" (
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
+
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "raw_content" text;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "summary" text;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "value_min" double precision;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "value_max" double precision;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "value_exact" double precision;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "unit" text;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "destination" text;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "project_type" text;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "instructor_note" text;
+ALTER TABLE "zone_regulatory_rules" ADD COLUMN IF NOT EXISTS "source_page" integer;
 
 CREATE TABLE IF NOT EXISTS "regulatory_controls" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

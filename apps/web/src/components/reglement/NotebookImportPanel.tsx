@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCopy, Loader2, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +30,8 @@ export function NotebookImportPanel({
   const [rawContent, setRawContent] = useState("");
   const [documentId, setDocumentId] = useState("__none__");
   const [source, setSource] = useState("notebook");
+  const [notebookUrl, setNotebookUrl] = useState("");
+  const [notebookSummary, setNotebookSummary] = useState("");
 
   const importMutation = useMutation({
     mutationFn: async () => {
@@ -36,6 +39,8 @@ export function NotebookImportPanel({
       form.set("commune", commune);
       form.set("source", source);
       form.set("rawContent", rawContent);
+      form.set("notebookUrl", notebookUrl);
+      form.set("notebookSummary", notebookSummary);
       if (documentId !== "__none__") form.set("documentId", documentId);
       const file = fileInputRef.current?.files?.[0];
       if (file) form.set("file", file);
@@ -43,6 +48,8 @@ export function NotebookImportPanel({
     },
     onSuccess: (payload: any) => {
       setRawContent("");
+      setNotebookUrl("");
+      setNotebookSummary("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       queryClient.invalidateQueries({ queryKey: ["reglement-summary", commune] });
       queryClient.invalidateQueries({ queryKey: ["reglement-zones", commune] });
@@ -107,6 +114,16 @@ export function NotebookImportPanel({
           placeholder="Colle ici l'analyse structurée par zones..."
           value={rawContent}
           onChange={(event) => setRawContent(event.target.value)}
+        />
+        <Input
+          placeholder="Lien NotebookLM (optionnel)"
+          value={notebookUrl}
+          onChange={(event) => setNotebookUrl(event.target.value)}
+        />
+        <Textarea
+          placeholder="Résumé Notebook : insights importants à conserver"
+          value={notebookSummary}
+          onChange={(event) => setNotebookSummary(event.target.value)}
         />
         <input ref={fileInputRef} type="file" accept=".txt,.md,.json,text/plain,application/json" className="text-sm" />
         <Button
