@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, boolean, integer, index, jsonb, doublePrecision } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { townHallDocumentsTable } from "./townHallDocuments";
@@ -12,6 +12,11 @@ export const regulatoryCalibrationZonesTable = pgTable("regulatory_calibration_z
   summary: text("summary"),
   geometry: jsonb("geometry"),
   status: text("status").notNull().default("draft"),
+  confidenceScore: doublePrecision("confidence_score").default(0.5),
+  linkedDocumentIds: jsonb("linked_document_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  constraints: jsonb("constraints").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  notebookUrl: text("notebook_url"),
+  notebookSummary: text("notebook_summary"),
   parentZoneCode: text("parent_zone_code"),
   sectorCode: text("sector_code"),
   guidanceNotes: text("guidance_notes"),
