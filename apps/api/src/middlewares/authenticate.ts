@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../lib/auth.js";
+import { AuthorizationService } from "../services/authorizationService.js";
 
 export interface AuthRequest extends Request {
   user?: { userId: string; email: string; role: string };
@@ -23,16 +24,27 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
   next();
 }
 
-export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (req.user?.role !== "admin" && req.user?.role !== "super_admin") {
-    res.status(403).json({ error: "FORBIDDEN", message: "Admin access required" });
+export async function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  if (!req.user) {
+    res.status(401).json({ error: "UNAUTHORIZED", message: "Authentication required" });
+    return;
+  }
+  const allowed = await AuthorizationService.hasPermission(req.user.userId, "users.manage");
+  if (!allowed) {
+    res.status(403).json({ error: "FORBIDDEN", message: "Accès administrateur requis." });
     return;
   }
   next();
 }
 
-export function requireMairie(req: AuthRequest, res: Response, next: NextFunction): void {
-  if (req.user?.role !== "mairie" && req.user?.role !== "admin" && req.user?.role !== "super_admin") {
+export async function requireMairie(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  if (!req.user) {
+    res.status(401).json({ error: "UNAUTHORIZED", message: "Authentication required" });
+    return;
+  }
+  const allowed = await AuthorizationService.hasPermission(req.user.userId, "dossier.instruct")
+    || await AuthorizationService.hasPermission(req.user.userId, "dossier.read");
+  if (!allowed) {
     res.status(403).json({ error: "FORBIDDEN", message: "Accès réservé aux agents de mairie." });
     return;
   }

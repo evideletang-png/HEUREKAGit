@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/use-auth";
 import { ProfessionalSidebar } from "./ProfessionalSidebar";
@@ -31,8 +31,15 @@ function parseFirstCommune(raw: unknown) {
 
 export function ProfessionalShell({ children, portalType, commune, contentClassName }: ProfessionalShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [selectedCommune, setSelectedCommune] = useState<string | null>(() => window.localStorage.getItem("heureka:selectedCommune"));
   const { user } = useAuth();
-  const resolvedCommune = useMemo(() => commune || parseFirstCommune((user as any)?.communes), [commune, user]);
+  const resolvedCommune = useMemo(() => commune || selectedCommune || parseFirstCommune((user as any)?.authorizedCommunes) || parseFirstCommune((user as any)?.communes), [commune, selectedCommune, user]);
+
+  useEffect(() => {
+    const handler = (event: Event) => setSelectedCommune(String((event as CustomEvent<string>).detail || ""));
+    window.addEventListener("heureka:selectedCommune", handler);
+    return () => window.removeEventListener("heureka:selectedCommune", handler);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#f7f7f6] text-slate-950 lg:grid lg:grid-cols-[280px_1fr]">

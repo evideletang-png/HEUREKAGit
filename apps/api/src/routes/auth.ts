@@ -5,8 +5,25 @@ import { and, eq, ne } from "drizzle-orm";
 import { hashPassword, verifyPassword, signToken } from "../lib/auth.js";
 import type { AuthRequest } from "../middlewares/authenticate.js";
 import { authenticate } from "../middlewares/authenticate.js";
+import { AuthorizationService } from "../services/authorizationService.js";
 
 const router: IRouter = Router();
+
+async function serializeUser(user: typeof usersTable.$inferSelect) {
+  const authorization = await AuthorizationService.getAuthorizationSummary(user.id);
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    communes: user.communes,
+    createdAt: user.createdAt,
+    assignments: authorization.assignments,
+    permissions: authorization.permissions,
+    authorizedCommunes: authorization.authorizedCommunes,
+    hasGlobalAccess: authorization.hasGlobalAccess,
+  };
+}
 
 router.post("/register", async (req, res) => {
   try {
@@ -44,10 +61,7 @@ router.post("/register", async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.status(201).json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role, communes: user.communes, createdAt: user.createdAt },
-      token,
-    });
+    res.status(201).json({ user: await serializeUser(user), token });
   } catch (err) {
     console.error("[auth/register]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
@@ -83,10 +97,7 @@ router.post("/login", async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role, communes: user.communes, createdAt: user.createdAt },
-      token,
-    });
+    res.json({ user: await serializeUser(user), token });
   } catch (err) {
     console.error("[auth/login]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
@@ -107,7 +118,7 @@ router.get("/me", authenticate, async (req: AuthRequest, res) => {
       res.status(401).json({ error: "UNAUTHORIZED", message: "Utilisateur non trouvé." });
       return;
     }
-    res.json({ id: user.id, email: user.email, name: user.name, role: user.role, communes: user.communes, createdAt: user.createdAt });
+    res.json(await serializeUser(user));
   } catch (err) {
     console.error("[auth/me]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
@@ -173,7 +184,7 @@ router.patch("/me", authenticate, async (req: AuthRequest, res) => {
 
     updates.updatedAt = new Date();
     const [user] = await db.update(usersTable).set(updates).where(eq(usersTable.id, req.user!.userId)).returning();
-    res.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role, communes: user.communes, createdAt: user.createdAt } });
+    res.json({ user: await serializeUser(user) });
   } catch (err) {
     console.error("[auth/me PATCH]", err);
     res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });

@@ -7,6 +7,13 @@ import { DEFAULT_PROMPTS } from "../services/promptLoader.js";
 import { townHallDocumentsTable } from "@workspace/db";
 import { AdminStatsService } from "../services/adminStatsService.js";
 import { logger } from "../utils/logger.js";
+import {
+  AuthorizationService,
+  STANDARD_PERMISSIONS,
+  type ActorType,
+  type RoleKey,
+  type ScopeType,
+} from "../services/authorizationService.js";
 
 function parseCommunes(raw: string | null): string[] {
   if (!raw) return [];
@@ -160,6 +167,82 @@ router.get("/communes/legacy", async (_req, res) => {
   } catch (err) {
     console.error("[admin/communes/legacy]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR" });
+  }
+});
+
+router.get("/assignments", async (req: AuthRequest, res) => {
+  try {
+    const userId = typeof req.query.userId === "string" ? req.query.userId : null;
+    if (userId) {
+      const assignments = await AuthorizationService.getUserAssignments(userId);
+      return res.json({ assignments, permissions: STANDARD_PERMISSIONS });
+    }
+
+    const users = await db.select({
+      id: usersTable.id,
+      email: usersTable.email,
+      name: usersTable.name,
+      role: usersTable.role,
+    }).from(usersTable).orderBy(usersTable.name);
+
+    const assignments = await Promise.all(users.map(async (user) => ({
+      user,
+      assignments: await AuthorizationService.getUserAssignments(user.id),
+    })));
+
+    return res.json({ assignments, permissions: STANDARD_PERMISSIONS });
+  } catch (err) {
+    console.error("[admin/assignments]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
+  }
+});
+
+router.post("/assignments", async (req: AuthRequest, res) => {
+  try {
+    const { userId, actorType, roleKey, scopeType, scopeId, permissions } = req.body as {
+      userId?: string;
+      actorType?: ActorType;
+      roleKey?: RoleKey;
+      scopeType?: ScopeType;
+      scopeId?: string | null;
+      permissions?: string[];
+    };
+
+    if (!userId || !actorType || !roleKey || !scopeType) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Utilisateur, profil, rôle et périmètre sont requis." });
+    }
+    if (scopeType !== "global" && !scopeId) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Un identifiant de périmètre est requis." });
+    }
+
+    const [targetUser] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!targetUser) return res.status(404).json({ error: "NOT_FOUND", message: "Utilisateur introuvable." });
+
+    const assignment = await AuthorizationService.createAssignment({
+      userId,
+      actorType,
+      roleKey,
+      scopeType,
+      scopeId,
+      permissions: Array.isArray(permissions) ? permissions : [],
+    });
+
+    return res.status(201).json({ assignment });
+  } catch (err) {
+    console.error("[admin/assignments POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
+  }
+});
+
+router.delete("/assignments/:userId/:assignmentId", async (req: AuthRequest, res) => {
+  try {
+    const { userId, assignmentId } = req.params as { userId: string; assignmentId: string };
+    const deleted = await AuthorizationService.deleteAssignment(userId, assignmentId);
+    if (!deleted) return res.status(404).json({ error: "NOT_FOUND", message: "Droit introuvable." });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[admin/assignments DELETE]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
 

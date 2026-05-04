@@ -23,9 +23,11 @@ export default function ProfessionalPlaceholderPage({ portalType, title, descrip
       return;
     }
     const role = (user?.role as string) || "";
+    const permissions = new Set(((user as any)?.permissions || []).map(String));
+    const hasGlobalAccess = Boolean((user as any)?.hasGlobalAccess || role === "admin" || role === "super_admin");
     const allowed =
-      role === "admin" ||
-      role === "super_admin" ||
+      hasGlobalAccess ||
+      permissions.size > 0 ||
       (portalType === "mairie" && role === "mairie") ||
       (portalType === "metropole" && role === "metropole") ||
       (portalType === "abf" && role === "abf");

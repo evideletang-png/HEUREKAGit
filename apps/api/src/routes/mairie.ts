@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type NextFunction, type Response } from "express";
 import { db, runMigrations } from "@workspace/db";
 import { desc, eq, sql, and, inArray, or, ne } from "drizzle-orm";
 import { 
@@ -102,6 +102,7 @@ import { onDossierUpdated } from "../services/instruction/instruction_workflow.s
 import { getTimeline } from "../services/instruction/instruction_events.service.js";
 import { markAsComplete, markAsIncomplete, updateInstructionStatus } from "../services/instruction/instruction_status.service.js";
 import { DocumentGenerationService } from "../services/documentGenerationService.js";
+import { AuthorizationService } from "../services/authorizationService.js";
 import { AUTHORITY_POLICY } from "@workspace/ai-core";
 import { assessExtractedTextQuality, hasUsableExtractedText, isTextLikelyGarbled, normalizeExtractedText, repairExtractedText, scoreTextQuality } from "../services/textQualityService.js";
 import { execFileSync } from "child_process";
@@ -145,8 +146,18 @@ async function ensureCalibrationSchemaReady() {
   await calibrationSchemaPromise;
 }
 
+function requireDossierPermission(permission: string) {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const allowed = await AuthorizationService.hasPermission(req.user!.userId, permission, { dossierId: req.params.id as string });
+    if (!allowed) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Droit insuffisant sur ce dossier." });
+    }
+    return next();
+  };
+}
+
 // ─── DECISION GENERATION ───────────────────────────────────────────────────
-router.post("/dossiers/:id/generate-decision", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/generate-decision", requireDossierPermission("dossier.generate_decision"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const draft = await DocumentGenerationService.generateArreteDraft(id as string, req.user!.userId);
@@ -2518,7 +2529,7 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
       .limit(1);
 
     const communes = currentUser[0] ? parseCommunes(currentUser[0].communes) : [];
-    const isAdmin = currentUser[0]?.role === "admin";
+    const authorization = await AuthorizationService.getAuthorizationSummary(req.user!.userId);
 
     const dossiers = await db
       .select({
@@ -2555,30 +2566,30 @@ router.get("/dossiers", async (req: AuthRequest, res) => {
       const requestedKey = normalizeMunicipalityName(requestedCommune);
       const role = currentUser[0]?.role;
 
-      if (role === "admin" || role === "super_admin") {
+      if (authorization.hasGlobalAccess) {
         if (requestedCommune && requestedCommune !== "all") {
           return city === requestedKey;
         }
         return true;
       }
-      
-      if (role === "metropole") {
-        // Metropole sees dossiers assigned to them
-        return d.assignedMetropoleId === req.user!.userId;
-      }
 
-      if (role === "abf") {
-        // ABF sees dossiers where their avis is requested
-        return d.isAbfConcerned === true;
-      }
-
-      // Mairie role filtering
-      if (requestedCommune) {
-        const canAccess = communes.some(c => normalizeMunicipalityName(c) === requestedKey);
-        if (!canAccess) return false;
+      const authorizedCommunes = authorization.authorizedCommunes.map(normalizeMunicipalityName);
+      const canAccessCity = city ? authorizedCommunes.includes(city) : false;
+      if (requestedCommune && requestedCommune !== "all") {
+        if (!authorizedCommunes.includes(requestedKey)) return false;
         return city === requestedKey;
       }
       
+      if (role === "metropole") {
+        return d.assignedMetropoleId === req.user!.userId || canAccessCity;
+      }
+
+      if (role === "abf") {
+        return d.isAbfConcerned === true || d.assignedAbfId === req.user!.userId || canAccessCity;
+      }
+
+      // Mairie role filtering
+      if (canAccessCity) return true;
       return communes.some(c => normalizeMunicipalityName(c) === city);
     });
 
@@ -2670,6 +2681,10 @@ router.get("/dossiers/:id", async (req: AuthRequest, res) => {
         return res.status(404).json({ error: "NOT_FOUND", message: "Dossier introuvable." });
       }
 
+      if (!await AuthorizationService.canAccessCommune(req.user!.userId, doc.commune)) {
+        return res.status(403).json({ error: "FORBIDDEN", message: "Accès au dossier refusé." });
+      }
+
       // If it's a legacy doc, redirect or handle as dossier
       const dossierId = doc.dossierId || doc.id;
       const allDocuments = await db
@@ -2689,6 +2704,10 @@ router.get("/dossiers/:id", async (req: AuthRequest, res) => {
     }
 
     // Standard Dossier flow
+    if (!await AuthorizationService.canAccessDossier(req.user!.userId, dossier.id as string)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "Accès au dossier refusé." });
+    }
+
     const allDocuments = await db
       .select({
         id: documentReviewsTable.id,
@@ -2768,7 +2787,7 @@ router.get("/dossiers/:id/instruction", async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/dossiers/:id/instruction/status", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/instruction/status", requireDossierPermission("dossier.instruct"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const status = typeof req.body?.status === "string" ? req.body.status : "";
@@ -2781,7 +2800,7 @@ router.post("/dossiers/:id/instruction/status", async (req: AuthRequest, res) =>
   }
 });
 
-router.post("/dossiers/:id/instruction/complete", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/instruction/complete", requireDossierPermission("dossier.instruct"), async (req: AuthRequest, res) => {
   try {
     const dossier = await markAsComplete(req.params.id as string);
     return res.json({ dossier });
@@ -2791,7 +2810,7 @@ router.post("/dossiers/:id/instruction/complete", async (req: AuthRequest, res) 
   }
 });
 
-router.post("/dossiers/:id/instruction/incomplete", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/instruction/incomplete", requireDossierPermission("dossier.request_pieces"), async (req: AuthRequest, res) => {
   try {
     const dossier = await markAsIncomplete(req.params.id as string);
     return res.json({ dossier });
@@ -2819,7 +2838,7 @@ router.get("/dossiers/:id/messages", async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/dossiers/:id/messages", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/messages", requireDossierPermission("message.write"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const { content, parentId, documentId } = req.body;
@@ -2855,7 +2874,7 @@ router.post("/dossiers/:id/messages", async (req: AuthRequest, res) => {
 // ─── WORKFLOW ACTIONS ────────────────────────────────────────────────────────
 
 // 1. Transmission à la Métropole (par la Mairie)
-router.post("/dossiers/:id/transmit", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/transmit", requireDossierPermission("dossier.assign"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const { metropoleId } = req.body;
@@ -2868,7 +2887,7 @@ router.post("/dossiers/:id/transmit", async (req: AuthRequest, res) => {
 });
 
 // 1.5 Saisir l'ABF (par la Mairie/Métropole)
-router.post("/dossiers/:id/request-abf", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/request-abf", requireDossierPermission("dossier.consult_services"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     
@@ -2895,15 +2914,11 @@ router.post("/dossiers/:id/request-abf", async (req: AuthRequest, res) => {
 });
 
 // 2. Décision ABF (par l'ABF)
-router.post("/dossiers/:id/abf-avis", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/abf-avis", requireDossierPermission("dossier.instruct"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const { decision, motivation } = req.body;
     
-    // Check if user is ABF
-    const [user] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, req.user!.userId)).limit(1);
-    if (user?.role !== "abf" && user?.role !== "admin") return res.status(403).json({ error: "FORBIDDEN" });
-
     await WorkflowService.transitionStatus(
       id as string,
       DOSSIER_STATUS.AVIS_ABF_RECU,
@@ -2918,7 +2933,7 @@ router.post("/dossiers/:id/abf-avis", async (req: AuthRequest, res) => {
   }
 });
 
-router.patch("/dossiers/:id/metadata", async (req: AuthRequest, res) => {
+router.patch("/dossiers/:id/metadata", requireDossierPermission("dossier.write"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     const { metadata } = req.body;
@@ -2948,7 +2963,7 @@ router.patch("/dossiers/:id/metadata", async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/dossiers/:id/re-analyze", async (req: AuthRequest, res) => {
+router.post("/dossiers/:id/re-analyze", requireDossierPermission("dossier.instruct"), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
     

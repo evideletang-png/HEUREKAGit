@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { LogOut, Menu, User as UserIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +22,10 @@ type ProfessionalTopbarProps = {
 
 export function ProfessionalTopbar({ portalType, commune, onOpenMenu }: ProfessionalTopbarProps) {
   const { user, logout } = useAuth();
+  const authorizedCommunes = Array.isArray((user as any)?.authorizedCommunes)
+    ? ((user as any).authorizedCommunes as string[]).filter(Boolean)
+    : [];
+  const selectedCommune = commune || authorizedCommunes[0] || "all";
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-6">
@@ -35,6 +40,24 @@ export function ProfessionalTopbar({ portalType, commune, onOpenMenu }: Professi
         </div>
       </div>
       <div className="flex items-center gap-2">
+        {authorizedCommunes.length > 1 ? (
+          <Select
+            value={selectedCommune}
+            onValueChange={(value) => {
+              window.localStorage.setItem("heureka:selectedCommune", value);
+              window.dispatchEvent(new CustomEvent("heureka:selectedCommune", { detail: value }));
+            }}
+          >
+            <SelectTrigger className="hidden h-10 w-[190px] rounded-full border-slate-200 bg-white text-sm font-semibold shadow-sm md:flex">
+              <SelectValue placeholder="Commune" />
+            </SelectTrigger>
+            <SelectContent>
+              {authorizedCommunes.map((item) => (
+                <SelectItem key={item} value={item}>{item}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <NotificationBell />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
