@@ -70,8 +70,7 @@ export const professionalNavigation: Record<ProfessionalPortalType, Professional
     {
       title: "Outils d'instruction",
       items: [
-        { label: "Règlement (PLU)", href: "/portail-mairie/base-ia", description: "Base PLU, zones, règles extraites", icon: BookOpen, activeMatches: ["/portail-mairie/base-ia"], permission: "plu.read" },
-        { label: "Documents opposables", href: "/portail-mairie/documents-opposables", description: "PLU, SPR, PPRI, servitudes, documents graphiques", icon: Archive, permission: "plu.read" },
+        { label: "Règlement (PLU)", href: "/portail-mairie/base-ia", description: "Zones, règles, sources documentaires et contrôles", icon: BookOpen, activeMatches: ["/portail-mairie/base-ia", "/portail-mairie/documents-opposables"], permission: "plu.read" },
         { label: "Contrôles réglementaires", href: "/portail-mairie/controles-reglementaires", description: "Hauteur, implantation, emprise, stationnement, aspect extérieur", icon: FileCheck2, permission: "dossier.instruct" },
         { label: "Services consultés", href: "/portail-mairie/services-consultes", description: "ABF, SDIS, DDT, métropole, consultations externes", icon: Siren, permission: "dossier.consult_services" },
         { label: "Fiscalité", href: "/portail-mairie/fiscalite", description: "Taxes, coûts, simulations", icon: Zap, permission: "fiscalite.read" },

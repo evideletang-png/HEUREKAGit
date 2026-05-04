@@ -23,6 +23,7 @@ import { createHash } from "crypto";
 import { extractDocumentData, extractRelevantRules, compareWithPLU, generateGlobalSynthesis, extractStructuredRuleCandidates, extractDeterministicRegulatoryRules, buildDeterministicZoneDigest } from "./pluAnalysis.js";
 import { loadRegulatoryUnits, buildParsedRulesFromRegulatoryUnits, buildArticlesFromRegulatoryUnits, buildDigestFromRegulatoryUnits } from "./regulatoryUnitService.js";
 import { buildArticlesFromUrbanRules, buildParsedRulesFromUrbanRules, loadStructuredRulesForAnalysis, type StructuredUrbanRuleSource } from "./urbanRuleExtractionService.js";
+import { loadZoneCentricRulesForAnalysis } from "./zoneCentricRuleService.js";
 import { calculateGlobalScore } from "./scoringService.js";
 import { evaluateFormalRules } from "./ruleEngine.js";
 import { simulateProjectModifications } from "./simulationService.js";
@@ -75,7 +76,7 @@ type BuildabilitySourceDetail = {
 };
 
 type BuildabilitySourceMeta = {
-  structuredRuleSource: "published_calibration" | "structured_urban_rules" | "none";
+  structuredRuleSource: "zone_regulatory_rules" | "published_calibration" | "structured_urban_rules" | "none";
   totalStructuredRules: number;
   publishedRuleCount: number;
   coveredFieldCount: number;
@@ -120,7 +121,7 @@ function extractCommuneNameFromAddress(address: string | null | undefined): stri
 
 async function buildBuildabilitySourceDetails(
   rules: StructuredUrbanRuleSource[],
-  source: "published_calibration" | "structured_urban_rules" | "none",
+  source: "zone_regulatory_rules" | "published_calibration" | "structured_urban_rules" | "none",
 ): Promise<BuildabilitySourceDetails> {
   const baseIds = Array.from(new Set(
     rules
@@ -997,7 +998,17 @@ export async function orchestrateDossierAnalysis(
   const annexRegulatoryContext = annexRegulatoryDocs.map((d) => d.rawText || "").join("\n\n");
   const regulatoryContext = [primaryRegulatoryContext, annexRegulatoryContext].filter(Boolean).join("\n\n--- ANNEXES OPPOSABLES ---\n\n");
   const supplementaryPlanningContext = supplementaryPlanningDocs.map((d) => d.rawText || "").join("\n\n");
-  const structuredRuleLoad = await loadStructuredRulesForAnalysis({
+  const zoneCentricRuleLoad = await loadZoneCentricRulesForAnalysis({
+    municipalityId: regulatoryCommune,
+    zoneCode: finalZone,
+    parcelId: parcelData?.id || null,
+  });
+  const structuredRuleLoad = zoneCentricRuleLoad.rules.length > 0
+    ? {
+        source: "zone_regulatory_rules" as const,
+        rules: zoneCentricRuleLoad.rules,
+      }
+    : await loadStructuredRulesForAnalysis({
     municipalityId: regulatoryCommune,
     communeName,
     zoneCode: finalZone,
@@ -1189,7 +1200,9 @@ export async function orchestrateDossierAnalysis(
         greenSpaceReq != null,
       ];
       const coverageScore = explicitSignals.filter(Boolean).length / explicitSignals.length;
-      const provenanceScore = structuredRuleLoad.source === "published_calibration"
+      const provenanceScore = structuredRuleLoad.source === "zone_regulatory_rules"
+        ? 0.95
+        : structuredRuleLoad.source === "published_calibration"
         ? 1
         : structuredRuleLoad.source === "structured_urban_rules"
           ? 0.55
@@ -1197,7 +1210,9 @@ export async function orchestrateDossierAnalysis(
       const publishedCoverageScore = sourceDetails.meta.explicitFieldCount > 0
         ? sourceDetails.meta.publishedCoveredFieldCount / sourceDetails.meta.explicitFieldCount
         : 0;
-      const baseConfidenceScore = structuredRuleLoad.source === "published_calibration"
+      const baseConfidenceScore = structuredRuleLoad.source === "zone_regulatory_rules"
+        ? Math.round(((coverageScore * 0.75) + (provenanceScore * 0.25)) * 100) / 100
+        : structuredRuleLoad.source === "published_calibration"
         ? Math.round(((coverageScore * 0.7) + (publishedCoverageScore * 0.3)) * 100) / 100
         : Math.round(((coverageScore * 0.7) + (provenanceScore * 0.3)) * 100) / 100;
       const relationPenaltyFactor = sourceDetails.meta.unresolvedRelationalRuleCount > 0
