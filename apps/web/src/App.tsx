@@ -13,6 +13,7 @@ import NewAnalysisPage from "@/pages/new-analysis";
 import AnalysisDetailPage from "@/pages/analysis-detail";
 import AdminPage from "@/pages/admin";
 import AdminPermissionsPage from "@/pages/admin-permissions";
+import RegulatoryControlsPage from "@/pages/regulatory-controls";
 import AccountPage from "@/pages/account";
 import MairiePage from "@/pages/mairie";
 import DashboardMairiePage from "@/pages/dashboard-mairie";
@@ -36,7 +37,7 @@ import DemoSdis from "@/pages/demo/demo-sdis";
 import { professionalPlaceholderFromRoute } from "@/pages/professional-placeholder";
 
 const MairieDocumentsOpposablesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/documents-opposables");
-const MairieControlesReglementairesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/controles-reglementaires");
+const MairieControlesReglementairesPage = RegulatoryControlsPage;
 const MairieServicesConsultesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/services-consultes");
 const MetropoleDossiersPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/dossiers-mutualises");
 const MetropoleReglementPage = professionalPlaceholderFromRoute("metropole", "/portail-metropole/reglement-intercommunal");
