@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { MairieNavigation } from "@/components/layout/MairieNavigation";
+import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 
 type MairieDossier = {
   id: string;
@@ -236,12 +236,9 @@ function buildDefaultLetterSettings(user: any, selectedCommune: string, settings
 
 function MairieShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
-      <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
-        <MairieNavigation />
-        {children}
-      </main>
-    </div>
+    <ProfessionalShell portalType="mairie" contentClassName="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
+      {children}
+    </ProfessionalShell>
   );
 }
 

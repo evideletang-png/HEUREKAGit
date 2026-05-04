@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ProtectedLayout } from "@/components/layout/ProtectedLayout";
-import { MairieNavigation } from "@/components/layout/MairieNavigation";
+import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -167,12 +167,9 @@ export default function AccountPage() {
 
   if (["mairie", "admin", "super_admin"].includes((user?.role as string) || "")) {
     return (
-      <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
-        <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
-          <MairieNavigation />
-          {content}
-        </main>
-      </div>
+      <ProfessionalShell portalType={(user?.role as string) === "mairie" ? "mairie" : "admin"} contentClassName="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
+        {content}
+      </ProfessionalShell>
     );
   }
 

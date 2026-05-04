@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
-import { AppShell } from "@/components/layout/AppShell";
+import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,7 +57,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
   );
 
   return (
-    <AppShell className="bg-[#FDFCFB]" mainClassName="container mx-auto py-8 px-4 max-w-7xl w-full">
+    <ProfessionalShell portalType="abf" contentClassName="container mx-auto py-8 px-4 max-w-7xl w-full">
         {selectedId ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <Button variant="ghost" onClick={() => setLocation("/portail-abf")} className="gap-2 -ml-2 text-amber-700 hover:text-amber-900">
@@ -67,7 +67,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
           </div>
         ) : (
           <div className="space-y-8">
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-3">
                   <div className="p-3 bg-amber-700 rounded-2xl shadow-amber-200 shadow-lg">
@@ -89,7 +89,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
                    onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-            </header>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                <StatCard label="Avis à rendre" value={filteredDossiers.length.toString()} icon={Gavel} color="text-amber-700" />
@@ -143,7 +143,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
             </Card>
           </div>
         )}
-    </AppShell>
+    </ProfessionalShell>
   );
 }
 

@@ -19,7 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { DeadlineWidget } from "@/components/instruction/DeadlineWidget";
 import { InstructionTimeline } from "@/components/instruction/InstructionTimeline";
 import { LegalAlerts, type LegalAlert } from "@/components/instruction/LegalAlerts";
-import { MairieNavigation } from "@/components/layout/MairieNavigation";
+import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 
 type DossierDetail = {
   id: string;
@@ -120,12 +120,9 @@ function statusClass(status?: string | null) {
 
 function MairieDetailShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f7f7f6] text-slate-950">
-      <main className="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
-        <MairieNavigation />
-        {children}
-      </main>
-    </div>
+    <ProfessionalShell portalType="mairie" contentClassName="mx-auto w-full max-w-7xl px-4 py-9 sm:px-6 lg:px-8">
+      {children}
+    </ProfessionalShell>
   );
 }
 
