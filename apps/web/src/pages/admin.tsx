@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "wouter";
 import { ProtectedLayout } from "@/components/layout/ProtectedLayout";
 import { useAdminListUsers, useAdminListAnalyses, useGeocodeAddress, getGeocodeAddressQueryKey, useUpdateAdminUser, useAdminListCommunes, useCreateAdminCommune, useDeleteAdminCommune, getAdminListUsersQueryKey, getAdminListCommunesQueryKey } from "@workspace/api-client-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -7,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Shield, Users, Activity, BrainCircuit, RotateCcw, Save, ChevronDown, ChevronRight, MapPin, X, Plus, Building2, UserPlus, Eye, EyeOff, Loader2, Search, Network, Landmark, Pencil, Trash2, Map as MapIcon } from "lucide-react";
+import { Shield, ShieldCheck, Users, Activity, BrainCircuit, RotateCcw, Save, ChevronDown, ChevronRight, MapPin, X, Plus, Building2, UserPlus, Eye, EyeOff, Loader2, Search, Network, Landmark, Pencil, Trash2, Map as MapIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -918,14 +919,22 @@ export default function AdminPage() {
 
   return (
     <ProtectedLayout requireAdmin={true}>
-      <div className="mb-8 flex items-center gap-3">
-        <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
-          <Shield className="w-6 h-6 text-accent" />
+      <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
+            <Shield className="w-6 h-6 text-accent" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Espace Administration</h1>
+            <p className="text-muted-foreground">Vue globale sur l'activité de la plateforme.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Espace Administration</h1>
-          <p className="text-muted-foreground">Vue globale sur l'activité de la plateforme.</p>
-        </div>
+        <Button asChild variant="outline" className="gap-2 self-start md:self-auto">
+          <Link href="/admin/droits">
+            <ShieldCheck className="h-4 w-4" />
+            Administrer les droits
+          </Link>
+        </Button>
       </div>
 
       <Tabs defaultValue="users" className="w-full">
@@ -960,6 +969,12 @@ export default function AdminPage() {
                 <CardDescription>Gérez les accès et périmètres de vos agents.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <Button asChild size="sm" variant="outline" className="gap-2 h-9">
+                  <Link href="/admin/droits">
+                    <ShieldCheck className="w-4 h-4" />
+                    Droits et périmètres
+                  </Link>
+                </Button>
                 <div className="relative w-64">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input 
