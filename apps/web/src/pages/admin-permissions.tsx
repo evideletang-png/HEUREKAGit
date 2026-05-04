@@ -90,6 +90,7 @@ export default function AdminPermissionsPage() {
   const [profileKey, setProfileKey] = useState("instructeur");
   const [scopeType, setScopeType] = useState("commune");
   const [scopeId, setScopeId] = useState("");
+  const [scopeIds, setScopeIds] = useState<string[]>([]);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [profileForm, setProfileForm] = useState({
     key: "",
@@ -110,13 +111,13 @@ export default function AdminPermissionsPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, actorType, roleKey, profileKey, scopeType, scopeId, permissions }),
+        body: JSON.stringify({ userId, actorType, roleKey, profileKey, scopeType, scopeId, scopeIds, permissions }),
       });
       if (!response.ok) throw new Error((await response.json()).message || "Création impossible.");
       return response.json();
     },
     onSuccess: () => {
-      toast({ title: "Profil attribué", description: "Le périmètre utilisateur a été ajouté." });
+      toast({ title: "Profil attribué", description: scopeType === "commune" && scopeIds.length > 1 ? `${scopeIds.length} communes ont été ajoutées.` : "Le périmètre utilisateur a été ajouté." });
       queryClient.invalidateQueries({ queryKey: ["admin-assignments"] });
     },
     onError: (error) => toast({ variant: "destructive", title: "Erreur", description: error instanceof Error ? error.message : "Action impossible." }),
@@ -306,7 +307,11 @@ export default function AdminPermissionsPage() {
             </div>
             <div className="space-y-2">
               <Label>Périmètre</Label>
-              <Select value={scopeType} onValueChange={setScopeType}>
+              <Select value={scopeType} onValueChange={(value) => {
+                setScopeType(value);
+                setScopeId("");
+                setScopeIds([]);
+              }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="global">Global</SelectItem>
@@ -319,10 +324,28 @@ export default function AdminPermissionsPage() {
             <div className="space-y-2 lg:col-span-3">
               <Label>Identifiant du périmètre</Label>
               {scopeType === "commune" ? (
-                <Select value={scopeId} onValueChange={setScopeId}>
-                  <SelectTrigger><SelectValue placeholder="Commune autorisée" /></SelectTrigger>
-                  <SelectContent>{communes.map((commune) => <SelectItem key={commune.id} value={commune.name}>{commune.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setScopeIds(communes.map((commune) => commune.name))}>
+                      Tout sélectionner
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setScopeIds([])}>
+                      Vider
+                    </Button>
+                    {scopeIds.length > 0 ? <Badge variant="secondary">{scopeIds.length} commune{scopeIds.length > 1 ? "s" : ""}</Badge> : null}
+                  </div>
+                  <div className="grid max-h-56 gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+                    {communes.map((commune) => (
+                      <label key={commune.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                        <Checkbox
+                          checked={scopeIds.includes(commune.name)}
+                          onCheckedChange={(checked) => setScopeIds((current) => checked ? [...current, commune.name] : current.filter((item) => item !== commune.name))}
+                        />
+                        {commune.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <Input value={scopeId} onChange={(event) => setScopeId(event.target.value)} placeholder={scopeType === "global" ? "Non requis" : "Identifiant EPCI ou service"} disabled={scopeType === "global"} />
               )}
@@ -343,7 +366,7 @@ export default function AdminPermissionsPage() {
               <p className="text-xs text-slate-500">Ces droits s'ajoutent au profil de base uniquement pour cet utilisateur.</p>
             </div>
             <div className="lg:col-span-4">
-              <Button className="w-full bg-slate-950 text-white hover:bg-slate-800" disabled={!userId || createMutation.isPending} onClick={() => createMutation.mutate()}>
+              <Button className="w-full bg-slate-950 text-white hover:bg-slate-800" disabled={!userId || createMutation.isPending || (scopeType === "commune" && scopeIds.length === 0)} onClick={() => createMutation.mutate()}>
                 Attribuer le profil
               </Button>
             </div>
