@@ -1277,6 +1277,29 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
     await removeTownHallUploadBlob(sessionId).catch(() => undefined);
   };
 
+  const deleteUploadSession = async (upload: ResumableTownHallUpload) => {
+    try {
+      const response = await fetch(`/api/mairie/documents/uploads/${upload.sessionId}`, {
+        method: "DELETE",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok && response.status !== 404) {
+        throw new Error(data.message || "Impossible de supprimer cette session d'upload.");
+      }
+      await clearUploadState(upload.sessionId);
+      toast({
+        title: "Upload supprimé",
+        description: `${upload.fileName} a été retiré des uploads reprenables.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Suppression impossible",
+        description: err?.message || "Impossible de supprimer cette session d'upload.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const fetchServerUploadState = async (sessionId: string): Promise<ResumableTownHallUpload | null> => {
     const response = await fetch(`/api/mairie/documents/uploads/${sessionId}`);
     const data = await response.json().catch(() => ({}));
@@ -2470,16 +2493,30 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
                         ? "Le fichier est cote serveur. L'indexation peut continuer meme si tu quittes la page."
                         : "Le navigateur memorise le fichier pour reprendre l'envoi apres refresh.")}
                     </p>
-                    {isRecoverable && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void resumeUpload(upload)}
-                        disabled={runningUploadIdsRef.current.has(upload.sessionId)}
-                      >
-                        Reprendre
-                      </Button>
-                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {isRecoverable && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void resumeUpload(upload)}
+                          disabled={runningUploadIdsRef.current.has(upload.sessionId)}
+                        >
+                          Reprendre
+                        </Button>
+                      )}
+                      {(upload.status === "failed" || upload.status === "uploading" || upload.status === "uploaded") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void deleteUploadSession(upload)}
+                          disabled={runningUploadIdsRef.current.has(upload.sessionId)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Supprimer
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

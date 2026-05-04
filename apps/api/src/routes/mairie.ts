@@ -4449,6 +4449,45 @@ router.get("/documents/uploads/:id", async (req: AuthRequest, res) => {
   }
 });
 
+router.delete("/documents/uploads/:id", async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const [session] = await db.select().from(townHallUploadSessionsTable)
+      .where(and(eq(townHallUploadSessionsTable.id, id as string), eq(townHallUploadSessionsTable.userId, req.user!.userId)))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Session d'upload introuvable." });
+    }
+
+    if ((session.status === "processing" || session.status === "completed") && session.townHallDocumentId) {
+      return res.status(409).json({
+        error: "DOCUMENT_ALREADY_CREATED",
+        message: "Le document est deja cote serveur. Supprimez le document depuis la bibliotheque si necessaire.",
+      });
+    }
+
+    const sessionPath = resolveTownHallUploadSessionPath(session.id);
+    try {
+      if (fs.existsSync(sessionPath)) fs.unlinkSync(sessionPath);
+    } catch (cleanupErr) {
+      logger.warn("[mairie/uploads/delete] Temporary file cleanup failed", {
+        error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+      });
+    }
+
+    await db.delete(townHallUploadChunksTable)
+      .where(eq(townHallUploadChunksTable.sessionId, session.id));
+    await db.delete(townHallUploadSessionsTable)
+      .where(eq(townHallUploadSessionsTable.id, session.id));
+
+    return res.json({ ok: true });
+  } catch (err) {
+    logger.error("[mairie/uploads/delete]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible de supprimer cette session d'upload." });
+  }
+});
+
 router.post("/documents/uploads/:id/chunk", upload.single("chunk"), async (req: AuthRequest, res) => {
   const file = req.file;
   try {
