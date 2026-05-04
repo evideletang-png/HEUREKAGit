@@ -175,7 +175,7 @@ router.get("/assignments", async (req: AuthRequest, res) => {
     const userId = typeof req.query.userId === "string" ? req.query.userId : null;
     if (userId) {
       const assignments = await AuthorizationService.getUserAssignments(userId);
-      return res.json({ assignments, permissions: STANDARD_PERMISSIONS });
+      return res.json({ assignments, permissions: STANDARD_PERMISSIONS, profiles: await AuthorizationService.getPermissionProfiles() });
     }
 
     const users = await db.select({
@@ -190,19 +190,57 @@ router.get("/assignments", async (req: AuthRequest, res) => {
       assignments: await AuthorizationService.getUserAssignments(user.id),
     })));
 
-    return res.json({ assignments, permissions: STANDARD_PERMISSIONS });
+    return res.json({ assignments, permissions: STANDARD_PERMISSIONS, profiles: await AuthorizationService.getPermissionProfiles() });
   } catch (err) {
     console.error("[admin/assignments]", err);
     return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
   }
 });
 
+router.get("/permission-profiles", async (_req: AuthRequest, res) => {
+  try {
+    return res.json({ profiles: await AuthorizationService.getPermissionProfiles(), permissions: STANDARD_PERMISSIONS });
+  } catch (err) {
+    console.error("[admin/permission-profiles]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
+  }
+});
+
+router.post("/permission-profiles", async (req: AuthRequest, res) => {
+  try {
+    const { key, label, description, actorType, roleKey, permissions } = req.body as {
+      key?: string;
+      label?: string;
+      description?: string;
+      actorType?: ActorType;
+      roleKey?: RoleKey;
+      permissions?: string[];
+    };
+    if (!key || !label || !actorType || !roleKey) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Clé, libellé, profil et rôle sont requis." });
+    }
+    const profile = await AuthorizationService.createPermissionProfile({
+      key,
+      label,
+      description,
+      actorType,
+      roleKey,
+      permissions: Array.isArray(permissions) ? permissions : [],
+    });
+    return res.status(201).json({ profile });
+  } catch (err) {
+    console.error("[admin/permission-profiles POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Erreur serveur." });
+  }
+});
+
 router.post("/assignments", async (req: AuthRequest, res) => {
   try {
-    const { userId, actorType, roleKey, scopeType, scopeId, permissions } = req.body as {
+    const { userId, actorType, roleKey, profileKey, scopeType, scopeId, permissions } = req.body as {
       userId?: string;
       actorType?: ActorType;
       roleKey?: RoleKey;
+      profileKey?: string | null;
       scopeType?: ScopeType;
       scopeId?: string | null;
       permissions?: string[];
@@ -222,6 +260,7 @@ router.post("/assignments", async (req: AuthRequest, res) => {
       userId,
       actorType,
       roleKey,
+      profileKey,
       scopeType,
       scopeId,
       permissions: Array.isArray(permissions) ? permissions : [],

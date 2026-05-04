@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, Trash2 } from "lucide-react";
+import { Layers3, ShieldCheck, Trash2 } from "lucide-react";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -48,8 +48,20 @@ type Assignment = {
   userId: string;
   actorType: string;
   roleKey: string;
+  profileKey?: string | null;
   scopeType: string;
   scopeId: string | null;
+  permissions: string[];
+  overridePermissions?: string[];
+  source?: string;
+};
+type PermissionProfile = {
+  id?: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  actorType: string;
+  roleKey: string;
   permissions: string[];
   source?: string;
 };
@@ -69,17 +81,28 @@ export default function AdminPermissionsPage() {
   const { data: communes = [] } = useQuery({ queryKey: ["admin-communes-for-permissions"], queryFn: () => fetchJson<Commune[]>("/api/admin/communes") });
   const { data: assignmentsData } = useQuery({
     queryKey: ["admin-assignments"],
-    queryFn: () => fetchJson<{ assignments: Array<{ user: AdminUser; assignments: Assignment[] }> }>("/api/admin/assignments"),
+    queryFn: () => fetchJson<{ assignments: Array<{ user: AdminUser; assignments: Assignment[] }>; profiles: PermissionProfile[] }>("/api/admin/assignments"),
   });
 
   const [userId, setUserId] = useState("");
   const [actorType, setActorType] = useState("collectivite");
   const [roleKey, setRoleKey] = useState("instructeur");
+  const [profileKey, setProfileKey] = useState("instructeur");
   const [scopeType, setScopeType] = useState("commune");
   const [scopeId, setScopeId] = useState("");
-  const [permissions, setPermissions] = useState<string[]>(ROLE_DEFAULTS.instructeur);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [profileForm, setProfileForm] = useState({
+    key: "",
+    label: "",
+    description: "",
+    actorType: "collectivite",
+    roleKey: "instructeur",
+    permissions: ROLE_DEFAULTS.instructeur,
+  });
 
   const selectedUser = useMemo(() => users.find((user) => user.id === userId), [userId, users]);
+  const profiles = assignmentsData?.profiles || [];
+  const selectedProfile = profiles.find((profile) => profile.key === profileKey);
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -87,13 +110,31 @@ export default function AdminPermissionsPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, actorType, roleKey, scopeType, scopeId, permissions }),
+        body: JSON.stringify({ userId, actorType, roleKey, profileKey, scopeType, scopeId, permissions }),
       });
       if (!response.ok) throw new Error((await response.json()).message || "Création impossible.");
       return response.json();
     },
     onSuccess: () => {
-      toast({ title: "Droits enregistrés", description: "Le périmètre utilisateur a été ajouté." });
+      toast({ title: "Profil attribué", description: "Le périmètre utilisateur a été ajouté." });
+      queryClient.invalidateQueries({ queryKey: ["admin-assignments"] });
+    },
+    onError: (error) => toast({ variant: "destructive", title: "Erreur", description: error instanceof Error ? error.message : "Action impossible." }),
+  });
+
+  const createProfileMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/admin/permission-profiles", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profileForm),
+      });
+      if (!response.ok) throw new Error((await response.json()).message || "Création impossible.");
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Catégorie créée", description: "Le profil de droits est disponible pour les utilisateurs." });
       queryClient.invalidateQueries({ queryKey: ["admin-assignments"] });
     },
     onError: (error) => toast({ variant: "destructive", title: "Erreur", description: error instanceof Error ? error.message : "Action impossible." }),
@@ -128,13 +169,87 @@ export default function AdminPermissionsPage() {
           <ShieldCheck className="h-4 w-4" />
           <AlertTitle>Modèle Role + Scope + Permissions</AlertTitle>
           <AlertDescription>
-            Les anciens rôles restent compatibles. Les nouveaux droits permettent de limiter un instructeur métropole, ABF ou SDIS à ses communes autorisées.
+            Attribuez un profil de droits réutilisable, puis ajoutez seulement les permissions exceptionnelles nécessaires à un utilisateur.
           </AlertDescription>
         </Alert>
 
         {canManageUsers ? <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader>
-            <CardTitle>Attribuer un droit</CardTitle>
+            <CardTitle className="flex items-center gap-2"><Layers3 className="h-5 w-5" /> Catégories de droits</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-4">
+              <div className="space-y-2">
+                <Label>Clé</Label>
+                <Input value={profileForm.key} onChange={(event) => setProfileForm((current) => ({ ...current, key: event.target.value }))} placeholder="mairie_instructeur_senior" />
+              </div>
+              <div className="space-y-2">
+                <Label>Libellé</Label>
+                <Input value={profileForm.label} onChange={(event) => setProfileForm((current) => ({ ...current, label: event.target.value }))} placeholder="Instructeur senior" />
+              </div>
+              <div className="space-y-2">
+                <Label>Profil</Label>
+                <Select value={profileForm.actorType} onValueChange={(value) => setProfileForm((current) => ({ ...current, actorType: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="collectivite">Collectivité</SelectItem>
+                    <SelectItem value="metropole">Métropole</SelectItem>
+                    <SelectItem value="abf">ABF</SelectItem>
+                    <SelectItem value="sdis">SDIS</SelectItem>
+                    <SelectItem value="extra_super_admin">Extra Super Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Rôle</Label>
+                <Select value={profileForm.roleKey} onValueChange={(value) => setProfileForm((current) => ({ ...current, roleKey: value, permissions: ROLE_DEFAULTS[value] || [] }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="super_admin">Super admin</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="instructeur">Instructeur</SelectItem>
+                    <SelectItem value="consultation">Consultation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 lg:col-span-4">
+                <Label>Description</Label>
+                <Input value={profileForm.description} onChange={(event) => setProfileForm((current) => ({ ...current, description: event.target.value }))} placeholder="Usage prévu de cette catégorie" />
+              </div>
+              <div className="space-y-2 lg:col-span-4">
+                <Label>Permissions de base</Label>
+                <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-3">
+                  {STANDARD_PERMISSIONS.map((permission) => (
+                    <label key={permission} className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <Checkbox
+                        checked={profileForm.permissions.includes(permission)}
+                        onCheckedChange={(checked) => setProfileForm((current) => ({
+                          ...current,
+                          permissions: checked ? [...current.permissions, permission] : current.permissions.filter((item) => item !== permission),
+                        }))}
+                      />
+                      {permission}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="lg:col-span-4">
+                <Button className="w-full" variant="outline" disabled={!profileForm.key || !profileForm.label || createProfileMutation.isPending} onClick={() => createProfileMutation.mutate()}>
+                  Créer ou mettre à jour la catégorie
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {profiles.map((profile) => (
+                <Badge key={profile.key} variant={profile.source === "system" ? "secondary" : "outline"}>{profile.label}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card> : null}
+
+        {canManageUsers ? <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle>Attribuer un profil à un utilisateur</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-4">
             <div className="space-y-2 lg:col-span-2">
@@ -148,7 +263,7 @@ export default function AdminPermissionsPage() {
               {selectedUser ? <p className="text-xs text-slate-500">Rôle historique : {selectedUser.role}</p> : null}
             </div>
             <div className="space-y-2">
-              <Label>Profil</Label>
+              <Label>Profil métier</Label>
               <Select value={actorType} onValueChange={setActorType}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -162,7 +277,7 @@ export default function AdminPermissionsPage() {
             </div>
             <div className="space-y-2">
               <Label>Rôle</Label>
-              <Select value={roleKey} onValueChange={(value) => { setRoleKey(value); setPermissions(ROLE_DEFAULTS[value] || []); }}>
+              <Select value={roleKey} onValueChange={(value) => { setRoleKey(value); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="super_admin">Super admin</SelectItem>
@@ -171,6 +286,23 @@ export default function AdminPermissionsPage() {
                   <SelectItem value="consultation">Consultation</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2 lg:col-span-2">
+              <Label>Catégorie de droits</Label>
+              <Select value={profileKey} onValueChange={(value) => {
+                const profile = profiles.find((item) => item.key === value);
+                setProfileKey(value);
+                if (profile) {
+                  setActorType(profile.actorType);
+                  setRoleKey(profile.roleKey);
+                }
+              }}>
+                <SelectTrigger><SelectValue placeholder="Choisir une catégorie" /></SelectTrigger>
+                <SelectContent>
+                  {profiles.map((profile) => <SelectItem key={profile.key} value={profile.key}>{profile.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500">{selectedProfile?.description || "Les permissions de base viennent de cette catégorie."}</p>
             </div>
             <div className="space-y-2">
               <Label>Périmètre</Label>
@@ -196,7 +328,7 @@ export default function AdminPermissionsPage() {
               )}
             </div>
             <div className="space-y-2 lg:col-span-4">
-              <Label>Permissions</Label>
+              <Label>Permissions complémentaires ponctuelles</Label>
               <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-3">
                 {STANDARD_PERMISSIONS.map((permission) => (
                   <label key={permission} className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -208,10 +340,11 @@ export default function AdminPermissionsPage() {
                   </label>
                 ))}
               </div>
+              <p className="text-xs text-slate-500">Ces droits s'ajoutent au profil de base uniquement pour cet utilisateur.</p>
             </div>
             <div className="lg:col-span-4">
               <Button className="w-full bg-slate-950 text-white hover:bg-slate-800" disabled={!userId || createMutation.isPending} onClick={() => createMutation.mutate()}>
-                Enregistrer le droit
+                Attribuer le profil
               </Button>
             </div>
           </CardContent>
@@ -227,6 +360,7 @@ export default function AdminPermissionsPage() {
                 <TableRow>
                   <TableHead>Utilisateur</TableHead>
                   <TableHead>Profil</TableHead>
+                  <TableHead>Catégorie</TableHead>
                   <TableHead>Périmètre</TableHead>
                   <TableHead>Permissions</TableHead>
                   <TableHead className="w-12" />
@@ -240,6 +374,7 @@ export default function AdminPermissionsPage() {
                       <div className="text-xs text-slate-500">{user.email}</div>
                     </TableCell>
                     <TableCell>{assignment.actorType} · {assignment.roleKey}</TableCell>
+                    <TableCell>{assignment.profileKey || "Profil par défaut"}</TableCell>
                     <TableCell>{assignment.scopeType}{assignment.scopeId ? ` · ${assignment.scopeId}` : ""}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">

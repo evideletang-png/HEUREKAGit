@@ -41,3 +41,4 @@ export * from "./regulatoryCalibrationPermissions";
 export * from "./zoneThematicSegments";
 export * from "./messaging";
 export * from "./userAssignments";
+export * from "./permissionProfiles";
