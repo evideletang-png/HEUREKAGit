@@ -15,10 +15,12 @@ import {
   dossierEventsTable,
   ruleArticlesTable,
   zoneAnalysesTable,
+  townHallUploadChunksTable,
+  townHallUploadSessionsTable,
+  type TownHallUploadSession,
 } from "@workspace/db";
 import { townHallDocumentsTable } from "../../../../packages/db/src/schema/townHallDocuments.js";
 import { townHallDocumentFilesTable } from "../../../../packages/db/src/schema/townHallDocumentFiles.js";
-import { townHallUploadSessionsTable } from "../../../../packages/db/src/schema/townHallUploadSessions.js";
 import { documentKnowledgeProfilesTable } from "../../../../packages/db/src/schema/documentKnowledgeProfiles.js";
 import { regulatoryUnitsTable } from "../../../../packages/db/src/schema/regulatoryUnits.js";
 import { urbanRuleConflictsTable } from "../../../../packages/db/src/schema/urbanRuleConflicts.js";
@@ -3630,6 +3632,50 @@ function resolveTownHallUploadSessionPath(sessionId: string): string {
   return path.join(TOWN_HALL_UPLOAD_SESSION_DIR, `${sessionId}.part`);
 }
 
+async function persistTownHallUploadChunk(args: {
+  sessionId: string;
+  start: number;
+  buffer: Buffer;
+}) {
+  await db.insert(townHallUploadChunksTable).values({
+    sessionId: args.sessionId,
+    start: args.start,
+    size: args.buffer.length,
+    chunkBase64: args.buffer.toString("base64"),
+  }).onConflictDoUpdate({
+    target: [townHallUploadChunksTable.sessionId, townHallUploadChunksTable.start],
+    set: {
+      size: args.buffer.length,
+      chunkBase64: args.buffer.toString("base64"),
+      updatedAt: new Date(),
+    },
+  });
+}
+
+async function rebuildTownHallUploadSessionFile(session: TownHallUploadSession): Promise<string | null> {
+  const chunks = await db.select().from(townHallUploadChunksTable)
+    .where(eq(townHallUploadChunksTable.sessionId, session.id))
+    .orderBy(townHallUploadChunksTable.start);
+
+  if (!chunks.length) return null;
+
+  const buffers: Buffer[] = [];
+  let expectedStart = 0;
+  for (const chunk of chunks) {
+    if (chunk.start !== expectedStart) return null;
+    const buffer = Buffer.from(chunk.chunkBase64, "base64");
+    if (buffer.length !== chunk.size) return null;
+    buffers.push(buffer);
+    expectedStart += buffer.length;
+  }
+
+  if (expectedStart < session.fileSize) return null;
+
+  const sessionPath = resolveTownHallUploadSessionPath(session.id);
+  fs.writeFileSync(sessionPath, Buffer.concat(buffers).subarray(0, session.fileSize));
+  return sessionPath;
+}
+
 function resolveTownHallDocumentPath(id: string, fileName: string | null | undefined): string | null {
   if (!fileName) return null;
   const ext = path.extname(fileName || "");
@@ -4435,7 +4481,13 @@ router.post("/documents/uploads/:id/chunk", upload.single("chunk"), async (req: 
       });
     }
 
-    fs.appendFileSync(resolveTownHallUploadSessionPath(session.id), fs.readFileSync(file.path));
+    const chunkBuffer = fs.readFileSync(file.path);
+    fs.appendFileSync(resolveTownHallUploadSessionPath(session.id), chunkBuffer);
+    await persistTownHallUploadChunk({
+      sessionId: session.id,
+      start,
+      buffer: chunkBuffer,
+    });
     const nextReceivedBytes = Math.min(session.receivedBytes + file.size, session.fileSize);
     const nextStatus = nextReceivedBytes >= session.fileSize ? "uploaded" : "uploading";
 
@@ -4492,8 +4544,16 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
       });
     }
 
-    const sessionPath = resolveTownHallUploadSessionPath(session.id);
-    if (!fs.existsSync(sessionPath)) {
+    let sessionPath = resolveTownHallUploadSessionPath(session.id);
+    const hasUsableSessionFile = fs.existsSync(sessionPath) && fs.statSync(sessionPath).size === session.fileSize;
+    if (!hasUsableSessionFile) {
+      const rebuiltPath = await rebuildTownHallUploadSessionFile(session);
+      if (rebuiltPath) {
+        sessionPath = rebuiltPath;
+      }
+    }
+
+    if (!fs.existsSync(sessionPath) || fs.statSync(sessionPath).size !== session.fileSize) {
       if (session.townHallDocumentId) {
         await db.update(townHallUploadSessionsTable)
           .set({ status: "processing", errorMessage: null, updatedAt: new Date() })
@@ -4505,9 +4565,12 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
         });
       }
       await db.update(townHallUploadSessionsTable)
-        .set({ status: "failed", errorMessage: "Fichier temporaire introuvable.", updatedAt: new Date() })
+        .set({ status: "failed", errorMessage: "Fichier temporaire introuvable et reconstruction impossible.", updatedAt: new Date() })
         .where(eq(townHallUploadSessionsTable.id, session.id));
-      return res.status(500).json({ error: "FILE_MISSING", message: "Le fichier temporaire de cette session est introuvable." });
+      return res.status(500).json({
+        error: "FILE_MISSING",
+        message: "Le fichier temporaire de cette session est introuvable et n'a pas pu etre reconstruit.",
+      });
     }
 
     const fileBuffer = fs.readFileSync(sessionPath);
@@ -4557,6 +4620,9 @@ router.post("/documents/uploads/:id/complete", async (req: AuthRequest, res) => 
         errorMessage: null,
       })
       .where(eq(townHallUploadSessionsTable.id, session.id));
+
+    await db.delete(townHallUploadChunksTable)
+      .where(eq(townHallUploadChunksTable.sessionId, session.id));
 
     res.json({ status: "processing", message: "Document recu, indexation en cours.", documentId: doc.id });
 

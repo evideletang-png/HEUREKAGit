@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { createSelectSchema, createInsertSchema } from "drizzle-zod";
 import { sql } from "drizzle-orm";
 import { usersTable } from "./users";
@@ -26,8 +26,21 @@ export const townHallUploadSessionsTable = pgTable("town_hall_upload_sessions", 
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const townHallUploadChunksTable = pgTable("town_hall_upload_chunks", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: uuid("session_id").notNull().references(() => townHallUploadSessionsTable.id, { onDelete: "cascade" }),
+  start: integer("start").notNull(),
+  size: integer("size").notNull(),
+  chunkBase64: text("chunk_base64").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  sessionStartIdx: uniqueIndex("town_hall_upload_chunks_session_start_idx").on(table.sessionId, table.start),
+}));
+
 export const selectTownHallUploadSessionSchema = createSelectSchema(townHallUploadSessionsTable);
 export const insertTownHallUploadSessionSchema = createInsertSchema(townHallUploadSessionsTable);
 
 export type TownHallUploadSession = typeof townHallUploadSessionsTable.$inferSelect;
 export type InsertTownHallUploadSession = typeof townHallUploadSessionsTable.$inferInsert;
+export type TownHallUploadChunk = typeof townHallUploadChunksTable.$inferSelect;

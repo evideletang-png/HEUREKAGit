@@ -225,6 +225,13 @@
       "when": 1775804400000,
       "tag": "0031_reglement_human_admin_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1775811600000,
+      "tag": "0032_town_hall_upload_chunks",
+      "breakpoints": true
     }
   ]
 }
