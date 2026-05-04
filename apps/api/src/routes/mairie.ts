@@ -4954,6 +4954,147 @@ router.get("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
   }
 });
 
+function coerceNotebookZoneAnalysis(raw: unknown) {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    const jsonStart = trimmed.indexOf("{");
+    const jsonEnd = trimmed.lastIndexOf("}");
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      try { return JSON.parse(trimmed.slice(jsonStart, jsonEnd + 1)); } catch {}
+    }
+    return { globalSummary: trimmed.slice(0, 2000), zones: [] };
+  }
+  return raw && typeof raw === "object" ? raw as any : { zones: [] };
+}
+
+function extractNotebookZoneType(zoneCode: string) {
+  const code = zoneCode.toUpperCase();
+  if (code.startsWith("AU") || /^\d+AU/.test(code)) return "future_urban";
+  if (code.startsWith("U")) return "urban";
+  if (code.startsWith("A")) return "agricultural";
+  if (code.startsWith("N")) return "natural";
+  return "unknown";
+}
+
+router.post("/regulatory-calibration/import-zone-analysis", async (req: AuthRequest, res) => {
+  try {
+    const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
+    if (!access.ok) return res.status(access.status).json(access.error);
+    const permissions = await resolveCalibrationPermissions({
+      userId: req.user!.userId,
+      role: req.user!.role,
+      commune: access.targetCommune,
+    });
+    if (!permissions.canEditCalibration) {
+      return denyCalibrationPermission(res, "Vous n’avez pas les droits pour importer une analyse PLU.");
+    }
+
+    const parsed = coerceNotebookZoneAnalysis(req.body.analysis || req.body.structuredAnalysis || req.body.text);
+    const zones = Array.isArray(parsed?.zones) ? parsed.zones : [];
+    const { communeKey, communeAliases } = await resolveCommuneAliases(access.targetCommune);
+    const parserVersion = `notebook-zone-v${Date.now()}`;
+    const differences: Array<{ zoneCode: string; status: string; message: string }> = [];
+    const createdZones: any[] = [];
+    const createdSections: any[] = [];
+
+    for (const inputZone of zones) {
+      const zoneCode = normalizeConfiguredZoneCode(inputZone?.zoneCode);
+      if (!zoneCode) continue;
+
+      const existingValidatedSection = await db.select({ id: regulatoryZoneSectionsTable.id, heading: regulatoryZoneSectionsTable.heading })
+        .from(regulatoryZoneSectionsTable)
+        .where(and(
+          buildMunicipalityAliasFilter(regulatoryZoneSectionsTable.municipalityId, communeAliases),
+          eq(regulatoryZoneSectionsTable.zoneCode, zoneCode),
+          eq(regulatoryZoneSectionsTable.reviewStatus, "validated"),
+        ))
+        .limit(1);
+
+      if (existingValidatedSection[0]) {
+        differences.push({
+          zoneCode,
+          status: "ignored_validated_zone",
+          message: "Zone déjà validée par un utilisateur : l'import crée une version d'analyse sans écraser la validation.",
+        });
+        continue;
+      }
+
+      const [existingZone] = await db.select().from(regulatoryCalibrationZonesTable)
+        .where(and(
+          buildMunicipalityAliasFilter(regulatoryCalibrationZonesTable.communeId, communeAliases),
+          eq(regulatoryCalibrationZonesTable.zoneCode, zoneCode),
+        ))
+        .limit(1);
+
+      const zoneLabel = typeof inputZone?.zoneLabel === "string" ? inputZone.zoneLabel.trim() || null : null;
+      const summary = typeof inputZone?.summary === "string" ? inputZone.summary.trim() : "";
+
+      let zone = existingZone;
+      if (!zone) {
+        [zone] = await db.insert(regulatoryCalibrationZonesTable).values({
+          communeId: communeKey,
+          zoneCode,
+          zoneLabel,
+          parentZoneCode: normalizeConfiguredZoneCode(inputZone?.parentZoneCode),
+          sectorCode: typeof inputZone?.sectorCode === "string" ? inputZone.sectorCode.trim() || null : null,
+          guidanceNotes: [
+            summary,
+            inputZone?.zoneType ? `Type : ${inputZone.zoneType || extractNotebookZoneType(zoneCode)}` : `Type : ${extractNotebookZoneType(zoneCode)}`,
+            Array.isArray(inputZone?.warnings) && inputZone.warnings.length ? `Alertes : ${inputZone.warnings.join(" · ")}` : "",
+          ].filter(Boolean).join("\n"),
+          searchKeywords: [zoneCode, zoneLabel].filter(Boolean) as string[],
+          createdBy: req.user!.userId,
+          updatedBy: req.user!.userId,
+        }).returning();
+        createdZones.push(zone);
+      }
+
+      const articles = Array.isArray(inputZone?.articles) ? inputZone.articles : [];
+      for (const article of articles) {
+        const articleNumber = article?.articleNumber ?? article?.article ?? null;
+        const articleTitle = typeof article?.articleTitle === "string" ? article.articleTitle : `Article ${articleNumber || "?"}`;
+        const rules = Array.isArray(article?.rules) ? article.rules : [];
+        const sourceText = [
+          typeof article?.summary === "string" ? article.summary : "",
+          ...rules.map((rule: any) => typeof rule?.ruleText === "string" ? rule.ruleText : "").filter(Boolean),
+        ].filter(Boolean).join("\n\n").trim() || articleTitle;
+
+        const [section] = await db.insert(regulatoryZoneSectionsTable).values({
+          municipalityId: communeKey,
+          zoneCode,
+          parentZoneCode: normalizeConfiguredZoneCode(inputZone?.parentZoneCode),
+          heading: `Zone ${zoneCode} — ${articleTitle}`,
+          sourceText,
+          isSubZone: zoneCode.length > 1 && !["UA", "UB", "UC", "UD", "UE", "AU"].includes(zoneCode),
+          reviewStatus: "to_review",
+          documentType: "NotebookLM",
+          parserVersion,
+          reviewedZoneCode: zoneCode,
+          reviewNotes: [
+            `Import NotebookLM structuré par zone.`,
+            Array.isArray(inputZone?.linkedDocuments) && inputZone.linkedDocuments.length ? `Documents liés : ${JSON.stringify(inputZone.linkedDocuments)}` : "",
+          ].filter(Boolean).join("\n"),
+        }).returning();
+        createdSections.push(section);
+      }
+    }
+
+    return res.status(201).json({
+      municipalityId: communeKey,
+      globalSummary: typeof parsed?.globalSummary === "string" ? parsed.globalSummary : "",
+      importedZoneCount: createdZones.length,
+      importedSectionCount: createdSections.length,
+      parserVersion,
+      differences,
+      transversalRules: Array.isArray(parsed?.transversalRules) ? parsed.transversalRules : [],
+      documentRelations: Array.isArray(parsed?.documentRelations) ? parsed.documentRelations : [],
+    });
+  } catch (err) {
+    logger.error("[mairie/regulatory-calibration/import-zone-analysis POST]", err);
+    return res.status(500).json({ error: "INTERNAL_ERROR", message: "Impossible d'importer l'analyse par zones." });
+  }
+});
+
 router.post("/regulatory-calibration/zones", async (req: AuthRequest, res) => {
   try {
     const access = await resolveAuthorizedTownHallCommune(req.user!.userId, req.body.commune as string | undefined);
@@ -7176,6 +7317,7 @@ router.get("/regulatory-calibration/library", async (req: AuthRequest, res) => {
       resolutionStatus: indexedRegulatoryRulesTable.resolutionStatus,
       linkedRuleCount: indexedRegulatoryRulesTable.linkedRuleCount,
       rawSuggestion: indexedRegulatoryRulesTable.rawSuggestion,
+      documentId: indexedRegulatoryRulesTable.documentId,
       documentTitle: townHallDocumentsTable.title,
     })
       .from(indexedRegulatoryRulesTable)

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Search, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, ClipboardCopy, Eye, FilePenLine, Layers3, LibraryBig, Loader2, MapPin, ScrollText, Search, Send, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -228,12 +228,15 @@ type LibraryResponse = {
     requiresCrossDocumentResolution: boolean;
     resolutionStatus: string;
     linkedRuleCount: number;
+    documentId: string | null;
     documentTitle: string | null;
   }>;
   relations: RuleRelationItem[];
   conflicts: Array<{ id: string; conflictSummary: string; status: string }>;
   history: Array<{ id: string; entityType: string; action: string; fromStatus: string | null; toStatus: string | null; createdAt: string }>;
 };
+
+const NOTEBOOK_ZONE_IMPORT_PROMPT = "Analyse les documents d’urbanisme fournis comme un instructeur confirmé. Ta réponse doit être structurée par zones du PLU/PLUi. Pour chaque zone détectée, liste les articles 1 à 14, résume la règle applicable, identifie les valeurs chiffrées, conditions, exceptions, documents liés, renvois vers documents graphiques, servitudes, SPR, PPRI, OAP ou annexes. Sépare les règles propres à une zone des règles transversales. Signale les incertitudes, conflits de documents, règles absentes ou renvois nécessitant une lecture graphique. Termine par un tableau des contrôles réglementaires exploitables par zone : destination, implantation, hauteur, emprise, stationnement, aspect extérieur, espaces libres, risques, patrimoine et servitudes.";
 
 type OverviewResponse = {
   commune: string;
@@ -746,6 +749,7 @@ export function RegulatoryCalibrationModule({
   const [libraryNormativeFilter, setLibraryNormativeFilter] = useState("all");
   const [libraryProceduralFilter, setLibraryProceduralFilter] = useState("all");
   const [quickRuleInputs, setQuickRuleInputs] = useState<Record<string, string>>({});
+  const [notebookImportText, setNotebookImportText] = useState("");
   const [managedZoneId, setManagedZoneId] = useState<string | null>(null);
   const [editingDetectedRuleId, setEditingDetectedRuleId] = useState<string | null>(null);
   const [detectedRuleDrafts, setDetectedRuleDrafts] = useState<Record<string, ReturnType<typeof buildDetectedRuleEditorDraft>>>({});
@@ -859,6 +863,25 @@ export function RegulatoryCalibrationModule({
       toast({ title: "Zone créée", description: "La zone est prête pour le calibrage." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const importNotebookAnalysisMutation = useMutation({
+    mutationFn: async () => apiFetch("/api/mairie/regulatory-calibration/import-zone-analysis", {
+      method: "POST",
+      body: JSON.stringify({
+        commune: currentCommune,
+        text: notebookImportText,
+      }),
+    }),
+    onSuccess: (payload: any) => {
+      setNotebookImportText("");
+      refreshCalibration();
+      toast({
+        title: "Analyse importée par zones",
+        description: `${payload.importedZoneCount || 0} zone(s), ${payload.importedSectionCount || 0} section(s) à valider.`,
+      });
+    },
+    onError: (err: any) => toast({ title: "Import impossible", description: err.message, variant: "destructive" }),
   });
 
   const deleteZoneMutation = useMutation({
@@ -1328,6 +1351,10 @@ export function RegulatoryCalibrationModule({
   const managedZoneKey = normalizeZoneKey(managedZone?.zoneCode);
   const managedZoneSections = managedZoneKey ? (detectedSectionsByZone.get(managedZoneKey) || []) : [];
   const managedZoneDetectedRules = managedZoneKey ? (detectedRulesByZone.get(managedZoneKey) || []) : [];
+  const managedZoneArticles = Array.from({ length: 14 }, (_, index) => index + 1).map((articleNumber) => ({
+    articleNumber,
+    rules: managedZoneDetectedRules.filter((rule) => rule.articleNumber === articleNumber),
+  }));
 
   const openCalibrationForZone = (args: {
     documentId?: string | null;
@@ -1608,6 +1635,19 @@ export function RegulatoryCalibrationModule({
                   <CardDescription>Corrige ici les articles trouvés avant de les transformer en règles calibrées.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {managedZoneArticles.map(({ articleNumber, rules }) => (
+                      <div key={`${managedZone.id}-article-${articleNumber}`} className="rounded-lg border bg-background p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold">Article {articleNumber}</p>
+                          <Badge variant={rules.length ? "secondary" : "outline"}>{rules.length ? `${rules.length} règle(s)` : "absent"}</Badge>
+                        </div>
+                        <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">
+                          {rules[0]?.sourceExcerpt || rules[0]?.sourceText || "Aucun résumé structuré pour cet article."}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                   {loadingDetectedRules ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Lecture des articles identifiés…</div>
                   ) : managedZoneDetectedRules.length > 0 ? managedZoneDetectedRules.map((rule) => (
@@ -1752,8 +1792,8 @@ export function RegulatoryCalibrationModule({
         {!managedZone && (
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" /> Zones de la commune</CardTitle>
-            <CardDescription>Définis la nomenclature des zones une fois, puis le calibrage vient s’y raccrocher proprement.</CardDescription>
+            <CardTitle className="text-base flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" /> Zones détectées</CardTitle>
+            <CardDescription>Chaque zone PLU/PLUi est structurée, validée et reliée à ses articles, contrôles et documents complémentaires.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 xl:grid-cols-[320px,minmax(0,1fr)]">
             <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
@@ -1794,6 +1834,17 @@ export function RegulatoryCalibrationModule({
                   const zoneKey = normalizeZoneKey(zone.zoneCode);
                   const zoneSections = detectedSectionsByZone.get(zoneKey) || [];
                   const zoneDetectedRules = detectedRulesByZone.get(zoneKey) || [];
+                  const calibratedRules = (libraryData?.rules || []).filter((rule) => normalizeZoneKey(rule.zoneCode) === zoneKey);
+                  const linkedDocumentCount = new Set(calibratedRules.map((rule) => rule.documentTitle).filter(Boolean)).size;
+                  const statusLabel = calibratedRules.some((rule) => rule.status === "published" || rule.status === "validated")
+                    ? "validée"
+                    : calibratedRules.length > 0
+                      ? "complète"
+                      : zoneDetectedRules.length > 0
+                        ? "partiellement structurée"
+                        : zoneSections.length > 0
+                          ? "à valider"
+                          : "détectée";
                   return (
                   <div key={zone.id} className="rounded-xl border bg-background p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1816,8 +1867,14 @@ export function RegulatoryCalibrationModule({
                               {zoneDetectedRules.length} article(s) identifiés
                             </Badge>
                           )}
+                          <Badge variant="outline">{statusLabel}</Badge>
                         </div>
                         <p className="font-medium break-words">{zone.zoneLabel || `Zone ${zone.zoneCode}`}</p>
+                        <div className="flex flex-wrap gap-2 text-[11px]">
+                          <Badge variant="secondary">{calibratedRules.length} règle(s) extraite(s)</Badge>
+                          <Badge variant="secondary">{zoneDetectedRules.length} contrôle(s) généré(s)</Badge>
+                          <Badge variant="secondary">{linkedDocumentCount} document(s) lié(s)</Badge>
+                        </div>
                         {zone.guidanceNotes && <p className="text-sm text-muted-foreground break-words">{zone.guidanceNotes}</p>}
                         {zone.searchKeywords?.length > 0 && (
                           <div className="flex flex-wrap gap-2">
@@ -2158,6 +2215,38 @@ export function RegulatoryCalibrationModule({
       </TabsContent>
 
       <TabsContent value="documents" className="space-y-4">
+        <Card className="border-primary/10 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><ClipboardCopy className="w-4 h-4 text-primary" /> Import NotebookLM par zones</CardTitle>
+            <CardDescription>Utilise ce prompt pour obtenir une sortie structurée par zones PLU, puis colle la réponse JSON ou texte ci-dessous.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                await navigator.clipboard.writeText(NOTEBOOK_ZONE_IMPORT_PROMPT);
+                toast({ title: "Prompt NotebookLM copié" });
+              }}
+            >
+              <ClipboardCopy className="mr-2 h-4 w-4" />
+              Copier le prompt NotebookLM
+            </Button>
+            <Textarea
+              className="min-h-32"
+              placeholder="Collez ici la réponse structurée de NotebookLM..."
+              value={notebookImportText}
+              onChange={(event) => setNotebookImportText(event.target.value)}
+            />
+            <Button
+              disabled={!canEditCalibration || currentCommune === "all" || !notebookImportText.trim() || importNotebookAnalysisMutation.isPending}
+              onClick={() => importNotebookAnalysisMutation.mutate()}
+            >
+              {importNotebookAnalysisMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              Importer l'analyse par zones
+            </Button>
+          </CardContent>
+        </Card>
+
         <Card className="border-primary/10 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2"><UploadCloud className="w-4 h-4 text-primary" /> Documents réglementaires</CardTitle>
