@@ -10,11 +10,13 @@ import { useMutation } from "@tanstack/react-query";
 import { useGeocodeAddress } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { AppShell } from "@/components/layout/AppShell";
-import { DynamicPieceChecklist } from "@/components/dossiers/DynamicPieceChecklist";
 import { getRequiredPieces, normalizeProcedureType } from "@/lib/pieceRequirements";
+import { OfficialPiecesChecklist } from "@/components/dossier/OfficialPiecesChecklist";
+import type { ProjectContext } from "@/lib/urbanisme/cerfa/officialPieces.types";
 
 const DOSSIER_TYPES = [
-  { value: "DP", label: "Déclaration préalable de travaux (DP)" },
+  { value: "DPC", label: "Déclaration préalable constructions/travaux (DPC)" },
+  { value: "DPA", label: "Déclaration préalable installations/aménagements (DPA)" },
   { value: "PCMI", label: "Permis de construire maison individuelle (PCMI)" },
   { value: "PC", label: "Permis de construire autre que maison individuelle (PC)" },
   { value: "PA", label: "Permis d'aménager (PA)" },
@@ -34,9 +36,8 @@ function getAddressCoordinates(address: any) {
 
 function documentTypeForProcedure(type: string) {
   const normalized = normalizeProcedureType(type);
-  if (normalized === "DP") return "declaration_prealable";
+  if (normalized === "DPC" || normalized === "DPA") return "declaration_prealable";
   if (normalized === "PA") return "permis_amenager";
-  if (normalized === "CUA" || normalized === "CUB") return "certificat_urbanisme";
   return "permis_de_construire";
 }
 
@@ -47,6 +48,7 @@ export default function CitoyenNewDossierPage() {
   const [address, setAddress] = useState("");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [docType, setDocType] = useState("PCMI");
+  const [projectFlags, setProjectFlags] = useState<ProjectContext["projectFlags"]>({});
   const [title, setTitle] = useState("");
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
   const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
@@ -146,7 +148,7 @@ export default function CitoyenNewDossierPage() {
     }
 
     try {
-      const pieceChecklist = getRequiredPieces({ procedureType: docType, parcelAnalysis, selectedAddress });
+      const pieceChecklist = getRequiredPieces({ procedureType: docType, parcelAnalysis, selectedAddress, projectDetails: projectFlags });
       const createResponse = await fetch("/api/dossiers", {
         method: "POST",
         credentials: "include",
@@ -168,6 +170,7 @@ export default function CitoyenNewDossierPage() {
             parcelAnalysis,
             locationContext: pieceChecklist.locationContext,
             pieceChecklist,
+            projectFlags,
           },
         }),
       });
@@ -324,12 +327,13 @@ export default function CitoyenNewDossierPage() {
             </Card>
           )}
 
-          <DynamicPieceChecklist
-            procedureType={docType}
+          <OfficialPiecesChecklist
+            dossierType={docType}
             parcelAnalysis={parcelAnalysis}
             selectedAddress={selectedAddress}
+            projectFlags={projectFlags}
+            onProjectFlagsChange={setProjectFlags}
             isAnalyzingLocation={parcelAnalysisLoading}
-            onRetryAnalysis={selectedAddress ? () => setParcelAnalysisRetryToken((value) => value + 1) : undefined}
           />
 
           <Card className="border-none shadow-md">
