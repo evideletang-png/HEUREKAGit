@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { AlertCircle, CheckCircle2, CircleDashed, FileText, MapPinned } from "lucide-react";
+import { AlertCircle, CheckCircle2, CircleDashed, ClipboardCheck, FileText, MapPinned, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,7 @@ import { CERFA_DYNAMIC_QUESTIONS, triggerSourceLabel } from "@/lib/urbanisme/cer
 import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
 import type { ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
 import type { ParcelAnalysisLike } from "@/lib/pieceRequirements";
+import { checkCompleteness, type UploadedDocumentForCompleteness } from "@/lib/urbanisme/compliance/checkCompleteness";
 
 type ProjectFlags = ProjectContext["projectFlags"];
 
@@ -83,6 +84,7 @@ export function OfficialPiecesChecklist({
   selectedAddress,
   projectFlags,
   onProjectFlagsChange,
+  uploadedDocuments = [],
   isAnalyzingLocation = false,
 }: {
   dossierType: string;
@@ -90,6 +92,7 @@ export function OfficialPiecesChecklist({
   selectedAddress?: any | null;
   projectFlags: ProjectFlags;
   onProjectFlagsChange: (flags: ProjectFlags) => void;
+  uploadedDocuments?: UploadedDocumentForCompleteness[];
   isAnalyzingLocation?: boolean;
 }) {
   const dossierTypeNormalized = normalizeOfficialDossierType(dossierType);
@@ -120,6 +123,10 @@ export function OfficialPiecesChecklist({
     },
   }), [dossierTypeNormalized, locationAnalysis, projectFlags]);
   const resolvedPieces = useMemo(() => resolveOfficialPieces(projectContext), [projectContext]);
+  const completeness = useMemo(
+    () => checkCompleteness({ requiredPieces: resolvedPieces, uploadedDocuments }),
+    [resolvedPieces, uploadedDocuments],
+  );
 
   const mandatory = resolvedPieces.filter((piece) => piece.status === "mandatory");
   const required = resolvedPieces.filter((piece) => piece.status === "conditional" && piece.requirementState === "required");
@@ -132,6 +139,12 @@ export function OfficialPiecesChecklist({
     projectContext.locationContext.pprRequiresStudy ? "PPR / risque" : null,
     projectContext.locationContext.lotissement ? "Lotissement" : null,
   ].filter(Boolean);
+  const completenessLabel = completeness.status === "complete" ? "Complet" : completeness.status === "incomplete" ? "Incomplet" : "À vérifier";
+  const completenessClass = completeness.status === "complete"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+    : completeness.status === "incomplete"
+      ? "border-red-200 bg-red-50 text-red-950"
+      : "border-amber-200 bg-amber-50 text-amber-950";
 
   return (
     <Card className="border border-slate-200 bg-slate-50/40 shadow-sm">
@@ -166,6 +179,25 @@ export function OfficialPiecesChecklist({
               Analyse en cours : {projectContext.locationContext.unresolvedChecks.join(", ")}.
             </p>
           ) : null}
+        </div>
+
+        <div className={`rounded-lg border p-3 text-sm ${completenessClass}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="flex items-center gap-2 font-semibold">
+                {completeness.status === "complete" ? <ShieldCheck className="h-4 w-4" /> : <ClipboardCheck className="h-4 w-4" />}
+                État de complétude du dossier
+              </p>
+              <p className="mt-1 text-xs leading-relaxed">{completeness.message}</p>
+              <p className="mt-1 text-[11px] opacity-80">
+                Documents reconnus : {completeness.matchedPieces.length} / {resolvedPieces.filter((piece) => piece.requirementState === "required").length}
+                {" · "}Confiance : {Math.round(completeness.confidenceScore * 100)}%
+              </p>
+            </div>
+            <Badge variant={completeness.status === "complete" ? "default" : completeness.status === "incomplete" ? "destructive" : "outline"} className="w-fit">
+              {completenessLabel}
+            </Badge>
+          </div>
         </div>
 
         {questions.length > 0 ? (
