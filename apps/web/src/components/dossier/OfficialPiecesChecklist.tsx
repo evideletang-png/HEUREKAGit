@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { AlertCircle, CalendarDays, CheckCircle2, CircleDashed, ClipboardCheck, Clock, FileText, MapPinned, ShieldCheck } from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, CircleDashed, ClipboardCheck, Clock, FileText, MapPinned, MessageSquare, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import type { ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/offici
 import type { ParcelAnalysisLike } from "@/lib/pieceRequirements";
 import { checkCompleteness, type UploadedDocumentForCompleteness } from "@/lib/urbanisme/compliance/checkCompleteness";
 import { computeInstructionTimeline } from "@/lib/urbanisme/timeline/computeInstructionTimeline";
+import { resolveConsultations, type Consultation } from "@/lib/urbanisme/consultations/resolveConsultations";
 
 type ProjectFlags = ProjectContext["projectFlags"];
 
@@ -83,6 +84,18 @@ function formatDate(date: Date) {
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(date);
 }
 
+function consultationStatusLabel(status: Consultation["status"]) {
+  if (status === "sent") return "Envoyée";
+  if (status === "received") return "Réponse reçue";
+  return "À envoyer";
+}
+
+function consultationStatusVariant(status: Consultation["status"]): "default" | "secondary" | "outline" {
+  if (status === "received") return "default";
+  if (status === "sent") return "secondary";
+  return "outline";
+}
+
 export function OfficialPiecesChecklist({
   dossierType,
   parcelAnalysis,
@@ -140,6 +153,7 @@ export function OfficialPiecesChecklist({
     }),
     [dossierTypeNormalized, projectContext.locationContext, projectFlags],
   );
+  const consultations = useMemo(() => resolveConsultations(projectContext).consultations, [projectContext]);
 
   const mandatory = resolvedPieces.filter((piece) => piece.status === "mandatory");
   const required = resolvedPieces.filter((piece) => piece.status === "conditional" && piece.requirementState === "required");
@@ -252,6 +266,55 @@ export function OfficialPiecesChecklist({
               {completenessLabel}
             </Badge>
           </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="flex items-center gap-2 font-semibold text-slate-900">
+                <MessageSquare className="h-4 w-4" />
+                Consultations
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Services à consulter selon les contraintes détectées et les réponses du dossier. Les cibles sont prêtes pour la messagerie du dossier.
+              </p>
+            </div>
+            <Badge variant={consultations.length > 0 ? "secondary" : "outline"} className="w-fit">
+              {consultations.length > 0 ? `${consultations.length} consultation${consultations.length > 1 ? "s" : ""}` : "Aucune obligatoire"}
+            </Badge>
+          </div>
+          {consultations.length > 0 ? (
+            <div className="mt-3 grid gap-2">
+              {consultations.map((consultation) => (
+                <div key={consultation.service} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className="rounded-md">{consultation.service}</Badge>
+                        <Badge variant={consultationStatusVariant(consultation.status)} className="rounded-md">
+                          {consultationStatusLabel(consultation.status)}
+                        </Badge>
+                        {consultation.messagingTarget ? (
+                          <Badge variant="outline" className="rounded-md">
+                            Messagerie {consultation.messagingTarget}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-xs leading-relaxed text-slate-700">{consultation.reason}</p>
+                    </div>
+                    <div className="min-w-[150px] text-xs text-slate-500 sm:text-right">
+                      <p>Envoi : {consultation.sentAt ? formatDate(new Date(consultation.sentAt)) : "non envoyé"}</p>
+                      <p>Réponse : {consultation.response || (consultation.receivedAt ? formatDate(new Date(consultation.receivedAt)) : "en attente")}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+              Aucune consultation obligatoire détectée à ce stade. Le bloc sera recalculé si l'adresse, les contraintes ou les réponses du projet changent.
+            </p>
+          )}
         </div>
 
         {questions.length > 0 ? (
