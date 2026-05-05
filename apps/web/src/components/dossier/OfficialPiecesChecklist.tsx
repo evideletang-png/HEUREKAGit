@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { AlertCircle, CheckCircle2, CircleDashed, ClipboardCheck, FileText, MapPinned, ShieldCheck } from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, CircleDashed, ClipboardCheck, Clock, FileText, MapPinned, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urban
 import type { ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
 import type { ParcelAnalysisLike } from "@/lib/pieceRequirements";
 import { checkCompleteness, type UploadedDocumentForCompleteness } from "@/lib/urbanisme/compliance/checkCompleteness";
+import { computeInstructionTimeline } from "@/lib/urbanisme/timeline/computeInstructionTimeline";
 
 type ProjectFlags = ProjectContext["projectFlags"];
 
@@ -78,6 +79,10 @@ function PieceGroup({ title, pieces, empty }: { title: string; pieces: ResolvedP
   );
 }
 
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "long", year: "numeric" }).format(date);
+}
+
 export function OfficialPiecesChecklist({
   dossierType,
   parcelAnalysis,
@@ -126,6 +131,14 @@ export function OfficialPiecesChecklist({
   const completeness = useMemo(
     () => checkCompleteness({ requiredPieces: resolvedPieces, uploadedDocuments }),
     [resolvedPieces, uploadedDocuments],
+  );
+  const instructionTimeline = useMemo(
+    () => computeInstructionTimeline({
+      dossierType: dossierTypeNormalized === "DPC" || dossierTypeNormalized === "DPA" ? "DP" : dossierTypeNormalized,
+      locationContext: projectContext.locationContext,
+      projectFlags,
+    }),
+    [dossierTypeNormalized, projectContext.locationContext, projectFlags],
   );
 
   const mandatory = resolvedPieces.filter((piece) => piece.status === "mandatory");
@@ -179,6 +192,47 @@ export function OfficialPiecesChecklist({
               Analyse en cours : {projectContext.locationContext.unresolvedChecks.join(", ")}.
             </p>
           ) : null}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="flex items-center gap-2 font-semibold text-slate-900">
+                <Clock className="h-4 w-4" />
+                Délai d'instruction estimé
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Délai de base : {instructionTimeline.baseDelay} mois
+                {instructionTimeline.additionalDelays.length > 0 ? ` · majorations : +${instructionTimeline.totalDelay - instructionTimeline.baseDelay} mois` : ""}
+              </p>
+            </div>
+            <div className="rounded-md bg-slate-50 px-3 py-2 text-left sm:text-right">
+              <p className="flex items-center gap-1 text-xs font-medium text-slate-500 sm:justify-end">
+                <CalendarDays className="h-3.5 w-3.5" />
+                Date limite de décision
+              </p>
+              <p className="text-sm font-bold text-slate-950">{formatDate(instructionTimeline.legalDeadlineDate)}</p>
+            </div>
+          </div>
+          <div className="mt-3 space-y-2 border-l border-slate-200 pl-3">
+            <div className="relative">
+              <span className="absolute -left-[19px] top-1 h-2.5 w-2.5 rounded-full bg-slate-700" />
+              <p className="text-xs font-semibold text-slate-800">Délai réglementaire de base</p>
+              <p className="text-xs text-slate-500">{instructionTimeline.baseDelay} mois selon le type de dossier {dossierTypeNormalized}.</p>
+            </div>
+            {instructionTimeline.additionalDelays.map((delay) => (
+              <div key={`${delay.reason}-${delay.source}`} className="relative">
+                <span className="absolute -left-[19px] top-1 h-2.5 w-2.5 rounded-full bg-amber-600" />
+                <p className="text-xs font-semibold text-slate-800">+{delay.duration} mois · {delay.reason}</p>
+                <p className="text-xs text-slate-500">Source : {delay.source}</p>
+              </div>
+            ))}
+            <div className="relative">
+              <span className="absolute -left-[19px] top-1 h-2.5 w-2.5 rounded-full bg-emerald-700" />
+              <p className="text-xs font-semibold text-slate-800">Total estimé : {instructionTimeline.totalDelay} mois</p>
+              <p className="text-xs text-slate-500">À compter de la réception d'un dossier complet.</p>
+            </div>
+          </div>
         </div>
 
         <div className={`rounded-lg border p-3 text-sm ${completenessClass}`}>
