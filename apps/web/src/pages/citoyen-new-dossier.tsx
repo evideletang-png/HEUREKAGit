@@ -57,6 +57,15 @@ export default function CitoyenNewDossierPage() {
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
   const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
+  const uploadedDocumentsForCompleteness = useMemo(
+    () => files.map((file) => ({
+      filename: file.name,
+      type: file.type,
+      detectedCode: file.name.match(/\b(?:PCMI|DPC|DPA|PC|PA|PD)\s*[-_ ]?\s*\d+(?:-\d+)?\b/i)?.[0]?.replace(/\s+/g, "").replace("_", "-"),
+      confidence: file.name.match(/\b(?:PCMI|DPC|DPA|PC|PA|PD)\s*[-_ ]?\s*\d+(?:-\d+)?\b/i) ? 0.78 : undefined,
+    })),
+    [files],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -333,6 +342,7 @@ export default function CitoyenNewDossierPage() {
             selectedAddress={selectedAddress}
             projectFlags={projectFlags}
             onProjectFlagsChange={setProjectFlags}
+            uploadedDocuments={uploadedDocumentsForCompleteness}
             isAnalyzingLocation={parcelAnalysisLoading}
           />
 
