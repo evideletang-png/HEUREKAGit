@@ -1114,6 +1114,7 @@ const TOWN_HALL_UPLOADS_STORAGE_KEY = "town-hall-base-ia-uploads-v1";
 const TOWN_HALL_UPLOADS_DB_NAME = "heureka-town-hall-uploads";
 const TOWN_HALL_UPLOADS_STORE = "files";
 const DEFAULT_TOWN_HALL_CHUNK_SIZE = 5 * 1024 * 1024;
+const MAX_PARALLEL_TOWN_HALL_UPLOADS = 3;
 
 function readPersistedTownHallUploads(): ResumableTownHallUpload[] {
   if (typeof window === "undefined") return [];
@@ -1417,47 +1418,73 @@ function BaseIASection({ currentCommune }: { currentCommune: string }) {
   };
 
   const startUpload = async ({ files, category, subCategory, docType }: { files: File[], category?: string, subCategory?: string, docType?: string }) => {
+    const uploadQueue: Array<{ session: ResumableTownHallUpload; file: File }> = [];
+
     for (const file of files) {
-      const mimeType = inferTownHallUploadMimeType(file);
-      const initResponse = await fetch("/api/mairie/documents/uploads/init", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      try {
+        const mimeType = inferTownHallUploadMimeType(file);
+        const initResponse = await fetch("/api/mairie/documents/uploads/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileSize: file.size,
+            mimeType,
+            category,
+            subCategory,
+            documentType: docType,
+            commune: currentCommune !== "all" ? currentCommune : undefined,
+          }),
+        });
+        const initData = await initResponse.json().catch(() => ({}));
+        if (!initResponse.ok) {
+          throw new Error(initData.message || "Impossible d'initialiser l'upload.");
+        }
+
+        const uploadSession: ResumableTownHallUpload = {
+          sessionId: initData.sessionId,
           fileName: file.name,
           fileSize: file.size,
           mimeType,
+          commune: initData.targetCommune || currentCommune,
           category,
           subCategory,
-          documentType: docType,
-          commune: currentCommune !== "all" ? currentCommune : undefined,
-        }),
-      });
-      const initData = await initResponse.json().catch(() => ({}));
-      if (!initResponse.ok) {
-        throw new Error(initData.message || "Impossible d'initialiser l'upload.");
+          docType,
+          title: file.name,
+          receivedBytes: initData.receivedBytes || 0,
+          totalBytes: initData.totalBytes || file.size,
+          chunkSize: initData.chunkSize || DEFAULT_TOWN_HALL_CHUNK_SIZE,
+          status: initData.status || "uploading",
+          updatedAt: new Date().toISOString(),
+        };
+
+        await saveTownHallUploadBlob(uploadSession.sessionId, file);
+        syncUploadState(uploadSession);
+        uploadQueue.push({ session: uploadSession, file });
+      } catch (err: any) {
+        toast({
+          title: "Upload non initialisé",
+          description: `${file.name} : ${err?.message || "Impossible de préparer cet upload."}`,
+          variant: "destructive",
+        });
       }
-
-      const uploadSession: ResumableTownHallUpload = {
-        sessionId: initData.sessionId,
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType,
-        commune: initData.targetCommune || currentCommune,
-        category,
-        subCategory,
-        docType,
-        title: file.name,
-        receivedBytes: initData.receivedBytes || 0,
-        totalBytes: initData.totalBytes || file.size,
-        chunkSize: initData.chunkSize || DEFAULT_TOWN_HALL_CHUNK_SIZE,
-        status: initData.status || "uploading",
-        updatedAt: new Date().toISOString(),
-      };
-
-      await saveTownHallUploadBlob(uploadSession.sessionId, file);
-      syncUploadState(uploadSession);
-      await resumeUpload(uploadSession, file);
     }
+
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(MAX_PARALLEL_TOWN_HALL_UPLOADS, uploadQueue.length) }, async () => {
+      while (cursor < uploadQueue.length) {
+        const next = uploadQueue[cursor++];
+        if (next) await resumeUpload(next.session, next.file);
+      }
+    });
+
+    void Promise.all(workers).catch((err: any) => {
+      toast({
+        title: "Upload interrompu",
+        description: err?.message || "Un ou plusieurs documents n'ont pas pu etre envoyes.",
+        variant: "destructive",
+      });
+    });
   };
 
   const updateNoteMutation = useMutation({
