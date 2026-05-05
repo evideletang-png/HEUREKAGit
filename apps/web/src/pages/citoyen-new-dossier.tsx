@@ -11,7 +11,7 @@ import { useGeocodeAddress } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { AppShell } from "@/components/layout/AppShell";
 import { DynamicPieceChecklist } from "@/components/dossiers/DynamicPieceChecklist";
-import { normalizeProcedureType } from "@/lib/pieceRequirements";
+import { getRequiredPieces, normalizeProcedureType } from "@/lib/pieceRequirements";
 
 const DOSSIER_TYPES = [
   { value: "DP", label: "Déclaration préalable de travaux (DP)" },
@@ -50,6 +50,8 @@ export default function CitoyenNewDossierPage() {
   const [title, setTitle] = useState("");
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
   const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
+  const [parcelAnalysisLoading, setParcelAnalysisLoading] = useState(false);
+  const [parcelAnalysisRetryToken, setParcelAnalysisRetryToken] = useState(0);
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
   const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
@@ -59,8 +61,10 @@ export default function CitoyenNewDossierPage() {
     async function loadParcelPreview() {
       setParcelAnalysis(null);
       setParcelAnalysisError(null);
+      setParcelAnalysisLoading(false);
       if (!selectedAddress || selectedCoordinates.lat === null || selectedCoordinates.lon === null) return;
       try {
+        setParcelAnalysisLoading(true);
         const response = await fetch("/api/analyses/parcel-preview", {
           method: "POST",
           credentials: "include",
@@ -79,6 +83,8 @@ export default function CitoyenNewDossierPage() {
           const primaryParcel = preview.primaryParcel || preview.parcels?.[0] || {};
           setParcelAnalysis({
             ...preview,
+            constraints: preview.constraints || preview.geoConstraints || [],
+            geoConstraints: preview.geoConstraints || preview.constraints || [],
             parcelRef: primaryParcel.parcelRef || primaryParcel.id || selectedAddress.parcelles?.[0] || null,
             parcelId: primaryParcel.id || null,
             section: primaryParcel.section || null,
@@ -94,11 +100,13 @@ export default function CitoyenNewDossierPage() {
         }
       } catch (error) {
         if (!cancelled) setParcelAnalysisError(error instanceof Error ? error.message : "Analyse parcelle indisponible");
+      } finally {
+        if (!cancelled) setParcelAnalysisLoading(false);
       }
     }
     loadParcelPreview();
     return () => { cancelled = true; };
-  }, [selectedAddress, selectedCoordinates.lat, selectedCoordinates.lon]);
+  }, [selectedAddress, selectedCoordinates.lat, selectedCoordinates.lon, parcelAnalysisRetryToken]);
 
   const upload = useMutation({
     mutationFn: async ({ formData, dossierId }: { formData: FormData; dossierId: string }) => {
@@ -138,6 +146,7 @@ export default function CitoyenNewDossierPage() {
     }
 
     try {
+      const pieceChecklist = getRequiredPieces({ procedureType: docType, parcelAnalysis, selectedAddress });
       const createResponse = await fetch("/api/dossiers", {
         method: "POST",
         credentials: "include",
@@ -157,6 +166,8 @@ export default function CitoyenNewDossierPage() {
               lon: selectedCoordinates.lon,
             },
             parcelAnalysis,
+            locationContext: pieceChecklist.locationContext,
+            pieceChecklist,
           },
         }),
       });
@@ -240,7 +251,11 @@ export default function CitoyenNewDossierPage() {
                     value={address}
                     onChange={e => {
                       setAddress(e.target.value);
-                      if (selectedAddress) setSelectedAddress(null);
+                      if (selectedAddress) {
+                        setSelectedAddress(null);
+                        setParcelAnalysis(null);
+                        setParcelAnalysisError(null);
+                      }
                     }}
                     className="h-11 pl-10"
                     autoComplete="off"
@@ -302,14 +317,20 @@ export default function CitoyenNewDossierPage() {
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-3">
                 <div><p className="text-xs font-medium text-muted-foreground">Commune</p><p className="font-semibold">{selectedAddress.city || "Non déterminée"}</p></div>
-                <div><p className="text-xs font-medium text-muted-foreground">Parcelle</p><p className="font-semibold">{parcelAnalysis?.parcelRef || "En recherche"}</p></div>
-                <div><p className="text-xs font-medium text-muted-foreground">Zone</p><p className="font-semibold">{parcelAnalysis?.zoneCode ? `Zone ${parcelAnalysis.zoneCode}` : "En recherche"}</p></div>
+                <div><p className="text-xs font-medium text-muted-foreground">Parcelle</p><p className="font-semibold">{parcelAnalysis?.parcelRef || (parcelAnalysisLoading ? "En recherche" : "Non déterminée")}</p></div>
+                <div><p className="text-xs font-medium text-muted-foreground">Zone</p><p className="font-semibold">{parcelAnalysis?.zoneCode ? `Zone ${parcelAnalysis.zoneCode}` : parcelAnalysisLoading ? "En recherche" : "Non déterminée"}</p></div>
                 {parcelAnalysisError ? <p className="sm:col-span-3 text-sm text-amber-700">{parcelAnalysisError}. Le dossier sera transmis avec l'adresse et les coordonnées disponibles.</p> : null}
               </CardContent>
             </Card>
           )}
 
-          <DynamicPieceChecklist procedureType={docType} parcelAnalysis={parcelAnalysis} />
+          <DynamicPieceChecklist
+            procedureType={docType}
+            parcelAnalysis={parcelAnalysis}
+            selectedAddress={selectedAddress}
+            isAnalyzingLocation={parcelAnalysisLoading}
+            onRetryAnalysis={selectedAddress ? () => setParcelAnalysisRetryToken((value) => value + 1) : undefined}
+          />
 
           <Card className="border-none shadow-md">
             <CardHeader>
