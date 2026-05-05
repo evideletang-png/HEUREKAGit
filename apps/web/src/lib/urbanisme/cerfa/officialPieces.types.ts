@@ -59,6 +59,7 @@ export interface ProjectContext {
     iotaDeclaration?: boolean;
     environmentalAuthorization?: boolean;
     protectedSpeciesDerogation?: boolean;
+    erp?: boolean;
     accessibilityDerogation?: boolean;
     energyExemplarityDerogation?: boolean;
     gabaritDerogation?: boolean;
@@ -74,6 +75,7 @@ export interface ProjectContext {
     campingOrTourismFacility?: boolean;
     permanentRemovableResidences?: boolean;
     roadOrPublicSpaceModification?: boolean;
+    metropoleCompetence?: boolean;
     treeCuttingOrProtectedElement?: boolean;
   };
   locationContext: {
