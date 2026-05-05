@@ -1,10 +1,21 @@
+import { resolveAdditionalPieces, type AdditionalPiece } from "./additionalPiecesResolver";
+import { analyzeLocationContext, type LocationConstraintContext } from "./locationContextAnalyzer";
+
 export type PieceRequirementLevel = "obligatoire" | "recommandée" | "à vérifier" | "déclenchée par contexte local";
+
+export type PieceRequirementCategory = "main" | "project" | "location" | "vigilance";
 
 export type PieceRequirement = {
   code: string;
   label: string;
   level: PieceRequirementLevel;
+  category?: PieceRequirementCategory;
   reason?: string;
+  source?: string;
+  confidence?: number;
+  required?: boolean;
+  blockingIfMissing?: boolean;
+  trigger?: string;
 };
 
 export type ParcelAnalysisLike = {
@@ -13,6 +24,8 @@ export type ParcelAnalysisLike = {
   zoningLabel?: string | null;
   constraints?: unknown[];
   overlays?: unknown[];
+  geoConstraints?: unknown[];
+  [key: string]: unknown;
 };
 
 const BASE_PIECES: Record<string, PieceRequirement[]> = {
@@ -25,7 +38,7 @@ const BASE_PIECES: Record<string, PieceRequirement[]> = {
     ["PCMI6", "Document graphique d'insertion"],
     ["PCMI7", "Photographie environnement proche"],
     ["PCMI8", "Photographie environnement lointain"],
-  ].map(([code, label]) => ({ code, label, level: "obligatoire" })),
+  ].map(([code, label]) => ({ code, label, level: "obligatoire", category: "main", source: "CERFA PCMI" })),
   PC: [
     ["PC1", "Plan de situation"],
     ["PC2", "Plan de masse"],
@@ -35,45 +48,87 @@ const BASE_PIECES: Record<string, PieceRequirement[]> = {
     ["PC6", "Document graphique d'insertion"],
     ["PC7", "Photographie environnement proche"],
     ["PC8", "Photographie environnement lointain"],
-  ].map(([code, label]) => ({ code, label, level: "obligatoire" })),
+  ].map(([code, label]) => ({ code, label, level: "obligatoire", category: "main", source: "CERFA PC" })),
   DP: [
-    ["DP1", "Plan de situation"],
-    ["DP2", "Plan de masse si création ou modification"],
-    ["DP3", "Plan en coupe si modification du profil"],
-    ["DP4", "Façades/toitures si modification extérieure"],
-    ["DP6", "Insertion graphique si visible depuis l'espace public"],
-    ["DP7", "Photographie environnement proche"],
-    ["DP8", "Photographie environnement lointain"],
-  ].map(([code, label]) => ({ code, label, level: code === "DP1" ? "obligatoire" : "à vérifier" })),
+    ["DP1", "Plan de situation", "obligatoire"],
+    ["DP2", "Plan de masse si création ou modification", "à vérifier"],
+    ["DP3", "Plan en coupe si modification du profil", "à vérifier"],
+    ["DP4", "Façades/toitures si modification extérieure", "à vérifier"],
+    ["DP6", "Insertion graphique si visible depuis l'espace public", "à vérifier"],
+    ["DP7", "Photographie environnement proche", "à vérifier"],
+    ["DP8", "Photographie environnement lointain", "à vérifier"],
+  ].map(([code, label, level]) => ({ code, label, level: level as PieceRequirementLevel, category: "main", source: "CERFA DP" })),
   PA: [
     ["PA1", "Plan de situation"],
     ["PA2", "Notice descriptive du terrain et du projet"],
     ["PA3", "Plan de l'état actuel du terrain"],
     ["PA4", "Plan de composition d'ensemble"],
-  ].map(([code, label]) => ({ code, label, level: "obligatoire" })),
+  ].map(([code, label]) => ({ code, label, level: "obligatoire", category: "main", source: "CERFA PA" })),
   PD: [
     ["PD1", "Plan de situation"],
     ["PD2", "Plan de masse des constructions à démolir"],
     ["PD3", "Photographies du bâtiment"],
-  ].map(([code, label]) => ({ code, label, level: "obligatoire" })),
+  ].map(([code, label]) => ({ code, label, level: "obligatoire", category: "main", source: "CERFA PD" })),
   CUA: [
     ["CU1", "Plan de situation"],
-  ].map(([code, label]) => ({ code, label, level: "obligatoire" })),
+  ].map(([code, label]) => ({ code, label, level: "obligatoire", category: "main", source: "CERFA CUa" })),
   CUB: [
     ["CU1", "Plan de situation"],
     ["CU2", "Description de l'opération"],
     ["CU3", "Plan du terrain"],
-  ].map(([code, label]) => ({ code, label, level: "obligatoire" })),
+  ].map(([code, label]) => ({ code, label, level: "obligatoire", category: "main", source: "CERFA CUb" })),
 };
 
-function textFromContext(parcelAnalysis?: ParcelAnalysisLike | null, constraints?: unknown[]) {
-  return JSON.stringify({
-    constraints: constraints || parcelAnalysis?.constraints || [],
-    overlays: parcelAnalysis?.overlays || [],
-    zoneCode: parcelAnalysis?.zoneCode,
-    zoneLabel: parcelAnalysis?.zoneLabel || parcelAnalysis?.zoningLabel,
-  }).toLowerCase();
-}
+const PROJECT_CONDITIONAL_PIECES: Record<string, PieceRequirement[]> = {
+  PCMI: [
+    {
+      code: "PROJET-EXT",
+      label: "Plans avant/après et cohérence des surfaces créées",
+      level: "à vérifier",
+      category: "project",
+      reason: "À fournir si le projet modifie l'existant ou crée de la surface.",
+      source: "Analyse du projet déclaré",
+      confidence: 0.55,
+    },
+  ],
+  PC: [
+    {
+      code: "PROJET-ACCESS",
+      label: "Justification des accès, stationnements et espaces extérieurs",
+      level: "à vérifier",
+      category: "project",
+      reason: "Pièce utile selon destination, ampleur du projet et règlement local.",
+      source: "Analyse du projet déclaré",
+      confidence: 0.55,
+    },
+  ],
+  DP: [
+    {
+      code: "PROJET-VISIBLE",
+      label: "Photographies et insertion si le projet est visible depuis l'espace public",
+      level: "à vérifier",
+      category: "project",
+      reason: "Les pièces DP varient selon la nature exacte des travaux.",
+      source: "CERFA DP / conditions projet",
+      confidence: 0.6,
+    },
+  ],
+  PA: [],
+  PD: [],
+  CUA: [],
+  CUB: [
+    {
+      code: "PROJET-CUB-OPERATION",
+      label: "Description précise de l'opération envisagée",
+      level: "obligatoire",
+      category: "project",
+      reason: "Nécessaire pour un certificat d'urbanisme opérationnel.",
+      source: "CERFA CUb",
+      confidence: 0.9,
+      blockingIfMissing: true,
+    },
+  ],
+};
 
 export function normalizeProcedureType(value: string | null | undefined) {
   const raw = String(value || "").trim();
@@ -87,39 +142,58 @@ export function normalizeProcedureType(value: string | null | undefined) {
   return raw.toUpperCase();
 }
 
+function toPieceRequirement(piece: AdditionalPiece): PieceRequirement {
+  return {
+    code: piece.code,
+    label: piece.label,
+    level: piece.required ? "déclenchée par contexte local" : "recommandée",
+    category: "location",
+    reason: piece.reason,
+    source: piece.source,
+    confidence: piece.confidence,
+    required: piece.required,
+    blockingIfMissing: piece.blockingIfMissing,
+    trigger: piece.trigger,
+  };
+}
+
 export function getRequiredPieces(args: {
   procedureType: string;
   parcelAnalysis?: ParcelAnalysisLike | null;
+  selectedAddress?: any | null;
+  addressLabel?: string | null;
   zone?: { zoneCode?: string | null; zoneType?: string | null; constraints?: unknown[] } | null;
   constraints?: unknown[];
 }) {
   const procedureType = normalizeProcedureType(args.procedureType);
   const requiredPieces = BASE_PIECES[procedureType] || [];
-  const context = textFromContext(args.parcelAnalysis, args.constraints);
-  const conditionalPieces: PieceRequirement[] = [];
-  const warnings: string[] = [];
+  const projectConditionalPieces = PROJECT_CONDITIONAL_PIECES[procedureType] || [];
+  const locationContext = analyzeLocationContext({
+    selectedAddress: args.selectedAddress,
+    addressLabel: args.addressLabel,
+    parcelAnalysis: {
+      ...(args.parcelAnalysis || {}),
+      constraints: args.constraints || args.parcelAnalysis?.constraints,
+      zoneCode: args.parcelAnalysis?.zoneCode || args.zone?.zoneCode,
+    },
+  });
+  const resolved = resolveAdditionalPieces({ procedureType, locationContext, basePieces: requiredPieces });
+  const locationAdditionalPieces = resolved.pieces.map(toPieceRequirement);
+  const warnings = [...resolved.vigilance];
 
-  if (/(abf|spr|patrimonial|monument|historique)/i.test(context)) {
-    conditionalPieces.push(
-      { code: "PATRIMOINE-1", label: "Notice matériaux détaillée", level: "déclenchée par contexte local", reason: "ABF / SPR / patrimoine détecté" },
-      { code: "PATRIMOINE-2", label: "Photographies complémentaires et insertion renforcée", level: "recommandée", reason: "Contexte patrimonial" },
-    );
-  }
-  if (/(ppri|inond|risque)/i.test(context)) {
-    conditionalPieces.push({ code: "RISQUE-1", label: "Notice de prise en compte du risque", level: "à vérifier", reason: "PPRI ou risque détecté" });
-  }
-  if (/(cavit|géotech|geotech|mouvement)/i.test(context)) {
-    conditionalPieces.push({ code: "CAVITES-1", label: "Étude ou justificatif géotechnique", level: "à vérifier", reason: "Cavités ou mouvement de terrain potentiels" });
-  }
-  if (/(spr|abf|patrimoine)/i.test(JSON.stringify(args.zone || {}).toLowerCase())) {
-    conditionalPieces.push({ code: "ZONE-PATRIMOINE", label: "Justification d'insertion patrimoniale", level: "déclenchée par contexte local", reason: "Contrainte de zone ou document lié" });
-  }
-  if (!args.parcelAnalysis?.zoneCode && !args.zone?.zoneCode) warnings.push("Zone PLU non déterminée : certaines pièces locales restent à vérifier.");
+  if (!locationContext.pluZone.code) warnings.push("Checklist provisoire : à confirmer après identification du zonage et des servitudes.");
 
   return {
     requiredPieces,
-    conditionalPieces,
-    missingContext: args.parcelAnalysis ? [] : ["Analyse parcelle non disponible"],
+    projectConditionalPieces,
+    conditionalPieces: [...projectConditionalPieces, ...locationAdditionalPieces],
+    locationAdditionalPieces,
+    vigilancePoints: warnings,
+    locationContext,
+    missingContext: locationContext.missingData,
     warnings,
   };
 }
+
+export type RequiredPiecesResult = ReturnType<typeof getRequiredPieces>;
+export type { LocationConstraintContext };

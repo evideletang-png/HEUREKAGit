@@ -31,6 +31,7 @@ import { loadRegulatoryUnits, buildArticlesFromRegulatoryUnits } from "../servic
 import { buildArticlesFromUrbanRules, loadStructuredRulesForAnalysis } from "../services/urbanRuleExtractionService.js";
 import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "../services/municipalityAliasService.js";
 import { generateCadastralExtractPDF } from "../services/cadastralExtractService.js";
+import { fetchGeoConstraints } from "../services/geoConstraintsService.js";
 
 const router: IRouter = Router();
 
@@ -312,7 +313,16 @@ router.post("/parcel-preview", authenticate, async (req: AuthRequest, res) => {
       console.warn("[analyses/parcel-preview] zoning preview unavailable:", zoningErr);
     }
 
-    res.json({ ...preview, zoningPreview });
+    let geoConstraints: Awaited<ReturnType<typeof fetchGeoConstraints>> = [];
+    try {
+      const previewAny = preview as any;
+      const primaryParcel = previewAny.primaryParcel || previewAny.parcels?.[0] || {};
+      geoConstraints = await fetchGeoConstraints(lat, lng, primaryParcel.geometry || primaryParcel.shape || previewAny.parcelGeometry);
+    } catch (constraintsErr) {
+      console.warn("[analyses/parcel-preview] geo constraints unavailable:", constraintsErr);
+    }
+
+    res.json({ ...preview, zoningPreview, geoConstraints, constraints: geoConstraints });
   } catch (err) {
     console.error("[analyses/parcel-preview]", err);
     res.status(500).json({ error: "PARCEL_PREVIEW_FAILED", message: "Impossible de précharger les parcelles autour de l'adresse." });
