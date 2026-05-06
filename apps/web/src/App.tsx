@@ -34,6 +34,9 @@ import DemoMairie from "@/pages/demo/demo-mairie";
 import DemoMetropole from "@/pages/demo/demo-metropole";
 import DemoAbf from "@/pages/demo/demo-abf";
 import DemoSdis from "@/pages/demo/demo-sdis";
+import DemoScenarioPage from "@/pages/demo/demo-scenario";
+import { DemoRuntime } from "@/components/demo/DemoRuntime";
+import { isDemoRouteEnabled } from "@/demo/demoRoutes";
 import { professionalPlaceholderFromRoute } from "@/pages/professional-placeholder";
 
 const MairieDocumentsOpposablesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/documents-opposables");
@@ -65,6 +68,8 @@ const queryClient = new QueryClient({
 });
 
 function Router() {
+  const demoRoutesEnabled = isDemoRouteEnabled();
+
   return (
     <Switch>
       <Route path="/" component={LandingPage} />
@@ -119,12 +124,13 @@ function Router() {
       <Route path="/recours" component={AppealsPage} />
       <Route path="/recours/:id" component={AppealDetailPage} />
 
-      <Route path="/demo" component={DemoHome} />
-      <Route path="/demo/citoyen" component={DemoCitoyen} />
-      <Route path="/demo/mairie" component={DemoMairie} />
-      <Route path="/demo/metropole" component={DemoMetropole} />
-      <Route path="/demo/abf" component={DemoAbf} />
-      <Route path="/demo/sdis" component={DemoSdis} />
+      {demoRoutesEnabled && <Route path="/demo/scenario" component={DemoScenarioPage} />}
+      {demoRoutesEnabled && <Route path="/demo" component={DemoHome} />}
+      {demoRoutesEnabled && <Route path="/demo/citoyen" component={DemoCitoyen} />}
+      {demoRoutesEnabled && <Route path="/demo/mairie" component={DemoMairie} />}
+      {demoRoutesEnabled && <Route path="/demo/metropole" component={DemoMetropole} />}
+      {demoRoutesEnabled && <Route path="/demo/abf" component={DemoAbf} />}
+      {demoRoutesEnabled && <Route path="/demo/sdis" component={DemoSdis} />}
 
       <Route component={NotFound} />
     </Switch>
@@ -138,6 +144,7 @@ function App() {
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <Router />
+            <DemoRuntime />
           </WouterRouter>
           <Toaster />
         </TooltipProvider>

@@ -20,6 +20,8 @@ import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { ZoneFirstCalibrationModule } from "@/components/mairie/ZoneFirstCalibrationModule";
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
+import { DEMO_DOSSIER_ID, getDemoDossierForStatus } from "@/demo/demoSeedData";
+import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 
 type Dossier = {
   id: string;
@@ -3058,19 +3060,38 @@ export default function PortailMairiePage() {
 
   const { data: dossiersData, isLoading: loadingDossiers } = useQuery<{ dossiers: Dossier[] }>({
     queryKey: ["mairie-dossiers", selectedCommune],
-    queryFn: () => apiFetch(`/api/mairie/dossiers${selectedCommune !== "all" ? `?commune=${encodeURIComponent(selectedCommune)}` : ""}`),
+    queryFn: async () => {
+      if (isDemoSessionActive()) {
+        return { dossiers: [getDemoDossierForStatus(readDemoState().dossierStatus) as any as Dossier] };
+      }
+      return apiFetch(`/api/mairie/dossiers${selectedCommune !== "all" ? `?commune=${encodeURIComponent(selectedCommune)}` : ""}`);
+    },
     enabled: !!isAuthenticated && ((user?.role as string) === "mairie" || (user?.role as string) === "admin"),
   });
 
   const { data: detail, isLoading: loadingDetail } = useQuery<DossierDetail>({
     queryKey: ["mairie-dossier", selectedId],
-    queryFn: () => apiFetch(`/api/mairie/dossiers/${selectedId}`),
+    queryFn: () => {
+      if (isDemoSessionActive() && selectedId === DEMO_DOSSIER_ID) {
+        return Promise.resolve(getDemoDossierForStatus(readDemoState().dossierStatus) as any as DossierDetail);
+      }
+      return apiFetch(`/api/mairie/dossiers/${selectedId}`);
+    },
     enabled: !!selectedId,
   });
 
   const { data: globalSummary, isLoading: loadingSummary } = useQuery<{ summary: string; global_status: string; recommendations: string[] }>({
     queryKey: ["mairie-dossier-summary", selectedId],
-    queryFn: () => apiFetch(`/api/mairie/dossiers/${selectedId}/summary`),
+    queryFn: () => {
+      if (isDemoSessionActive() && selectedId === DEMO_DOSSIER_ID) {
+        return Promise.resolve({
+          summary: "Dossier PCMI complet, contraintes patrimoniales identifiees, avis ABF favorable avec prescription.",
+          global_status: "FAVORABLE_AVEC_PRESCRIPTIONS",
+          recommendations: ["Preparer l'accord avec prescriptions", "Envoyer au parapheur mock demo"],
+        });
+      }
+      return apiFetch(`/api/mairie/dossiers/${selectedId}/summary`);
+    },
     enabled: !!selectedId && activeDossierTab === "summary",
   });
 

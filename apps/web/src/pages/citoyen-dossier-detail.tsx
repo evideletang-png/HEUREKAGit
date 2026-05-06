@@ -20,6 +20,9 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { AppShell } from "@/components/layout/AppShell";
+import { DEMO_DOSSIER_ID, getDemoDossierForStatus } from "@/demo/demoSeedData";
+import { getDemoSeedMessages } from "@/demo/demoOrchestrator";
+import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 
 type DossierMsg = {
   id: number;
@@ -248,7 +251,13 @@ export default function CitoyenDossierDetailPage() {
 
   const { data: docData, isLoading: docLoading } = useQuery<{ document: DossierDetail; analysis?: ComparisonResult; documents: any[] }>({
     queryKey: ["citoyen-dossier", id],
-    queryFn: () => apiFetch(`/api/documents/${id}`),
+    queryFn: () => {
+      if (isDemoSessionActive() && id === DEMO_DOSSIER_ID) {
+        const dossier = getDemoDossierForStatus(readDemoState().dossierStatus);
+        return Promise.resolve({ document: dossier as any, documents: dossier.documents });
+      }
+      return apiFetch(`/api/documents/${id}`);
+    },
     enabled: !!id,
     refetchInterval: (data: any) => {
       const status = data?.document?.status;
@@ -258,7 +267,12 @@ export default function CitoyenDossierDetailPage() {
 
   const { data: messagesData, isLoading: messagesLoading } = useQuery<{ messages: DossierMsg[] }>({
     queryKey: ["dossier-messages", id],
-    queryFn: () => apiFetch(`/api/documents/${id}/messages`),
+    queryFn: () => {
+      if (isDemoSessionActive() && id === DEMO_DOSSIER_ID) {
+        return Promise.resolve({ messages: getDemoSeedMessages() as any });
+      }
+      return apiFetch(`/api/documents/${id}/messages`);
+    },
     enabled: !!id,
     refetchInterval: 15000,
   });
