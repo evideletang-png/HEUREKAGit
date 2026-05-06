@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, FileText, MessageSquare, Clock, Gavel, MapPin, Shield, Building2, Send, Zap, Landmark } from "lucide-react";
+import { CheckCircle2, Loader2, FileText, MessageSquare, Clock, Gavel, MapPin, Shield, Building2, Send, Zap, Landmark, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { DossierSIGMap } from "./DossierSIGMap";
+import { analyzeProject, type ProjectPluAnalysis } from "@/lib/urbanisme/plu/analyzeProject";
 
 interface DossierDetailViewProps {
   dossierId: string;
@@ -31,6 +32,15 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
     },
     enabled: !!dossierId,
   });
+
+  const projectPluAnalysis = useMemo(() => analyzeProject({
+    parcel: detail?.metadata?.parcelAnalysis || detail?.parcelRef,
+    zone: detail?.metadata?.zone || detail?.metadata?.pluAnalysis?.zone || detail?.metadata?.pluAnalysis,
+    projectDetails: {
+      ...detail,
+      pluAnalysis: detail?.metadata?.pluAnalysis,
+    },
+  }), [detail]);
 
   if (isLoading) return <div className="p-20 flex justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>;
   if (!detail) return <div className="p-20 text-center text-slate-500 font-bold">Dossier introuvable.</div>;
@@ -96,16 +106,7 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
         </TabsContent>
 
         <TabsContent value="analysis" className="pt-4">
-           <div className="grid grid-cols-1 gap-3">
-             {detail.metadata?.pluAnalysis?.controles?.map((c: any, i: number) => (
-                <TraceabilityPoint key={i} data={{ ...c, point: c.categorie }} />
-             ))}
-             {!detail.metadata?.pluAnalysis?.controles && (
-               <div className="p-20 text-center bg-white border border-dashed rounded-3xl text-slate-400 font-bold">
-                  Aucune analyse de conformité disponible pour le moment.
-               </div>
-             )}
-           </div>
+          <PluRegulatoryAnalysisBlock analysis={projectPluAnalysis} />
         </TabsContent>
 
         <TabsContent value="documents" className="pt-4 overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
@@ -255,6 +256,80 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
       }
     }
   }
+}
+
+function PluRegulatoryAnalysisBlock({ analysis }: { analysis: ProjectPluAnalysis }) {
+  const nonCompliant = analysis.rulesChecked.filter((rule) => !rule.compliant);
+  const compliant = analysis.rulesChecked.filter((rule) => rule.compliant);
+
+  return (
+    <Card className="overflow-hidden rounded-3xl border-slate-100 shadow-lg shadow-slate-200/40">
+      <CardHeader className="border-b border-slate-100 bg-white">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-900">
+              <Shield className="h-4 w-4 text-primary" />
+              Analyse réglementaire PLU
+            </CardTitle>
+            <p className="mt-1 text-xs text-slate-500">
+              Règles explicitement analysées et transmises au moteur de décision.
+            </p>
+          </div>
+          <Badge variant={nonCompliant.length > 0 ? "destructive" : analysis.rulesChecked.length > 0 ? "default" : "outline"} className="w-fit rounded-md">
+            {nonCompliant.length > 0 ? "Non conforme" : analysis.rulesChecked.length > 0 ? "Conforme" : "À analyser"}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 bg-slate-50/50 p-4">
+        {analysis.rulesChecked.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+            <p className="text-sm font-bold text-slate-500">Aucune règle PLU exploitable n'est encore disponible.</p>
+            <p className="mt-2 text-xs text-slate-400">
+              Heureka n'affiche ici que les règles réellement présentes dans l'analyse PLU. Aucune règle n'est inventée.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Règles conformes</p>
+                <p className="mt-1 text-2xl font-black text-emerald-700">{compliant.length}</p>
+              </div>
+              <div className="rounded-2xl border border-red-100 bg-white p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-red-700">Non-conformités</p>
+                <p className="mt-1 text-2xl font-black text-red-700">{nonCompliant.length}</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {analysis.rulesChecked.map((rule, index) => (
+                <div key={`${rule.article}-${rule.rule}-${index}`} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="rounded-md font-mono text-[10px]">
+                          {rule.article}
+                        </Badge>
+                        <Badge variant={rule.compliant ? "secondary" : "destructive"} className="rounded-md">
+                          {rule.compliant ? "Conforme" : "Non conforme"}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-sm font-bold text-slate-950">{rule.rule}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-600">{rule.explanation}</p>
+                    </div>
+                    {rule.compliant ? (
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                    ) : (
+                      <XCircle className="h-5 w-5 shrink-0 text-red-600" />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function StatCard({ label, value, color = "" }: { label: string; value: string; color?: string }) {
