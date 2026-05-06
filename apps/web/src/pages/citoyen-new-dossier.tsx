@@ -82,6 +82,25 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} Mo`;
 }
 
+function getParcelAreaM2(parcelAnalysis: any) {
+  const primaryParcel = parcelAnalysis?.primaryParcel || parcelAnalysis?.parcels?.[0] || {};
+  const candidates = [
+    parcelAnalysis?.contenanceM2,
+    parcelAnalysis?.parcelSurfaceM2,
+    parcelAnalysis?.surfaceM2,
+    parcelAnalysis?.surface_m2,
+    parcelAnalysis?.areaM2,
+    parcelAnalysis?.metadata?.contenance,
+    parcelAnalysis?.metadata?.contenanceM2,
+    primaryParcel?.contenanceM2,
+    primaryParcel?.contenance,
+    primaryParcel?.surfaceM2,
+    primaryParcel?.feature?.properties?.contenance,
+  ];
+  const area = candidates.map(Number).find((value) => Number.isFinite(value) && value > 0);
+  return area ? Math.round(area) : "";
+}
+
 function constraintsFrom(parcelAnalysis: any) {
   const values = [
     ...(Array.isArray(parcelAnalysis?.constraints) ? parcelAnalysis.constraints : []),
@@ -318,6 +337,7 @@ export default function CitoyenNewDossierPage() {
   const [activeSectionId, setActiveSectionId] = useState("receipt");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [verificationRequested, setVerificationRequested] = useState(false);
+  const lastAutoTerrainAreaRef = useRef<number | "">("");
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
   const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
   const [parcelAnalysisLoading, setParcelAnalysisLoading] = useState(false);
@@ -350,13 +370,27 @@ export default function CitoyenNewDossierPage() {
   }, [title, docType]);
 
   useEffect(() => {
+    const areaM2 = getParcelAreaM2(parcelAnalysis);
     const prefill = {
       "terrain.address": selectedAddress?.label || address,
       "terrain.commune": selectedAddress?.city || parcelAnalysis?.commune || "",
       "terrain.parcel": parcelAnalysis?.parcelRef || selectedAddress?.parcelles?.[0] || "",
       "terrain.pluZone": parcelAnalysis?.zoneCode || "",
+      "terrain.area": areaM2,
     };
-    setCerfaValues((current) => mergeCerfaValuesWithPrefill(current, prefill));
+    setCerfaValues((current) => {
+      const next = mergeCerfaValuesWithPrefill(current, prefill);
+      const currentArea = current["terrain.area"];
+      const canRefreshAutoArea = currentArea === undefined
+        || currentArea === null
+        || currentArea === ""
+        || Number(currentArea) === lastAutoTerrainAreaRef.current;
+      if (areaM2 && canRefreshAutoArea) {
+        next["terrain.area"] = areaM2;
+        lastAutoTerrainAreaRef.current = areaM2;
+      }
+      return next;
+    });
   }, [address, selectedAddress, parcelAnalysis]);
 
   useEffect(() => {
@@ -374,6 +408,7 @@ export default function CitoyenNewDossierPage() {
       "terrain.commune": demoDossier.commune,
       "terrain.parcel": demoDossier.parcelRef,
       "terrain.pluZone": demoDossier.zoneCode,
+      "terrain.area": 650,
       "works.description": "Extension d'une maison individuelle et modification de façade.",
       "works.createsConstruction": true,
       "works.modifiesFacadesOrRoof": true,
@@ -404,6 +439,7 @@ export default function CitoyenNewDossierPage() {
       constraints: ["Abords monument historique", "Consultation ABF"],
       geoConstraints: ["Abords monument historique"],
       source: "demoParcelProvider",
+      contenanceM2: 650,
     });
     setLastSavedAt(new Date());
     if (files.length === 0 && typeof File !== "undefined") {
@@ -445,6 +481,7 @@ export default function CitoyenNewDossierPage() {
             parcelId: primaryParcel.id || null,
             section: primaryParcel.section || null,
             number: primaryParcel.numero || primaryParcel.number || null,
+            contenanceM2: primaryParcel.contenanceM2 || primaryParcel.contenance || null,
             commune: selectedAddress.city || preview.commune || null,
             postcode: selectedAddress.postcode || null,
             lat: selectedCoordinates.lat,

@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { CheckCircle2, Loader2, Search } from "lucide-react";
+import { useGeocodeAddress } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,6 +22,61 @@ function setFieldValue(
   if (field.type === "yes_no") return raw === "yes";
   if (field.type === "number") return raw === "" ? "" : Number(raw);
   return raw;
+}
+
+function SmartAddressInput(props: {
+  id: string;
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const [selectedLabel, setSelectedLabel] = useState("");
+  const geocode = useGeocodeAddress({ q: props.value }, { query: { enabled: props.value.length > 5 && props.value !== selectedLabel } } as any);
+  const results = geocode.data?.results || [];
+
+  return (
+    <div className="relative">
+      <Input
+        id={props.id}
+        value={props.value}
+        onChange={(event) => {
+          setSelectedLabel("");
+          props.onChange(event.target.value);
+        }}
+        placeholder={props.placeholder}
+        className="pl-10"
+        autoComplete="off"
+      />
+      <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+      {geocode.isLoading ? <Loader2 className="absolute right-3.5 top-3 h-4 w-4 animate-spin text-slate-500" /> : null}
+
+      {results.length > 0 && props.value.length > 5 && props.value !== selectedLabel ? (
+        <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {results.map((result: any, index: number) => (
+            <button
+              key={`${result.id || result.label}-${index}`}
+              type="button"
+              className="block w-full border-b px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
+              onClick={() => {
+                setSelectedLabel(result.label);
+                props.onChange(result.label);
+              }}
+            >
+              <span className="block text-sm font-semibold text-slate-950">{result.label}</span>
+              <span className="text-xs text-slate-500">{result.city} ({result.postcode})</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {selectedLabel ? (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Adresse sélectionnée
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function CerfaInteractiveForm(props: {
@@ -57,7 +115,14 @@ export function CerfaInteractiveForm(props: {
                 ) : null}
               </div>
 
-              {field.type === "textarea" ? (
+              {field.type === "address" ? (
+                <SmartAddressInput
+                  id={id}
+                  value={valueAsString(values[field.id])}
+                  onChange={(value) => update(field, value)}
+                  placeholder={field.placeholder}
+                />
+              ) : field.type === "textarea" ? (
                 <Textarea
                   id={id}
                   value={valueAsString(values[field.id])}

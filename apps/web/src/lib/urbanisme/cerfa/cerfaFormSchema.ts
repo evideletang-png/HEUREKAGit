@@ -3,7 +3,7 @@ import type { CerfaFormValues } from "./cerfaFieldMapping";
 
 export type CerfaSectionStatus = "not_started" | "in_progress" | "complete" | "error" | "not_applicable";
 
-export type CerfaFieldType = "text" | "textarea" | "yes_no" | "select" | "number" | "date";
+export type CerfaFieldType = "text" | "textarea" | "address" | "yes_no" | "select" | "number" | "date";
 
 export type CerfaFieldDefinition = {
   id: string;
@@ -69,7 +69,13 @@ const COMMON_SECTIONS: CerfaSectionDefinition[] = [
     fields: [
       { id: "applicant.email", label: "Adresse électronique", type: "text", required: true },
       { id: "applicant.phone", label: "Téléphone", type: "text" },
-      { id: "applicant.address", label: "Adresse postale", type: "textarea" },
+      {
+        id: "applicant.address",
+        label: "Adresse postale",
+        type: "address",
+        placeholder: "Rechercher l'adresse du demandeur...",
+        helpText: "Sélectionnez une adresse proposée pour fiabiliser les coordonnées du demandeur.",
+      },
     ],
   },
   {
