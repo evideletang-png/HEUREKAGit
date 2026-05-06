@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { DossierSIGMap } from "./DossierSIGMap";
 import { analyzeProject, type ProjectPluAnalysis } from "@/lib/urbanisme/plu/analyzeProject";
 import { DossierStatusBadge } from "./DossierStatusBadge";
+import { SignatureWorkflowPanel } from "./SignatureWorkflowPanel";
 
 interface DossierDetailViewProps {
   dossierId: string;
@@ -102,6 +103,18 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
                 </div>
               </CardContent>
            </Card>
+           <SignatureWorkflowPanel
+             dossierId={dossierId}
+             decisionGenerated={!!detail.metadata?.decisionDraft || !!detail.metadata?.generatedDecision || detail.status === "DECISION_EN_COURS"}
+             dossierReadyForSignature={detail.status === "DECISION_EN_COURS" || detail.status === "decision_pending" || detail.status === "SIGNED"}
+             signatory={{
+               id: detail.metadata?.signatureSignatory?.id || detail.assignedSignatoryId || "",
+               fullName: detail.metadata?.signatureSignatory?.fullName || detail.metadata?.signature?.signerName || "",
+               role: detail.metadata?.signatureSignatory?.role || detail.metadata?.signature?.signerTitle || "",
+               email: detail.metadata?.signatureSignatory?.email || detail.metadata?.signature?.signerEmail || "",
+               authorityDelegationReference: detail.metadata?.signatureSignatory?.authorityDelegationReference || detail.metadata?.signature?.delegationReference,
+             }}
+           />
         </TabsContent>
 
         <TabsContent value="analysis" className="pt-4">
