@@ -5,7 +5,7 @@ import { resolveDemoStepRoute } from "./demoRoutes";
 
 const favorableSteps = getDemoSteps("decision_favorable");
 assert(favorableSteps.length >= 12, "Le scenario favorable doit couvrir le parcours complet");
-assert.equal(favorableSteps[0].route, "/login", "La demo commence par le vrai parcours de connexion");
+assert.equal(favorableSteps[0].route, "/citoyen", "La demo commence par le vrai portail citoyen");
 assert.equal(getDemoStepById("depot-pcmi").route, "/citoyen/nouveau", "Le depot PCMI utilise le vrai formulaire citoyen");
 assert(favorableSteps.some((step) => step.route === `/citoyen/dossier/${DEMO_DOSSIER_ID}`), "Le suivi citoyen utilise la vraie route dossier");
 assert(favorableSteps.some((step) => step.route === "/dashboard-mairie"), "Le dashboard mairie reel est dans le scenario");

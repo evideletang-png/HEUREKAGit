@@ -28,14 +28,9 @@ import TasksPage from "@/pages/tasks";
 import AppealsPage from "@/pages/appeals";
 import AppealDetailPage from "@/pages/appeal-detail";
 import MessagingPage from "@/pages/messaging";
-import DemoHome from "@/pages/demo/demo-home";
-import DemoCitoyen from "@/pages/demo/demo-citoyen";
-import DemoMairie from "@/pages/demo/demo-mairie";
-import DemoMetropole from "@/pages/demo/demo-metropole";
-import DemoAbf from "@/pages/demo/demo-abf";
-import DemoSdis from "@/pages/demo/demo-sdis";
 import DemoScenarioPage from "@/pages/demo/demo-scenario";
 import { DemoRuntime } from "@/components/demo/DemoRuntime";
+import { DemoAuthProvider } from "@/demo/DemoAuthProvider";
 import { professionalPlaceholderFromRoute } from "@/pages/professional-placeholder";
 
 const MairieDocumentsOpposablesPage = professionalPlaceholderFromRoute("mairie", "/portail-mairie/documents-opposables");
@@ -122,12 +117,7 @@ function Router() {
       <Route path="/recours/:id" component={AppealDetailPage} />
 
       <Route path="/demo/scenario" component={DemoScenarioPage} />
-      <Route path="/demo" component={DemoHome} />
-      <Route path="/demo/citoyen" component={DemoCitoyen} />
-      <Route path="/demo/mairie" component={DemoMairie} />
-      <Route path="/demo/metropole" component={DemoMetropole} />
-      <Route path="/demo/abf" component={DemoAbf} />
-      <Route path="/demo/sdis" component={DemoSdis} />
+      <Route path="/demo" component={DemoScenarioPage} />
 
       <Route component={NotFound} />
     </Switch>
@@ -140,8 +130,10 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-            <DemoRuntime />
+            <DemoAuthProvider>
+              <Router />
+              <DemoRuntime />
+            </DemoAuthProvider>
           </WouterRouter>
           <Toaster />
         </TooltipProvider>

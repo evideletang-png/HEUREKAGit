@@ -64,6 +64,13 @@ export function startDemo(options: { stepIndex?: number; variant?: DemoScenarioV
   return next;
 }
 
+export function goToStep(stepId: string, navigate?: (route: string) => void) {
+  const state = readDemoState();
+  const steps = getDemoSteps(state.variant);
+  const index = steps.findIndex((step) => step.id === stepId);
+  return goToDemoStep(index >= 0 ? index : 0, navigate);
+}
+
 export function applyDemoStep(step: DemoStep, index: number) {
   const state = writeDemoState({
     enabled: true,
@@ -89,9 +96,13 @@ export function nextDemoStep(navigate?: (route: string) => void) {
   return goToDemoStep(readDemoState().currentStepIndex + 1, navigate);
 }
 
+export const nextStep = nextDemoStep;
+
 export function previousDemoStep(navigate?: (route: string) => void) {
   return goToDemoStep(readDemoState().currentStepIndex - 1, navigate);
 }
+
+export const previousStep = previousDemoStep;
 
 export function stopDemo() {
   const state = writeDemoState({ playing: false });
@@ -107,6 +118,8 @@ export function resetDemo(navigate?: (route: string) => void) {
   navigate?.(firstStep.route);
   return state;
 }
+
+export const resetDemoScenario = resetDemo;
 
 export function getCurrentDemoStep(state: DemoModeState = readDemoState()) {
   const steps = getDemoSteps(state.variant);
