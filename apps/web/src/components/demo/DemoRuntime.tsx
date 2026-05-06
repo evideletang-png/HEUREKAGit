@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { DemoControls } from "./DemoControls";
 import { DemoOverlay } from "./DemoOverlay";
-import { DEMO_MODE_ENABLED, readDemoState, subscribeDemoState, writeDemoState } from "@/demo/demoModeStore";
+import { DEMO_MODE_ENABLED, isDemoUrlScoped, readDemoState, subscribeDemoState, writeDemoState } from "@/demo/demoModeStore";
 
 export function DemoRuntime() {
+  const [location] = useLocation();
   const [state, setState] = useState(() => readDemoState());
 
   useEffect(() => subscribeDemoState(setState), []);
 
-  if (!DEMO_MODE_ENABLED || !state.enabled) return null;
+  if (!DEMO_MODE_ENABLED || !state.enabled || !isDemoUrlScoped({ pathname: location, search: window.location.search })) return null;
 
   return (
     <>

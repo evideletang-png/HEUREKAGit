@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { getDemoSteps } from "@/demo/demoScenario";
 import {
   DEMO_MODE_ENABLED,
+  getDemoScopedRoute,
   readDemoState,
   subscribeDemoState,
   writeDemoState,
@@ -42,7 +43,7 @@ export function DemoControls() {
     const next = writeDemoState({ variant, currentStepIndex: 0, role: "citizen", dossierStatus: "draft", playing: false });
     seedDemoData(next);
     const firstStep = getDemoSteps(variant)[0];
-    if (firstStep) setLocation(firstStep.route);
+    if (firstStep) setLocation(getDemoScopedRoute(firstStep.route));
   };
 
   return (

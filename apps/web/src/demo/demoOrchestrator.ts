@@ -3,6 +3,7 @@ import { demoDossier, demoMessages, demoSeedUsers, getDemoDossierForStatus } fro
 import {
   DEMO_MODE_ENABLED,
   DEFAULT_DEMO_STATE,
+  getDemoScopedRoute,
   readDemoState,
   resetDemoState,
   writeDemoState,
@@ -88,7 +89,7 @@ export function goToDemoStep(index: number, navigate?: (route: string) => void) 
   const nextIndex = Math.min(Math.max(index, 0), steps.length - 1);
   const step = steps[nextIndex];
   applyDemoStep(step, nextIndex);
-  navigate?.(step.route);
+  navigate?.(getDemoScopedRoute(step.route));
   return step;
 }
 
@@ -115,7 +116,7 @@ export function resetDemo(navigate?: (route: string) => void) {
   if (typeof window !== "undefined") window.localStorage.removeItem(DEMO_SEED_STORAGE_KEY);
   const state = startDemo({ stepIndex: 0 });
   const firstStep = getDemoSteps(state.variant)[0];
-  navigate?.(firstStep.route);
+  navigate?.(getDemoScopedRoute(firstStep.route));
   return state;
 }
 

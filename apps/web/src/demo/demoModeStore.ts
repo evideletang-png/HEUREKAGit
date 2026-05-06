@@ -16,6 +16,8 @@ export type DemoModeState = {
 };
 
 const STORAGE_KEY = "heureka.demo.mode";
+const DEMO_SCOPE_QUERY_PARAM = "demo";
+const DEMO_SCOPE_QUERY_VALUE = "1";
 
 const demoModeFlag = String((import.meta as any).env?.VITE_ENABLE_DEMO_MODE || "").toLowerCase();
 export const DEMO_MODE_ENABLED =
@@ -81,8 +83,23 @@ export function getDemoUser(role: DemoUserRole = readDemoState().role): DemoSeed
   return demoSeedUsers[role] || demoSeedUsers.citizen;
 }
 
+export function isDemoUrlScoped(locationLike: Pick<Location, "pathname" | "search"> | null = typeof window !== "undefined" ? window.location : null) {
+  if (!locationLike) return false;
+  if (locationLike.pathname.startsWith("/demo")) return true;
+  return new URLSearchParams(locationLike.search).get(DEMO_SCOPE_QUERY_PARAM) === DEMO_SCOPE_QUERY_VALUE;
+}
+
+export function getDemoScopedRoute(route: string) {
+  const [pathAndSearch, hash = ""] = route.split("#");
+  const [pathname, search = ""] = pathAndSearch.split("?");
+  const params = new URLSearchParams(search);
+  params.set(DEMO_SCOPE_QUERY_PARAM, DEMO_SCOPE_QUERY_VALUE);
+  const query = params.toString();
+  return `${pathname}${query ? `?${query}` : ""}${hash ? `#${hash}` : ""}`;
+}
+
 export function isDemoSessionActive() {
-  return DEMO_MODE_ENABLED && readDemoState().enabled;
+  return DEMO_MODE_ENABLED && readDemoState().enabled && isDemoUrlScoped();
 }
 
 export function setDemoRole(role: DemoUserRole) {
