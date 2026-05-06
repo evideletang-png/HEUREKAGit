@@ -20,6 +20,7 @@ import { DeadlineWidget } from "@/components/instruction/DeadlineWidget";
 import { InstructionTimeline } from "@/components/instruction/InstructionTimeline";
 import { LegalAlerts, type LegalAlert } from "@/components/instruction/LegalAlerts";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
+import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 
 type DossierDetail = {
   id: string;
@@ -108,14 +109,6 @@ const demoDossier: DossierDetail = {
 function formatDate(value?: string | null) {
   if (!value) return "Non daté";
   return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
-}
-
-function statusClass(status?: string | null) {
-  const normalized = (status || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (normalized.includes("refus") || normalized.includes("incomplet")) return "bg-red-100 text-red-700";
-  if (normalized.includes("notifi") || normalized.includes("accepte")) return "bg-emerald-100 text-emerald-700";
-  if (normalized.includes("instruction")) return "bg-blue-100 text-blue-700";
-  return "bg-slate-100 text-slate-700";
 }
 
 function MairieDetailShell({ children }: { children: React.ReactNode }) {
@@ -216,10 +209,7 @@ export default function DossierMairieDetailPage() {
               <p className="mt-4 text-lg text-slate-600">Demandeur : {dossier.userName || "Demandeur"}</p>
               <p className="mt-1 max-w-xl text-lg text-slate-600">{dossier.address || "Adresse non renseignée"}</p>
             </div>
-            <span className={`inline-flex items-center gap-2 rounded-full px-6 py-4 text-lg font-bold ${statusClass(dossier.status)}`}>
-              <Clock3 className="h-5 w-5" />
-              {dossier.status || "En instruction"}
-            </span>
+            <DossierStatusBadge status={dossier.status || "in_instruction"} className="px-6 py-4 text-lg" />
           </div>
 
           <InfoCard title="Actions">

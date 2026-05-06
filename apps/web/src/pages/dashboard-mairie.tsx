@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
+import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 
 type MairieDossier = {
   id: string;
@@ -194,15 +195,6 @@ function deadlineInfo(row: MairieDossier, index = 0) {
   return { label: `J-${days}`, className: days > 30 ? "text-emerald-700" : "text-amber-600", date: baseDate };
 }
 
-function statusStyle(status?: string | null) {
-  const normalized = (status || "").toLowerCase();
-  if (normalized.includes("manqu") || normalized.includes("retard")) return "bg-amber-100 text-amber-800";
-  if (normalized.includes("notifi")) return "bg-emerald-100 text-emerald-800";
-  if (normalized.includes("consult")) return "bg-indigo-100 text-indigo-800";
-  if (normalized.includes("instruction")) return "bg-blue-100 text-blue-800";
-  return "bg-stone-100 text-stone-700";
-}
-
 function statusMatches(rowStatus: string | null | undefined, configuredStatus: DashboardStatusConfig) {
   return normalizeText(rowStatus).includes(normalizeText(configuredStatus.label));
 }
@@ -309,9 +301,7 @@ function DossierPreview({ dossier, onClose }: { dossier: MairieDossier | null; o
             </Button>
           </div>
 
-          <span className={`inline-flex rounded-lg px-3 py-2 text-sm font-medium ${statusStyle(dossier.status)}`}>
-            ● {dossier.status || "Déposé"}
-          </span>
+          <DossierStatusBadge status={dossier.status || "submitted"} className="rounded-lg px-3 py-2 text-sm" />
 
           <div className="mt-7 space-y-5">
             <div>
@@ -505,7 +495,7 @@ function DashboardView() {
                     {!!row.documentCount && <span className="mt-2 inline-flex rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">PLU analysé</span>}
                   </td>
                   <td className="px-3 py-4 font-medium">{row.userName || "Demandeur"}</td>
-                  <td className="px-3 py-4"><span className={`inline-flex rounded px-2 py-1 text-xs font-medium ${statusStyle(row.status)}`}>{row.status || "Déposé"}</span></td>
+                  <td className="px-3 py-4"><DossierStatusBadge status={row.status || "submitted"} className="rounded px-2 py-1 text-xs" /></td>
                   <td className="px-3 py-4">
                     <p className={`font-semibold ${deadline.className}`}>{deadline.label}</p>
                     <p className="text-xs text-slate-400">{formatDate(deadline.date)}</p>

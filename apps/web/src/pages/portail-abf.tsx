@@ -4,11 +4,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, ShieldCheck, ClipboardCheck, MessageSquare, ArrowLeft, Search, Gavel, Landmark } from "lucide-react";
 import { DossierDetailView } from "@/components/dossier/DossierDetailView";
 import { Input } from "@/components/ui/input";
+import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 
 type Dossier = {
   id: string;
@@ -128,7 +128,7 @@ export default function PortailABFPage({ params }: { params: { id?: string } }) 
                           </div>
                           <div className="flex items-center gap-6">
                              <div className="text-right flex flex-col items-end gap-1">
-                                <Badge className="text-[9px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 hover:bg-amber-200 border-none">{d.status}</Badge>
+                                <DossierStatusBadge status={d.status} className="text-[9px] uppercase tracking-widest" />
                                 <p className="text-[10px] text-slate-400 font-bold">{d.dossierNumber}</p>
                              </div>
                              <div className="p-2 bg-amber-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
