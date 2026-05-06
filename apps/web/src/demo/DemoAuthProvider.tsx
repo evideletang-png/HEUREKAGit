@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { getDemoUser, isDemoSessionActive, readDemoState, setDemoRole, subscribeDemoState, type DemoModeState } from "./demoModeStore";
+import { useLocation } from "wouter";
+import { DEMO_MODE_ENABLED, getDemoUser, isDemoUrlScoped, readDemoState, setDemoRole, subscribeDemoState, type DemoModeState } from "./demoModeStore";
 import type { DemoRole } from "./demoScenario";
 import type { DemoSeedUser } from "./demoSeedData";
 
@@ -18,11 +19,12 @@ const DemoAuthContext = createContext<DemoAuthContextValue>({
 });
 
 export function DemoAuthProvider({ children }: { children: React.ReactNode }) {
+  const [location] = useLocation();
   const [state, setState] = useState<DemoModeState>(() => readDemoState());
 
   useEffect(() => subscribeDemoState(setState), []);
 
-  const active = isDemoSessionActive();
+  const active = DEMO_MODE_ENABLED && state.enabled && isDemoUrlScoped({ pathname: location, search: typeof window !== "undefined" ? window.location.search : "" });
   const role = active ? state.role : null;
   const demoUser = active ? getDemoUser(state.role) : null;
 

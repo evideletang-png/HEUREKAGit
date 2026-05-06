@@ -30,10 +30,10 @@ export default function DemoScenarioPage() {
           </CardHeader>
           <CardContent className="space-y-4 text-sm text-slate-600">
             <p>
-              La route existe, mais l'orchestration demo complete doit etre activee explicitement sur un build production avec
-              <span className="font-mono font-bold text-slate-950"> VITE_ENABLE_DEMO_MODE=true</span>.
+              La route existe, mais l'orchestration demo a ete desactivee explicitement sur ce build avec
+              <span className="font-mono font-bold text-slate-950"> VITE_ENABLE_DEMO_MODE=false</span>.
             </p>
-            <p>En local/dev, elle reste active par defaut pour faciliter les repetitions de demonstration.</p>
+            <p>Sans cette valeur, la demo reste active pour faciliter les repetitions et les demonstrations produit.</p>
             <Button asChild>
               <Link href="/demo">Retour au mode demo</Link>
             </Button>
