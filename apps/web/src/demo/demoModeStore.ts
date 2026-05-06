@@ -17,8 +17,11 @@ export type DemoModeState = {
 
 const STORAGE_KEY = "heureka.demo.mode";
 
+const demoModeFlag = String((import.meta as any).env?.VITE_ENABLE_DEMO_MODE || "").toLowerCase();
+const isProductionBuild = String((import.meta as any).env?.MODE || "").toLowerCase() === "production";
+
 export const DEMO_MODE_ENABLED =
-  String((import.meta as any).env?.VITE_ENABLE_DEMO_MODE || "").toLowerCase() === "true";
+  demoModeFlag === "true" || (!isProductionBuild && demoModeFlag !== "false");
 
 export const DEFAULT_DEMO_STATE: DemoModeState = {
   enabled: false,
