@@ -1,6 +1,7 @@
 import type { ProjectContext } from "../cerfa/officialPieces.types";
 import type { CompletenessResult } from "../compliance/checkCompleteness";
 import type { Consultation } from "../consultations/resolveConsultations";
+import type { ProjectPluRuleCheck } from "../plu/analyzeProject";
 
 export type UrbanismDecision = "approved" | "refused" | "conditional";
 export type MotivationResult = "compliant" | "non-compliant";
@@ -40,6 +41,7 @@ export interface PluAnalysisInput {
   controles?: PluRuleAnalysis[];
   controls?: PluRuleAnalysis[];
   motivations?: PluRuleAnalysis[];
+  rulesChecked?: ProjectPluRuleCheck[];
 }
 
 export interface GenerateDecisionInput {
@@ -67,6 +69,8 @@ function unique<T>(items: T[]) {
 }
 
 function ruleLabel(item: PluRuleAnalysis) {
+  if (item.article && item.rule) return `${item.article} - ${item.rule}`;
+  if (item.sourceArticle && item.rule) return `${item.sourceArticle} - ${item.rule}`;
   return item.rule || item.article || item.sourceArticle || item.source || [
     item.articleNumber ? `Article ${item.articleNumber}` : null,
     item.articleTitle,
@@ -95,6 +99,12 @@ function resultFromRule(item: PluRuleAnalysis): MotivationResult | null {
 function collectPluRules(pluAnalysis?: PluAnalysisInput | null) {
   if (!pluAnalysis) return [];
   return [
+    ...(pluAnalysis.rulesChecked || []).map((item) => ({
+      article: item.article,
+      rule: item.rule,
+      compliant: item.compliant,
+      justification: item.explanation,
+    })),
     ...(pluAnalysis.motivations || []),
     ...(pluAnalysis.controles || []),
     ...(pluAnalysis.controls || []),

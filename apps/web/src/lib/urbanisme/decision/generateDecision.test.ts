@@ -94,4 +94,22 @@ const globalRefusal = generateDecision({
 });
 assert(globalRefusal.decision === "refused", "Une conclusion PLU globale non conforme doit refuser même sans motivation détaillée");
 
+const fromAnalyzeProject = generateDecision({
+  projectContext,
+  pluAnalysis: {
+    rulesChecked: [
+      {
+        article: "Article 7",
+        rule: "Recul 5m",
+        compliant: false,
+        explanation: "Le recul déclaré ne respecte pas la règle analysée.",
+      },
+    ],
+  },
+  consultations: [],
+  complianceStatus: { status: "complete", missingPieces: [], message: "Complet" },
+});
+assert(fromAnalyzeProject.decision === "refused", "Les règles issues d'analyzeProject doivent alimenter la décision");
+assert(fromAnalyzeProject.legalText.includes("Article 7"), "La décision doit citer l'article issu d'analyzeProject");
+
 console.info("[generateDecision] décision d'urbanisme OK");
