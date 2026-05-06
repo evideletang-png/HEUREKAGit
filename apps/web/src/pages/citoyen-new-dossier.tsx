@@ -1,30 +1,59 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  Plus,
+  Search,
+  Upload,
+  X,
+} from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { useGeocodeAddress } from "@workspace/api-client-react";
+import { AppShell } from "@/components/layout/AppShell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, ArrowLeft, Upload, FileText, X, CheckCircle2, Search, Loader2, Plus } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
-import { useGeocodeAddress } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
-import { AppShell } from "@/components/layout/AppShell";
+import { checkCompleteness } from "@/lib/urbanisme/compliance/checkCompleteness";
+import {
+  getCerfaSectionStatus,
+  getCerfaSections,
+  getMissingRequiredFields,
+  type CerfaSectionDefinition,
+  type CerfaSectionStatus,
+} from "@/lib/urbanisme/cerfa/cerfaFormSchema";
+import {
+  getProjectFlagsFromCerfaValues,
+  mergeCerfaValuesWithPrefill,
+  type CerfaFormValues,
+} from "@/lib/urbanisme/cerfa/cerfaFieldMapping";
+import { downloadBlob, generateCerfaPdf } from "@/lib/urbanisme/cerfa/generateCerfaPdf";
+import { importCerfaPdf } from "@/lib/urbanisme/cerfa/importCerfaPdf";
+import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
+import type { DossierType, ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
+import { triggerSourceLabel } from "@/lib/urbanisme/cerfa/pieceTriggers";
+import { computeInstructionTimeline } from "@/lib/urbanisme/timeline/computeInstructionTimeline";
 import { getRequiredPieces, normalizeProcedureType } from "@/lib/pieceRequirements";
-import { OfficialPiecesChecklist } from "@/components/dossier/OfficialPiecesChecklist";
-import type { ProjectContext } from "@/lib/urbanisme/cerfa/officialPieces.types";
+import { CerfaInteractiveForm } from "@/components/dossier/CerfaInteractiveForm";
+import { CerfaSectionSidebar } from "@/components/dossier/CerfaSectionSidebar";
+import { DossierActionRail } from "@/components/dossier/DossierActionRail";
 import { demoDossier, demoProjectContext, demoUploadedDocuments } from "@/demo/demoSeedData";
 import { isDemoSessionActive } from "@/demo/demoModeStore";
 
-const DOSSIER_TYPES = [
-  { value: "DPC", label: "Déclaration préalable constructions/travaux (DPC)" },
-  { value: "DPA", label: "Déclaration préalable installations/aménagements (DPA)" },
-  { value: "PCMI", label: "Permis de construire maison individuelle (PCMI)" },
-  { value: "PC", label: "Permis de construire autre que maison individuelle (PC)" },
-  { value: "PA", label: "Permis d'aménager (PA)" },
-  { value: "PD", label: "Permis de démolir (PD)" },
-  { value: "CUA", label: "Certificat d'urbanisme d'information (CUa)" },
-  { value: "CUB", label: "Certificat d'urbanisme opérationnel (CUb)" },
+const DOSSIER_TYPES: { value: DossierType; label: string }[] = [
+  { value: "PCMI", label: "PCMI - Permis de construire maison individuelle" },
+  { value: "PC", label: "PC - Permis de construire" },
+  { value: "DPC", label: "DP - Déclaration préalable constructions/travaux" },
+  { value: "DPA", label: "DP - Déclaration préalable installations/aménagements" },
+  { value: "PA", label: "PA - Permis d'aménager" },
+  { value: "PD", label: "PD - Permis de démolir" },
 ];
 
 function getAddressCoordinates(address: any) {
@@ -40,18 +69,255 @@ function documentTypeForProcedure(type: string) {
   const normalized = normalizeProcedureType(type);
   if (normalized === "DPC" || normalized === "DPA") return "declaration_prealable";
   if (normalized === "PA") return "permis_amenager";
+  if (normalized === "PD") return "permis_demolir";
   return "permis_de_construire";
+}
+
+function extractDetectedCode(filename: string) {
+  return filename.match(/\b(?:PCMI|DPC|DPA|PC|PA|PD)\s*[-_ ]?\s*\d+(?:-\d+)?\b/i)?.[0]?.replace(/\s+/g, "").replace("_", "-");
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} Ko`;
+  return `${(size / 1024 / 1024).toFixed(1)} Mo`;
+}
+
+function constraintsFrom(parcelAnalysis: any) {
+  const values = [
+    ...(Array.isArray(parcelAnalysis?.constraints) ? parcelAnalysis.constraints : []),
+    ...(Array.isArray(parcelAnalysis?.geoConstraints) ? parcelAnalysis.geoConstraints : []),
+  ].map((value) => String(value).toLowerCase());
+  return {
+    abf: values.some((value) => value.includes("abf") || value.includes("monument") || value.includes("patrimoine")),
+    monumentHistoriqueAbords: values.some((value) => value.includes("abords") || value.includes("monument")),
+    spr: values.some((value) => value.includes("spr") || value.includes("patrimonial remarquable")),
+    natura2000: values.some((value) => value.includes("natura")),
+    pprRequiresStudy: values.some((value) => value.includes("ppr") || value.includes("risque")),
+  };
+}
+
+function buildLocationContext(args: {
+  selectedAddress: any;
+  parcelAnalysis: any;
+  isAnalyzing: boolean;
+}): ProjectContext["locationContext"] {
+  const constraints = constraintsFrom(args.parcelAnalysis);
+  const hasUnresolved = args.isAnalyzing || !args.parcelAnalysis?.zoneCode;
+  return {
+    commune: args.selectedAddress?.city || args.parcelAnalysis?.commune || undefined,
+    parcel: args.parcelAnalysis?.parcelRef || args.selectedAddress?.parcelles?.[0] || undefined,
+    pluZone: args.parcelAnalysis?.zoneCode || null,
+    confidence: args.parcelAnalysis?.zoneCode ? 0.82 : 0.5,
+    unresolvedChecks: hasUnresolved ? ["pluZone", "servitudes", "risks"] : [],
+    ...constraints,
+  };
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: "Brouillon",
+    complete: "Complet",
+    incomplete: "En cours",
+    submitted: "Transmis",
+    in_instruction: "En instruction",
+  };
+  return labels[status] || status;
+}
+
+function PieceRow(props: {
+  piece: ResolvedPiece;
+  matched: boolean;
+  onAdd: () => void;
+}) {
+  const stateLabel = props.piece.requirementState === "required" ? "Requis" : "À confirmer";
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="rounded-md bg-primary px-2.5 py-1 text-xs">{props.piece.code}</Badge>
+            <Badge variant={props.piece.status === "mandatory" ? "default" : "outline"}>
+              {props.piece.status === "mandatory" ? "Obligatoire" : "Conditionnelle"}
+            </Badge>
+            <Badge variant={props.matched ? "secondary" : props.piece.requirementState === "required" ? "destructive" : "outline"}>
+              {props.matched ? "Ajoutée" : stateLabel}
+            </Badge>
+          </div>
+          <h3 className="mt-3 text-sm font-semibold leading-6 text-slate-950">{props.piece.label}</h3>
+          {props.piece.conditionLabel ? <p className="mt-2 text-xs italic text-slate-600">Condition : {props.piece.conditionLabel}</p> : null}
+          {props.piece.legalReference ? <p className="mt-2 text-xs text-slate-500">Base réglementaire : {props.piece.legalReference}</p> : null}
+          <p className="mt-2 text-xs text-slate-600">{props.piece.explanation}</p>
+          {props.piece.matchedTriggers.length > 0 ? (
+            <p className="mt-2 text-xs text-slate-500">
+              Déclenché par : {props.piece.matchedTriggers.map(triggerSourceLabel).join(", ")}
+            </p>
+          ) : null}
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={props.onAdd} className="shrink-0 gap-2">
+          <Upload className="h-4 w-4" />
+          Ajouter
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PiecesSection(props: {
+  pieces: ResolvedPiece[];
+  files: File[];
+  matchedCodes: Set<string>;
+  onAdd: () => void;
+  onRemoveFile: (index: number) => void;
+}) {
+  const mandatory = props.pieces.filter((piece) => piece.status === "mandatory");
+  const required = props.pieces.filter((piece) => piece.status === "conditional" && piece.requirementState === "required");
+  const potential = props.pieces.filter((piece) => piece.requirementState === "potentially_required");
+  const groups = [
+    { title: "Pièces obligatoires pour tous les dossiers", pieces: mandatory },
+    { title: "Pièces complémentaires requises", pieces: required },
+    { title: "Pièces potentiellement requises", pieces: potential },
+  ];
+
+  return (
+    <div className="space-y-6" data-demo="official-pieces-checklist">
+      <div>
+        <h2 className="text-2xl font-semibold text-slate-950">Pièces à joindre à votre dossier</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Bordereau officiel du CERFA, recalculé selon le type de dossier, les réponses et les contraintes détectées.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+        <Upload className="mx-auto h-8 w-8 text-slate-500" />
+        <p className="mt-2 text-sm font-semibold text-slate-900">Ajouter des pièces justificatives</p>
+        <p className="mt-1 text-xs text-slate-500">Le code officiel dans le nom du fichier améliore le contrôle : PCMI1-plan-situation.pdf.</p>
+        <Button type="button" variant="outline" className="mt-4" onClick={props.onAdd}>
+          Sélectionner des documents
+        </Button>
+      </div>
+
+      {props.files.length > 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-sm font-semibold text-slate-900">Documents ajoutés ({props.files.length})</p>
+          <div className="mt-3 grid gap-2">
+            {props.files.map((file, index) => (
+              <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-3">
+                  <FileText className="h-4 w-4 shrink-0 text-slate-500" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{file.name}</p>
+                    <p className="text-xs text-slate-500">{formatFileSize(file.size)}</p>
+                  </div>
+                </div>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => props.onRemoveFile(index)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {groups.map((group) => (
+        <section key={group.title} className="space-y-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{group.title}</h3>
+          {group.pieces.length === 0 ? (
+            <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">Aucune pièce dans cette catégorie pour le contexte actuel.</p>
+          ) : (
+            group.pieces.map((piece) => (
+              <PieceRow key={piece.code} piece={piece} matched={props.matchedCodes.has(piece.code)} onAdd={props.onAdd} />
+            ))
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function VerificationSection(props: {
+  missingFields: ReturnType<typeof getMissingRequiredFields>;
+  missingPieces: ResolvedPiece[];
+  unresolvedChecks: string[];
+  timeline: ReturnType<typeof computeInstructionTimeline>;
+}) {
+  const hasIssues = props.missingFields.length > 0 || props.missingPieces.length > 0;
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-semibold text-slate-950">Vérification avant transmission</h2>
+        <p className="mt-1 text-sm text-slate-600">Heureka contrôle les champs obligatoires, les pièces CERFA et les points à confirmer.</p>
+      </div>
+
+      <div className={`rounded-lg border p-4 ${hasIssues ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+        <div className="flex items-start gap-3">
+          {hasIssues ? <AlertCircle className="mt-0.5 h-5 w-5 text-amber-700" /> : <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700" />}
+          <div>
+            <p className="font-semibold text-slate-950">
+              {hasIssues ? "Votre dossier ne peut pas encore être transmis." : "Votre dossier est complet au regard des contrôles identifiés."}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Délai indicatif : {props.timeline.totalDelay} mois, date limite estimée {props.timeline.legalDeadlineDate.toLocaleDateString("fr-FR")}.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="font-semibold text-slate-950">Champs manquants</h3>
+          {props.missingFields.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">Aucun champ obligatoire manquant.</p>
+          ) : (
+            <ul className="mt-3 space-y-2 text-sm text-slate-700">
+              {props.missingFields.map((item) => (
+                <li key={`${item.sectionId}-${item.field.id}`}>• {item.sectionTitle} — {item.field.label}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h3 className="font-semibold text-slate-950">Pièces manquantes</h3>
+          {props.missingPieces.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">Aucune pièce requise manquante.</p>
+          ) : (
+            <ul className="mt-3 space-y-2 text-sm text-slate-700">
+              {props.missingPieces.map((piece) => (
+                <li key={piece.code}>• {piece.code} — {piece.label}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <h3 className="font-semibold text-slate-950">Contraintes et données à confirmer</h3>
+        {props.unresolvedChecks.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">Les contrôles de localisation principaux sont renseignés.</p>
+        ) : (
+          <p className="mt-2 text-sm text-slate-600">
+            Analyse réglementaire en cours : {props.unresolvedChecks.join(", ")}. Les pièces liées à l'adresse seront recalculées automatiquement.
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function CitoyenNewDossierPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [address, setAddress] = useState("");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
-  const [docType, setDocType] = useState("PCMI");
+  const [docType, setDocType] = useState<DossierType>("PCMI");
   const [projectFlags, setProjectFlags] = useState<ProjectContext["projectFlags"]>({});
   const [title, setTitle] = useState("");
+  const [cerfaValues, setCerfaValues] = useState<CerfaFormValues>({});
+  const [activeSectionId, setActiveSectionId] = useState("receipt");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [verificationRequested, setVerificationRequested] = useState(false);
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
   const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
   const [parcelAnalysisLoading, setParcelAnalysisLoading] = useState(false);
@@ -59,21 +325,63 @@ export default function CitoyenNewDossierPage() {
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
   const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
+
   const uploadedDocumentsForCompleteness = useMemo(
     () => files.map((file) => ({
       filename: file.name,
       type: file.type,
-      detectedCode: file.name.match(/\b(?:PCMI|DPC|DPA|PC|PA|PD)\s*[-_ ]?\s*\d+(?:-\d+)?\b/i)?.[0]?.replace(/\s+/g, "").replace("_", "-"),
-      confidence: file.name.match(/\b(?:PCMI|DPC|DPA|PC|PA|PD)\s*[-_ ]?\s*\d+(?:-\d+)?\b/i) ? 0.78 : undefined,
+      detectedCode: extractDetectedCode(file.name),
+      confidence: extractDetectedCode(file.name) ? 0.78 : undefined,
     })),
     [files],
   );
+
+  useEffect(() => {
+    const nextType = normalizeOfficialDossierType(cerfaValues["project.dossierType"] as string || docType);
+    if (nextType !== docType) setDocType(nextType);
+  }, [cerfaValues, docType]);
+
+  useEffect(() => {
+    setCerfaValues((current) => ({
+      ...current,
+      "project.title": title,
+      "project.dossierType": docType,
+    }));
+  }, [title, docType]);
+
+  useEffect(() => {
+    const prefill = {
+      "terrain.address": selectedAddress?.label || address,
+      "terrain.commune": selectedAddress?.city || parcelAnalysis?.commune || "",
+      "terrain.parcel": parcelAnalysis?.parcelRef || selectedAddress?.parcelles?.[0] || "",
+      "terrain.pluZone": parcelAnalysis?.zoneCode || "",
+    };
+    setCerfaValues((current) => mergeCerfaValuesWithPrefill(current, prefill));
+  }, [address, selectedAddress, parcelAnalysis]);
 
   useEffect(() => {
     if (!isDemoSessionActive()) return;
     setTitle(demoDossier.title);
     setDocType("PCMI");
     setProjectFlags(demoProjectContext.projectFlags);
+    setCerfaValues((current) => ({
+      ...current,
+      "project.title": demoDossier.title,
+      "project.dossierType": "PCMI",
+      "applicant.fullName": "Jean Martin",
+      "applicant.email": "jean.martin.demo@heureka.local",
+      "terrain.address": demoDossier.address,
+      "terrain.commune": demoDossier.commune,
+      "terrain.parcel": demoDossier.parcelRef,
+      "terrain.pluZone": demoDossier.zoneCode,
+      "works.description": "Extension d'une maison individuelle et modification de façade.",
+      "works.createsConstruction": true,
+      "works.modifiesFacadesOrRoof": true,
+      "works.visibleFromPublicSpace": true,
+      "surfaces.created": 28,
+      "legal.ownerAuthorization": true,
+      "engagement.accepted": true,
+    }));
     setAddress(demoDossier.address);
     setSelectedAddress({
       id: "demo-ban-commune-demo-12-tilleuls",
@@ -97,6 +405,7 @@ export default function CitoyenNewDossierPage() {
       geoConstraints: ["Abords monument historique"],
       source: "demoParcelProvider",
     });
+    setLastSavedAt(new Date());
     if (files.length === 0 && typeof File !== "undefined") {
       setFiles(demoUploadedDocuments.map((document) => new File(["demo"], document.fileName, { type: "application/pdf" })));
     }
@@ -155,13 +464,61 @@ export default function CitoyenNewDossierPage() {
     return () => { cancelled = true; };
   }, [selectedAddress, selectedCoordinates.lat, selectedCoordinates.lon, parcelAnalysisRetryToken]);
 
+  const sections = useMemo(() => getCerfaSections(docType), [docType]);
+  const activeSection = sections.find((section) => section.id === activeSectionId) || sections[0];
+  const derivedProjectFlags = useMemo(
+    () => ({ ...projectFlags, ...getProjectFlagsFromCerfaValues(cerfaValues) }),
+    [projectFlags, cerfaValues],
+  );
+  const locationContext = useMemo(
+    () => buildLocationContext({ selectedAddress, parcelAnalysis, isAnalyzing: parcelAnalysisLoading }),
+    [selectedAddress, parcelAnalysis, parcelAnalysisLoading],
+  );
+  const projectContext: ProjectContext = useMemo(
+    () => ({ dossierType: docType, projectFlags: derivedProjectFlags, locationContext }),
+    [docType, derivedProjectFlags, locationContext],
+  );
+  const resolvedPieces = useMemo(() => resolveOfficialPieces(projectContext), [projectContext]);
+  const completeness = useMemo(
+    () => checkCompleteness({ requiredPieces: resolvedPieces, uploadedDocuments: uploadedDocumentsForCompleteness }),
+    [resolvedPieces, uploadedDocumentsForCompleteness],
+  );
+  const matchedCodes = useMemo(() => new Set(completeness.matchedPieces.map((match) => match.piece.code)), [completeness]);
+  const missingRequiredFields = useMemo(() => getMissingRequiredFields(sections, cerfaValues), [sections, cerfaValues]);
+  const timeline = useMemo(
+    () => computeInstructionTimeline({ dossierType: docType, locationContext, projectFlags: derivedProjectFlags }),
+    [docType, locationContext, derivedProjectFlags],
+  );
+  const hasBlockingErrors = missingRequiredFields.length > 0 || completeness.status === "incomplete";
+  const sectionStatuses = useMemo(
+    () => sections.reduce<Record<string, CerfaSectionStatus>>((acc, section) => {
+      acc[section.id] = getCerfaSectionStatus({
+        section,
+        values: cerfaValues,
+        missingPieceCodes: completeness.missingPieces.map((piece) => piece.code),
+        resolvedPieces,
+        hasBlockingErrors,
+      });
+      return acc;
+    }, {}),
+    [sections, cerfaValues, completeness.missingPieces, resolvedPieces, hasBlockingErrors],
+  );
+  const completedSections = Object.values(sectionStatuses).filter((status) => status === "complete" || status === "not_applicable").length;
+  const sectionRate = sections.length === 0 ? 0 : (completedSections / sections.length) * 100;
+  const pieceRate = resolvedPieces.filter((piece) => piece.requirementState === "required").length === 0
+    ? 100
+    : (completeness.matchedPieces.length / resolvedPieces.filter((piece) => piece.requirementState === "required").length) * 100;
+  const completionRate = Math.round((sectionRate * 0.55) + (pieceRate * 0.45));
+  const canTransmit = !hasBlockingErrors && !!selectedAddress && !!title;
+  const dossierStatus = canTransmit ? "complete" : title || selectedAddress ? "incomplete" : "draft";
+
   const upload = useMutation({
     mutationFn: async ({ formData, dossierId }: { formData: FormData; dossierId: string }) => {
       formData.append("dossierId", dossierId);
       const r = await fetch("/api/documents/upload", {
         method: "POST",
         credentials: "include",
-        body: formData, // No Content-Type header — browser sets it with boundary automatically
+        body: formData,
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: "Unknown error" }));
@@ -171,29 +528,58 @@ export default function CitoyenNewDossierPage() {
     },
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(prev => [...prev, ...Array.from(e.target.files!)]);
-    }
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) setFiles((prev) => [...prev, ...Array.from(event.target.files!)]);
+    event.target.value = "";
+  };
+
+  const handleImportChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const imported = await importCerfaPdf(file);
+    setDocType(imported.dossierType);
+    setCerfaValues((current) => ({ ...current, ...imported.values, "project.dossierType": imported.dossierType }));
+    if (imported.values["project.title"]) setTitle(String(imported.values["project.title"]));
+    toast({
+      title: "CERFA importé partiellement",
+      description: imported.warnings[0],
+    });
   };
 
   const removeFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAddress || files.length === 0 || !title) {
-      toast({
-        title: "Champs manquants",
-        description: "Veuillez renseigner un titre, une adresse et ajouter au moins un document.",
-        variant: "destructive"
-      });
+  const saveDraft = () => {
+    const payload = { docType, title, address, selectedAddress, parcelAnalysis, cerfaValues, savedAt: new Date().toISOString() };
+    localStorage.setItem("heureka.citizenDraft", JSON.stringify(payload));
+    const now = new Date();
+    setLastSavedAt(now);
+    toast({ title: "Brouillon sauvegardé", description: `Dernière sauvegarde à ${now.toLocaleTimeString("fr-FR")}.` });
+  };
+
+  const exportDossier = async () => {
+    const blob = await generateCerfaPdf({ dossierType: docType, values: cerfaValues, title });
+    downloadBlob(blob, `${docType}-${title || "dossier"}.pdf`);
+  };
+
+  const verifyDossier = () => {
+    setVerificationRequested(true);
+    setActiveSectionId("verification");
+    toast({
+      title: hasBlockingErrors ? "Dossier à compléter" : "Dossier vérifié",
+      description: hasBlockingErrors ? "La rubrique Vérification liste les points bloquants." : "Aucun blocage identifié avant transmission.",
+    });
+  };
+
+  const submitDossier = async () => {
+    if (!canTransmit) {
+      verifyDossier();
       return;
     }
-
     try {
-      const pieceChecklist = getRequiredPieces({ procedureType: docType, parcelAnalysis, selectedAddress, projectDetails: projectFlags });
+      const pieceChecklist = getRequiredPieces({ procedureType: docType, parcelAnalysis, selectedAddress, projectDetails: derivedProjectFlags });
       const createResponse = await fetch("/api/dossiers", {
         method: "POST",
         credentials: "include",
@@ -204,6 +590,7 @@ export default function CitoyenNewDossierPage() {
           address: selectedAddress.label,
           commune: selectedAddress.city || parcelAnalysis?.commune || "",
           metadata: {
+            cerfaValues,
             normalizedAddress: selectedAddress.label,
             address: {
               label: selectedAddress.label,
@@ -213,9 +600,11 @@ export default function CitoyenNewDossierPage() {
               lon: selectedCoordinates.lon,
             },
             parcelAnalysis,
-            locationContext: pieceChecklist.locationContext,
+            locationContext,
+            officialPieces: resolvedPieces,
+            completeness,
             pieceChecklist,
-            projectFlags,
+            projectFlags: derivedProjectFlags,
           },
         }),
       });
@@ -224,247 +613,231 @@ export default function CitoyenNewDossierPage() {
       const dossierId = created.dossier.id as string;
 
       const formData = new FormData();
-      files.forEach(file => formData.append("files", file));
+      files.forEach((file) => formData.append("files", file));
       formData.append("adresse", selectedAddress.label);
       formData.append("commune", selectedAddress.city || parcelAnalysis?.commune || "");
       formData.append("title", title);
       formData.append("documentType", documentTypeForProcedure(docType));
-      await upload.mutateAsync({ formData, dossierId });
+      if (files.length > 0) await upload.mutateAsync({ formData, dossierId });
 
       const submitResponse = await fetch(`/api/dossiers/${dossierId}/submit`, { method: "PATCH", credentials: "include" });
       if (!submitResponse.ok) throw new Error((await submitResponse.json().catch(() => ({}))).message || "Soumission impossible.");
       const submitted = await submitResponse.json();
-      
       toast({
-        title: submitted.dossier?.status === "INCOMPLET" ? "Dossier transmis, pièces à compléter" : "Dossier déposé !",
-        description: submitted.dossier?.status === "INCOMPLET"
-          ? "Votre dossier a été transmis à la mairie. Des compléments pourront être demandés."
-          : "Votre dossier a été transmis avec succès et est en cours d'analyse.",
+        title: submitted.dossier?.status === "INCOMPLET" ? "Dossier transmis, pièces à compléter" : "Dossier transmis",
+        description: "Votre demande a été envoyée au service instructeur.",
       });
-      
       setLocation("/citoyen");
-    } catch (err: any) {
-      console.error(err);
+    } catch (error: any) {
       toast({
         title: "Erreur lors du dépôt",
-        description: err?.message || "Une erreur est survenue lors de l'envoi de vos documents.",
-        variant: "destructive"
+        description: error?.message || "Une erreur est survenue lors de l'envoi du dossier.",
+        variant: "destructive",
       });
     }
   };
 
-  return (
-    <AppShell className="bg-muted/20 pb-20" mainClassName="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 w-full">
-      <div className="mb-6 rounded-lg border border-border/40 bg-white p-3 shadow-sm">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/citoyen">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-          </Button>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Plus className="w-4 h-4 text-primary-foreground" />
-            </div>
-            <CardTitle className="text-lg">Nouveau Dépôt de Dossier</CardTitle>
+  const updateCerfaValues = (values: CerfaFormValues) => {
+    setCerfaValues(values);
+    if (typeof values["project.title"] === "string") setTitle(values["project.title"]);
+    if (typeof values["project.dossierType"] === "string") setDocType(normalizeOfficialDossierType(values["project.dossierType"]));
+  };
+
+  const renderActiveSection = (section: CerfaSectionDefinition) => {
+    if (section.kind === "pieces") {
+      return (
+        <PiecesSection
+          pieces={resolvedPieces}
+          files={files}
+          matchedCodes={matchedCodes}
+          onAdd={() => fileInputRef.current?.click()}
+          onRemoveFile={removeFile}
+        />
+      );
+    }
+    if (section.kind === "verification") {
+      return (
+        <VerificationSection
+          missingFields={missingRequiredFields}
+          missingPieces={completeness.missingPieces}
+          unresolvedChecks={locationContext.unresolvedChecks || []}
+          timeline={timeline}
+        />
+      );
+    }
+    if (section.kind === "transmission") {
+      return (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-950">Transmission</h2>
+            <p className="mt-1 text-sm text-slate-600">Relisez la synthèse, vérifiez le dossier puis transmettez la demande à la mairie.</p>
           </div>
+          <div className={`rounded-lg border p-5 ${canTransmit ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+            <p className="font-semibold text-slate-950">
+              {canTransmit ? "Votre dossier peut être transmis." : "Transmission désactivée tant que le dossier est incomplet."}
+            </p>
+            <p className="mt-2 text-sm text-slate-600">{completeness.message}</p>
+            <Button type="button" className="mt-4" disabled={!canTransmit || upload.isPending} onClick={submitDossier}>
+              {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Transmettre ma demande
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return <CerfaInteractiveForm section={section} values={cerfaValues} onValuesChange={updateCerfaValues} />;
+  };
+
+  return (
+    <AppShell className="bg-slate-50 pb-12" mainClassName="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
+      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} />
+      <input ref={importInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleImportChange} />
+
+      <div className="mb-5 flex items-center gap-3">
+        <Button variant="ghost" size="icon" asChild>
+          <Link href="/citoyen">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+        </Button>
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <Plus className="h-5 w-5" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-950">Nouveau dépôt de dossier</h1>
+          <p className="text-sm text-slate-600">Formulaire CERFA interactif, pièces officielles et vérification avant transmission.</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-          <Card className="border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="text-xl">1. Informations du Projet</CardTitle>
-              <CardDescription>Donnez un nom à votre projet et renseignez l'adresse concernée.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="title">Titre du projet</Label>
-                <Input 
-                  id="title" 
-                  placeholder="Ex: Extension de garage, Rénovation façade..." 
-                  value={title}
-                  onChange={e => setTitle(e.target.value)}
-                  className="h-11"
-                  required
+      <Card className="mb-6 border-slate-200 shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle className="text-xl">{title || "Dossier sans titre"}</CardTitle>
+              <CardDescription>{DOSSIER_TYPES.find((type) => type.value === docType)?.label}</CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={canTransmit ? "default" : "outline"}>{statusLabel(dossierStatus)}</Badge>
+              <Badge variant="outline">{completionRate}% complété</Badge>
+              <Badge variant="outline">{lastSavedAt ? `Sauvé ${lastSavedAt.toLocaleTimeString("fr-FR")}` : "Non sauvegardé"}</Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-5">
+          <div>
+            <p className="text-xs font-medium text-slate-500">Commune</p>
+            <p className="font-semibold text-slate-950">{locationContext.commune || "À renseigner"}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">Adresse</p>
+            <p className="truncate font-semibold text-slate-950">{selectedAddress?.label || address || "À renseigner"}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">Parcelle</p>
+            <p className="font-semibold text-slate-950">{locationContext.parcel || (parcelAnalysisLoading ? "En recherche" : "Non déterminée")}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">Zone PLU</p>
+            <p className="font-semibold text-slate-950">{locationContext.pluZone || (parcelAnalysisLoading ? "En recherche" : "Non déterminée")}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">Analyse</p>
+            <p className="font-semibold text-slate-950">{locationContext.unresolvedChecks?.length ? "En cours" : "Localisation renseignée"}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 xl:grid-cols-[270px_minmax(0,1fr)_240px]">
+        <CerfaSectionSidebar
+          sections={sections}
+          activeSectionId={activeSection.id}
+          statuses={sectionStatuses}
+          onSelect={setActiveSectionId}
+        />
+
+        <main className="min-w-0 rounded-lg border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+          {activeSection.id === "terrain" ? (
+            <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4" data-demo="location-analysis">
+              <Label htmlFor="address-search">Recherche d'adresse</Label>
+              <div className="relative mt-2">
+                <Input
+                  id="address-search"
+                  value={address}
+                  placeholder="Cherchez une adresse..."
+                  onChange={(event) => {
+                    setAddress(event.target.value);
+                    if (selectedAddress) {
+                      setSelectedAddress(null);
+                      setParcelAnalysis(null);
+                      setParcelAnalysisError(null);
+                    }
+                  }}
+                  className="pl-10"
+                  autoComplete="off"
                 />
+                <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+                {geocode.isLoading ? <Loader2 className="absolute right-3.5 top-3 h-4 w-4 animate-spin text-slate-500" /> : null}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="address">Adresse du terrain</Label>
-                <div className="relative">
-                  <Input 
-                    id="address" 
-                    placeholder="Cherchez une adresse..." 
-                    value={address}
-                    onChange={e => {
-                      setAddress(e.target.value);
-                      if (selectedAddress) {
-                        setSelectedAddress(null);
-                        setParcelAnalysis(null);
-                        setParcelAnalysisError(null);
-                      }
-                    }}
-                    className="h-11 pl-10"
-                    autoComplete="off"
-                  />
-                  <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-muted-foreground" />
-                  {geocode.isLoading && <Loader2 className="absolute right-3.5 top-3.5 w-4 h-4 animate-spin text-muted-foreground" />}
+              {geocode.data?.results && address.length > 5 && !selectedAddress ? (
+                <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                  {geocode.data.results.map((result: any, index: number) => (
+                    <button
+                      key={index}
+                      type="button"
+                      className="block w-full border-b px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
+                      onClick={() => {
+                        setSelectedAddress(result);
+                        setAddress(result.label);
+                        setCerfaValues((current) => ({
+                          ...current,
+                          "terrain.address": result.label,
+                          "terrain.commune": result.city || "",
+                        }));
+                      }}
+                    >
+                      <span className="block text-sm font-semibold text-slate-950">{result.label}</span>
+                      <span className="text-xs text-slate-500">{result.city} ({result.postcode})</span>
+                    </button>
+                  ))}
                 </div>
-
-                {geocode.data?.results && address.length > 5 && !selectedAddress && (
-                  <Card className="absolute z-50 w-full mt-1 border shadow-xl max-h-60 overflow-y-auto">
-                    <CardContent className="p-0">
-                      {geocode.data.results.map((res: any, i: number) => (
-                        <button
-                          key={i}
-                          type="button"
-                          className="w-full text-left px-4 py-3 hover:bg-muted flex flex-col transition-colors border-b last:border-0"
-                          onClick={() => {
-                            setSelectedAddress(res);
-                            setAddress(res.label);
-                          }}
-                        >
-                          <span className="text-sm font-semibold">{res.label}</span>
-                          <span className="text-xs text-muted-foreground">{res.city} ({res.postcode})</span>
-                        </button>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {selectedAddress && (
-                  <div className="mt-2 text-xs font-medium text-emerald-600 flex items-center gap-1.5 bg-emerald-50 w-fit px-3 py-1.5 rounded-full ring-1 ring-emerald-100">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
+              ) : null}
+              {selectedAddress ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
                     Adresse validée : {selectedAddress.city}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="type">Type de dossier</Label>
-                <Select value={docType} onValueChange={setDocType}>
-                  <SelectTrigger id="type" className="h-11">
-                    <SelectValue placeholder="Choisir le type de demande" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DOSSIER_TYPES.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          {selectedAddress && (
-            <Card className="border-none shadow-md" data-demo="location-analysis">
-              <CardHeader>
-                <CardTitle className="text-xl">Analyse de localisation</CardTitle>
-                <CardDescription>Ces informations alimentent la checklist et le dossier mairie.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3 sm:grid-cols-3">
-                <div><p className="text-xs font-medium text-muted-foreground">Commune</p><p className="font-semibold">{selectedAddress.city || "Non déterminée"}</p></div>
-                <div><p className="text-xs font-medium text-muted-foreground">Parcelle</p><p className="font-semibold">{parcelAnalysis?.parcelRef || (parcelAnalysisLoading ? "En recherche" : "Non déterminée")}</p></div>
-                <div><p className="text-xs font-medium text-muted-foreground">Zone</p><p className="font-semibold">{parcelAnalysis?.zoneCode ? `Zone ${parcelAnalysis.zoneCode}` : parcelAnalysisLoading ? "En recherche" : "Non déterminée"}</p></div>
-                {parcelAnalysisError ? <p className="sm:col-span-3 text-sm text-amber-700">{parcelAnalysisError}. Le dossier sera transmis avec l'adresse et les coordonnées disponibles.</p> : null}
-              </CardContent>
-            </Card>
-          )}
-
-          <div data-demo="official-pieces-checklist">
-            <OfficialPiecesChecklist
-              dossierType={docType}
-              parcelAnalysis={parcelAnalysis}
-              selectedAddress={selectedAddress}
-              projectFlags={projectFlags}
-              onProjectFlagsChange={setProjectFlags}
-              uploadedDocuments={uploadedDocumentsForCompleteness}
-              isAnalyzingLocation={parcelAnalysisLoading}
-            />
-          </div>
-
-          <Card className="border-none shadow-md">
-            <CardHeader>
-              <CardTitle className="text-xl">2. Pièces du Dossier</CardTitle>
-              <CardDescription>Téléchargez ici votre CERFA rempli, ainsi que les plans (masse, coupe, façade).</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div 
-                className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center transition-all ${
-                  files.length > 0 ? "border-primary/40 bg-primary/5" : "border-muted-foreground/20 hover:border-primary/40"
-                }`}
-              >
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Upload className="w-8 h-8 text-primary" />
+                  </Badge>
+                  {parcelAnalysisError ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setParcelAnalysisRetryToken((token) => token + 1)}>
+                      Relancer l'analyse
+                    </Button>
+                  ) : null}
                 </div>
-                <h4 className="text-lg font-semibold mb-1">Cliquer pour ajouter des fichiers</h4>
-                <p className="text-sm text-muted-foreground mb-6">Supports PDF, JPG, PNG (Max 10MB par fichier)</p>
-                <input 
-                  type="file" 
-                  multiple 
-                  className="hidden" 
-                  id="file-upload" 
-                  onChange={handleFileChange}
-                />
-                <Button variant="outline" asChild className="rounded-lg px-8">
-                  <label htmlFor="file-upload" className="cursor-pointer">Sélectionner des documents</label>
-                </Button>
-              </div>
+              ) : null}
+              {parcelAnalysisError ? <p className="mt-2 text-sm text-amber-700">{parcelAnalysisError}</p> : null}
+            </div>
+          ) : null}
 
-              {files.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-muted-foreground px-1">Fichiers à envoyer ({files.length})</p>
-                  <div className="grid grid-cols-1 gap-2">
-                    {files.map((file, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-white border rounded-lg shadow-sm group">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded bg-muted flex items-center justify-center">
-                            <FileText className="w-4 h-4 text-muted-foreground" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium line-clamp-1">{file.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeFile(i)}
-                          className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-50"
-                        >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {verificationRequested && activeSection.kind !== "verification" && hasBlockingErrors ? (
+            <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              La vérification a détecté des points bloquants. Ouvrez la rubrique Vérification pour les corriger.
+            </div>
+          ) : null}
 
-          <div className="flex items-center justify-end gap-4 pt-4">
-            <Button variant="ghost" asChild>
-              <Link href="/citoyen">Annuler</Link>
-            </Button>
-            <Button 
-              type="submit" 
-              size="lg" 
-              className="px-10 h-12 shadow-lg shadow-primary/20"
-              disabled={upload.isPending || !selectedAddress || files.length === 0 || !title}
-            >
-              {upload.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Transfert en cours...
-                </>
-              ) : (
-                "Finaliser et Envoyer mon dossier"
-              )}
-            </Button>
-          </div>
-      </form>
+          {renderActiveSection(activeSection)}
+        </main>
+
+        <DossierActionRail
+          completionRate={completionRate}
+          canTransmit={canTransmit}
+          isTransmitting={upload.isPending}
+          onImport={() => importInputRef.current?.click()}
+          onExport={exportDossier}
+          onVerify={verifyDossier}
+          onSave={saveDraft}
+          onTransmit={submitDossier}
+          onBack={() => setLocation("/citoyen")}
+        />
+      </div>
     </AppShell>
   );
 }
