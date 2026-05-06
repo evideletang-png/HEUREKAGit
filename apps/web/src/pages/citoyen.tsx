@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { useGetApiDocuments } from "@workspace/api-client-react";
 import { AppShell } from "@/components/layout/AppShell";
+import { getDemoCitizenPortalContext, getDemoDossierForStatus } from "@/demo/demoSeedData";
+import { readDemoState, isDemoSessionActive } from "@/demo/demoModeStore";
 
 const stepLabels: Record<string, { label: string; color: string; icon: any }> = {
   depot: { label: "Dépôt validé", color: "text-blue-700 bg-blue-50 border-blue-200", icon: Clock },
@@ -95,7 +97,7 @@ export default function CitoyenPage() {
       if (!response.ok) throw new Error("Impossible de charger le contexte du portail citoyen.");
       return response.json();
     },
-    enabled: !!user,
+    enabled: !!user && !isDemoSessionActive(),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -105,7 +107,9 @@ export default function CitoyenPage() {
     }
   }, [user, authLoading, setLocation]);
 
-  if (authLoading || docsLoading || portalContextLoading) {
+  const demoActive = isDemoSessionActive();
+
+  if (!demoActive && (authLoading || docsLoading || portalContextLoading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/40">
         <p>Chargement...</p>
@@ -113,9 +117,16 @@ export default function CitoyenPage() {
     );
   }
 
-  const documents = docsData?.documents || [];
+  const demoState = readDemoState();
+  const documents = demoActive
+    ? [{
+        ...getDemoDossierForStatus(demoState.dossierStatus),
+        documentCount: 8,
+        timelineStep: demoState.dossierStatus === "notified" ? "decision" : demoState.dossierStatus === "incomplete" ? "pieces" : "instruction",
+      }]
+    : docsData?.documents || [];
   const firstName = getFirstName(user?.name);
-  const portalContext = portalContextData?.portalContext;
+  const portalContext = demoActive ? getDemoCitizenPortalContext() : portalContextData?.portalContext;
   const communeName = portalContext?.commune || getPortalCommuneName(documents);
   const townHallName = portalContext?.townHallName || `Mairie de ${communeName}`;
   const hasPortalAddress = Boolean(

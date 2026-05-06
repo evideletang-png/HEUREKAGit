@@ -9,6 +9,8 @@ import { Loader2, Building2, ClipboardCheck, MessageSquare, ArrowLeft, Search, F
 import { DossierDetailView } from "@/components/dossier/DossierDetailView";
 import { Input } from "@/components/ui/input";
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
+import { getDemoDossierForStatus } from "@/demo/demoSeedData";
+import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 
 type Dossier = {
   id: string;
@@ -45,11 +47,18 @@ export default function PortailMetropolePage({ params }: { params: { id?: string
 
   const { data: dossiersData, isLoading: loadingDossiers } = useQuery<{ dossiers: Dossier[] }>({
     queryKey: ["metropole-dossiers"],
-    queryFn: () => apiFetch("/api/mairie/dossiers"),
+    queryFn: () => isDemoSessionActive()
+      ? Promise.resolve({ dossiers: [getDemoDossierForStatus(readDemoState().dossierStatus) as any as Dossier] })
+      : apiFetch("/api/mairie/dossiers"),
     enabled: !!isAuthenticated,
   });
 
-  const filteredDossiers = (dossiersData?.dossiers || []).filter(d => 
+  const demoActive = isDemoSessionActive();
+  const demoDossier = getDemoDossierForStatus(readDemoState().dossierStatus) as any as Dossier;
+  const dossiers = demoActive && !(dossiersData?.dossiers || []).some((d) => d.id === demoDossier.id)
+    ? [demoDossier, ...(dossiersData?.dossiers || [])]
+    : (dossiersData?.dossiers || []);
+  const filteredDossiers = dossiers.filter(d => 
     (d.title || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
     (d.commune || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (d.address || "").toLowerCase().includes(searchTerm.toLowerCase()) ||

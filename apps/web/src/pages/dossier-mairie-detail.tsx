@@ -21,6 +21,8 @@ import { InstructionTimeline } from "@/components/instruction/InstructionTimelin
 import { LegalAlerts, type LegalAlert } from "@/components/instruction/LegalAlerts";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
+import { getDemoDossierForStatus } from "@/demo/demoSeedData";
+import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 
 type DossierDetail = {
   id: string;
@@ -151,7 +153,9 @@ export default function DossierMairieDetailPage() {
     enabled: !!id && !id.startsWith("demo-") && id !== "d2",
   });
 
-  const dossier = query.data || demoDossier;
+  const demoActive = isDemoSessionActive();
+  const seededDemoDossier = getDemoDossierForStatus(readDemoState().dossierStatus) as any as DossierDetail;
+  const dossier = query.data || (demoActive ? seededDemoDossier : demoDossier);
   const instruction = instructionQuery.data?.instruction || {
     instructionStatus: dossier.instructionStatus || demoDossier.instructionStatus,
     dateDepot: dossier.dateDepot || dossier.createdAt || demoDossier.dateDepot,

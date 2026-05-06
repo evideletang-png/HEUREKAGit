@@ -12,6 +12,7 @@ const ICONS: Record<DossierStatus, ComponentType<{ className?: string }>> = {
   in_instruction: Clock3,
   in_consultation: MessageSquare,
   decision_pending: Gavel,
+  signature_pending: FilePenLine,
   signed: CheckCircle2,
   notified: CheckCircle2,
 };

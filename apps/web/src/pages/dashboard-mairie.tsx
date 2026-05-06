@@ -27,6 +27,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
+import { getDemoDossierForStatus } from "@/demo/demoSeedData";
+import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 
 type MairieDossier = {
   id: string;
@@ -372,7 +374,16 @@ function DashboardView() {
     enabled: selectedCommune !== "all",
   });
 
-  const rows = data?.dossiers?.length ? data.dossiers : demoRows;
+  const demoActive = isDemoSessionActive();
+  const demoState = readDemoState();
+  const demoDashboardRow: MairieDossier = {
+    ...getDemoDossierForStatus(demoState.dossierStatus),
+    id: "demo-dossier-pcmi",
+    status: demoState.dossierStatus,
+  };
+  const rows = demoActive
+    ? [demoDashboardRow, ...(data?.dossiers?.length ? data.dossiers : demoRows)]
+    : data?.dossiers?.length ? data.dossiers : demoRows;
   const activeStatuses = useMemo(() => {
     const configured = settingsData?.settings?.formulas?.dashboardStatuses;
     const base = configured?.length ? configured : defaultDashboardStatuses;

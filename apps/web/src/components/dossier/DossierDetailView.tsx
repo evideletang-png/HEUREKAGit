@@ -14,6 +14,9 @@ import { DossierSIGMap } from "./DossierSIGMap";
 import { analyzeProject, type ProjectPluAnalysis } from "@/lib/urbanisme/plu/analyzeProject";
 import { DossierStatusBadge } from "./DossierStatusBadge";
 import { SignatureWorkflowPanel } from "./SignatureWorkflowPanel";
+import { DEMO_DOSSIER_ID, DEMO_MAIRIE_DETAIL_ID } from "@/demo/demoSeedData";
+import { getDemoSeedDossier, getDemoSeedMessages } from "@/demo/demoOrchestrator";
+import { isDemoSessionActive } from "@/demo/demoModeStore";
 
 interface DossierDetailViewProps {
   dossierId: string;
@@ -28,6 +31,9 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
   const { data: detail, isLoading } = useQuery<any>({
     queryKey: ["dossier-full-detail", dossierId],
     queryFn: async () => {
+      if (isDemoSessionActive() && (dossierId === DEMO_DOSSIER_ID || dossierId === DEMO_MAIRIE_DETAIL_ID)) {
+        return getDemoSeedDossier();
+      }
       const r = await fetch(`/api/mairie/dossiers/${dossierId}`);
       if (!r.ok) throw new Error("Failed to fetch");
       return r.json();
@@ -103,10 +109,11 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
                 </div>
               </CardContent>
            </Card>
+           <div data-demo="signature-workflow">
            <SignatureWorkflowPanel
              dossierId={dossierId}
              decisionGenerated={!!detail.metadata?.decisionDraft || !!detail.metadata?.generatedDecision || detail.status === "DECISION_EN_COURS"}
-             dossierReadyForSignature={detail.status === "DECISION_EN_COURS" || detail.status === "decision_pending" || detail.status === "SIGNED"}
+             dossierReadyForSignature={detail.status === "DECISION_EN_COURS" || detail.status === "decision_pending" || detail.status === "signature_pending" || detail.status === "SIGNED"}
              signatory={{
                id: detail.metadata?.signatureSignatory?.id || detail.assignedSignatoryId || "",
                fullName: detail.metadata?.signatureSignatory?.fullName || detail.metadata?.signature?.signerName || "",
@@ -115,9 +122,10 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
                authorityDelegationReference: detail.metadata?.signatureSignatory?.authorityDelegationReference || detail.metadata?.signature?.delegationReference,
              }}
            />
+           </div>
         </TabsContent>
 
-        <TabsContent value="analysis" className="pt-4">
+        <TabsContent value="analysis" className="pt-4" data-demo="plu-analysis">
           <PluRegulatoryAnalysisBlock analysis={projectPluAnalysis} />
         </TabsContent>
 
@@ -182,7 +190,7 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
            </div>
         </TabsContent>
 
-        <TabsContent value="messages" className="pt-4">
+        <TabsContent value="messages" className="pt-4" data-demo="dossier-messages">
            <MessagerieSection dossierId={dossierId} currentRole={userRole} />
         </TabsContent>
 
@@ -379,6 +387,9 @@ function MessagerieSection({ dossierId, currentRole }: { dossierId: string; curr
   const { data: messages = [] } = useQuery<any[]>({
     queryKey: ["dossier-messages", dossierId],
     queryFn: async () => {
+      if (isDemoSessionActive() && (dossierId === DEMO_DOSSIER_ID || dossierId === DEMO_MAIRIE_DETAIL_ID)) {
+        return getDemoSeedMessages();
+      }
       const r = await fetch(`/api/mairie/dossiers/${dossierId}/messages`);
       const d = await r.json();
       return d.messages || [];
@@ -471,6 +482,16 @@ function TimelineView({ dossierId }: { dossierId: string }) {
   const { data: timelineData } = useQuery<any>({
     queryKey: ["dossier-timeline", dossierId],
     queryFn: async () => {
+      if (isDemoSessionActive() && (dossierId === DEMO_DOSSIER_ID || dossierId === DEMO_MAIRIE_DETAIL_ID)) {
+        return {
+          events: [
+            { type: "STATUS_CHANGE", description: "Dossier depose par Jean Martin", toStatus: "submitted", createdAt: "2026-05-05T09:10:00.000Z" },
+            { type: "PIECE_RECEIVED", description: "Pieces PCMI1 a PCMI8 recues et controlees", toStatus: "complete", createdAt: "2026-05-05T09:25:00.000Z" },
+            { type: "CONSULTATION", description: "Consultation ABF lancee", toStatus: "in_consultation", createdAt: "2026-05-05T10:30:00.000Z" },
+            { type: "DECISION", description: "Decision favorable avec prescriptions preparee", toStatus: "decision_pending", createdAt: "2026-05-05T15:45:00.000Z" },
+          ],
+        };
+      }
       const r = await fetch(`/api/mairie/dossiers/${dossierId}/timeline`);
       return r.json();
     }

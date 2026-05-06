@@ -2,6 +2,7 @@ import { useGetMe, useLogin, useRegister, useLogout, getGetMeQueryKey } from "@w
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { getDemoUser, isDemoSessionActive } from "@/demo/demoModeStore";
 
 export function useAuth() {
   const [, setLocation] = useLocation();
@@ -77,10 +78,13 @@ export function useAuth() {
     }
   });
 
+  const demoUser = isDemoSessionActive() ? getDemoUser() : null;
+  const effectiveUser = demoUser || user;
+
   return {
-    user,
-    isLoading,
-    isAuthenticated: !!user && !error,
+    user: effectiveUser,
+    isLoading: demoUser ? false : isLoading,
+    isAuthenticated: !!effectiveUser && (!error || !!demoUser),
     login: loginMutation.mutate,
     isLoggingIn: loginMutation.isPending,
     register: registerMutation.mutate,

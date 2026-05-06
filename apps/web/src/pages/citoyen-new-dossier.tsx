@@ -13,6 +13,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { getRequiredPieces, normalizeProcedureType } from "@/lib/pieceRequirements";
 import { OfficialPiecesChecklist } from "@/components/dossier/OfficialPiecesChecklist";
 import type { ProjectContext } from "@/lib/urbanisme/cerfa/officialPieces.types";
+import { demoDossier, demoProjectContext, demoUploadedDocuments } from "@/demo/demoSeedData";
+import { isDemoSessionActive } from "@/demo/demoModeStore";
 
 const DOSSIER_TYPES = [
   { value: "DPC", label: "Déclaration préalable constructions/travaux (DPC)" },
@@ -68,8 +70,42 @@ export default function CitoyenNewDossierPage() {
   );
 
   useEffect(() => {
+    if (!isDemoSessionActive()) return;
+    setTitle(demoDossier.title);
+    setDocType("PCMI");
+    setProjectFlags(demoProjectContext.projectFlags);
+    setAddress(demoDossier.address);
+    setSelectedAddress({
+      id: "demo-ban-commune-demo-12-tilleuls",
+      label: demoDossier.address,
+      city: demoDossier.commune,
+      postcode: "37000",
+      lat: 47.394,
+      lon: 0.684,
+      parcelles: [demoDossier.parcelRef],
+    });
+    setParcelAnalysis({
+      parcelRef: demoDossier.parcelRef,
+      parcelId: "demo-cadastre-ab-123",
+      section: "AB",
+      number: "123",
+      commune: demoDossier.commune,
+      postcode: "37000",
+      zoneCode: demoDossier.zoneCode,
+      zoningLabel: demoDossier.zoneLabel,
+      constraints: ["Abords monument historique", "Consultation ABF"],
+      geoConstraints: ["Abords monument historique"],
+      source: "demoParcelProvider",
+    });
+    if (files.length === 0 && typeof File !== "undefined") {
+      setFiles(demoUploadedDocuments.map((document) => new File(["demo"], document.fileName, { type: "application/pdf" })));
+    }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     async function loadParcelPreview() {
+      if (isDemoSessionActive()) return;
       setParcelAnalysis(null);
       setParcelAnalysisError(null);
       setParcelAnalysisLoading(false);
@@ -322,7 +358,7 @@ export default function CitoyenNewDossierPage() {
           </Card>
 
           {selectedAddress && (
-            <Card className="border-none shadow-md">
+            <Card className="border-none shadow-md" data-demo="location-analysis">
               <CardHeader>
                 <CardTitle className="text-xl">Analyse de localisation</CardTitle>
                 <CardDescription>Ces informations alimentent la checklist et le dossier mairie.</CardDescription>
@@ -336,15 +372,17 @@ export default function CitoyenNewDossierPage() {
             </Card>
           )}
 
-          <OfficialPiecesChecklist
-            dossierType={docType}
-            parcelAnalysis={parcelAnalysis}
-            selectedAddress={selectedAddress}
-            projectFlags={projectFlags}
-            onProjectFlagsChange={setProjectFlags}
-            uploadedDocuments={uploadedDocumentsForCompleteness}
-            isAnalyzingLocation={parcelAnalysisLoading}
-          />
+          <div data-demo="official-pieces-checklist">
+            <OfficialPiecesChecklist
+              dossierType={docType}
+              parcelAnalysis={parcelAnalysis}
+              selectedAddress={selectedAddress}
+              projectFlags={projectFlags}
+              onProjectFlagsChange={setProjectFlags}
+              uploadedDocuments={uploadedDocumentsForCompleteness}
+              isAnalyzingLocation={parcelAnalysisLoading}
+            />
+          </div>
 
           <Card className="border-none shadow-md">
             <CardHeader>

@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Building2, CheckCircle2, FileSearch, Gavel, ShieldCheck, Siren } from "lucide-react";
 import { demoScenario } from "@/demo/demoScenario";
+import { DEMO_SCENARIO_ROUTE } from "@/demo/demoRoutes";
 import { DemoAccessGuard } from "@/demo/components/DemoAccessGuard";
 import { DemoHeader } from "@/demo/components/DemoHeader";
 import { DemoScenarioCard } from "@/demo/components/DemoScenarioCard";
@@ -23,8 +24,22 @@ export default function DemoHome() {
         <DemoHeader role="Accueil" />
         <main className="mx-auto max-w-7xl space-y-6 px-4 py-8 lg:px-8">
           <DemoScenarioCard />
+          <Card className="border-slate-900/10 bg-white">
+            <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-black uppercase tracking-widest text-slate-500">Nouveau mode demo orchestre</p>
+                <h2 className="mt-1 text-xl font-black text-slate-950">Parcours complet sur les vrais ecrans Heureka</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Lance le scenario citoyen → mairie → services → parapheur → notification, avec donnees controlees injectees dans les routes applicatives.
+                </p>
+              </div>
+              <Button asChild className="h-12 shrink-0 rounded-xl bg-slate-950 px-6 font-bold text-white hover:bg-slate-800">
+                <Link href={DEMO_SCENARIO_ROUTE}>Lancer /demo/scenario</Link>
+              </Button>
+            </CardContent>
+          </Card>
           <Card>
-            <CardHeader><CardTitle>Scénario figé sans IA live</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Anciennes vues de reference</CardTitle></CardHeader>
             <CardContent className="grid gap-5 lg:grid-cols-[1fr_0.9fr]">
               <p className="text-slate-600">
                 Cette démonstration présente un dossier de {demoScenario.commune} avec pré-contrôle,

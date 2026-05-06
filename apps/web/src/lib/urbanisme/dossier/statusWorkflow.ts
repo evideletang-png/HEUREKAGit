@@ -6,6 +6,7 @@ export type DossierStatus =
   | "in_instruction"
   | "in_consultation"
   | "decision_pending"
+  | "signature_pending"
   | "signed"
   | "notified";
 
@@ -28,6 +29,7 @@ export const DOSSIER_STATUS_ORDER: DossierStatus[] = [
   "in_instruction",
   "in_consultation",
   "decision_pending",
+  "signature_pending",
   "signed",
   "notified",
 ];
@@ -53,6 +55,8 @@ const LEGACY_STATUS_MAP: Record<string, DossierStatus> = {
   IN_CONSULTATION: "in_consultation",
   DECISION_EN_COURS: "decision_pending",
   DECISION_PENDING: "decision_pending",
+  SIGNATURE_PENDING: "signature_pending",
+  EN_SIGNATURE: "signature_pending",
   ACCEPTE: "signed",
   APPROVED: "signed",
   REFUSE: "signed",
@@ -72,6 +76,7 @@ export const DOSSIER_STATUS_META: Record<DossierStatus, { label: string; classNa
   in_instruction: { label: "En instruction", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   in_consultation: { label: "En consultation", className: "bg-amber-50 text-amber-700 border-amber-200" },
   decision_pending: { label: "Décision à préparer", className: "bg-purple-50 text-purple-700 border-purple-200" },
+  signature_pending: { label: "En signature", className: "bg-violet-50 text-violet-700 border-violet-200" },
   signed: { label: "Signé", className: "bg-slate-900 text-white border-slate-900" },
   notified: { label: "Notifié", className: "bg-emerald-600 text-white border-emerald-600" },
 };
@@ -97,7 +102,7 @@ export function updateDossierStatus(context: DossierStatusContext): DossierStatu
   if (context.notified) return "notified";
   if (context.decisionSigned) return current === "notified" ? "notified" : "signed";
 
-  if (current === "signed" || current === "notified") return current;
+  if (current === "signature_pending" || current === "signed" || current === "notified") return current;
 
   if (context.decisionReady || current === "decision_pending") {
     return "decision_pending";
