@@ -22,6 +22,7 @@ export type DemoStep = {
   title: string;
   description: string;
   route: string;
+  seedAction?: () => Promise<void>;
   highlightSelectors?: string[];
   waitMs?: number;
   dossierStatus?: DossierStatus | "signature_pending";
@@ -34,7 +35,7 @@ export const DEMO_STEPS: DemoStep[] = [
     role: "citizen",
     title: "Connexion citoyen",
     description: "Jean Martin entre dans le vrai portail citoyen Heureka avec une session de demonstration controlee.",
-    route: "/login",
+    route: "/citoyen",
     waitMs: 1200,
     dossierStatus: "draft",
   },

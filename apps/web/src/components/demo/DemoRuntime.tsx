@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DemoControls } from "./DemoControls";
-import { DemoStepOverlay } from "./DemoStepOverlay";
+import { DemoOverlay } from "./DemoOverlay";
 import { DEMO_MODE_ENABLED, readDemoState, subscribeDemoState, writeDemoState } from "@/demo/demoModeStore";
 
 export function DemoRuntime() {
@@ -13,7 +13,7 @@ export function DemoRuntime() {
 
   return (
     <>
-      <DemoStepOverlay />
+      <DemoOverlay />
       {state.overlayHidden && (
         <Button
           type="button"

@@ -2,12 +2,13 @@ import { useGetMe, useLogin, useRegister, useLogout, getGetMeQueryKey } from "@w
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { getDemoUser, isDemoSessionActive } from "@/demo/demoModeStore";
+import { useDemoAuth } from "@/demo/DemoAuthProvider";
 
 export function useAuth() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { demoUser, isDemoAuthenticated } = useDemoAuth();
 
   const { data: user, isLoading, error } = useGetMe({
     query: {
@@ -78,13 +79,12 @@ export function useAuth() {
     }
   });
 
-  const demoUser = isDemoSessionActive() ? getDemoUser() : null;
   const effectiveUser = demoUser || user;
 
   return {
     user: effectiveUser,
     isLoading: demoUser ? false : isLoading,
-    isAuthenticated: !!effectiveUser && (!error || !!demoUser),
+    isAuthenticated: isDemoAuthenticated || (!!effectiveUser && !error),
     login: loginMutation.mutate,
     isLoggingIn: loginMutation.isPending,
     register: registerMutation.mutate,
