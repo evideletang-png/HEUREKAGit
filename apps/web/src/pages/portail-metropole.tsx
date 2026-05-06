@@ -4,11 +4,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, Building2, ClipboardCheck, MessageSquare, ArrowLeft, Search, Filter } from "lucide-react";
 import { DossierDetailView } from "@/components/dossier/DossierDetailView";
 import { Input } from "@/components/ui/input";
+import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 
 type Dossier = {
   id: string;
@@ -130,7 +130,7 @@ export default function PortailMetropolePage({ params }: { params: { id?: string
                           </div>
                           <div className="flex items-center gap-6">
                              <div className="text-right flex flex-col items-end gap-1">
-                                <Badge className="text-[9px] font-black uppercase tracking-widest" variant="secondary">{d.status}</Badge>
+                                <DossierStatusBadge status={d.status} className="text-[9px] uppercase tracking-widest" />
                                 <p className="text-[10px] text-slate-400 font-bold">{d.dossierNumber}</p>
                              </div>
                              <div className="p-2 bg-slate-100 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">

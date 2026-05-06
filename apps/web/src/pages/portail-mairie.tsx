@@ -19,6 +19,7 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { ZoneFirstCalibrationModule } from "@/components/mairie/ZoneFirstCalibrationModule";
+import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 
 type Dossier = {
   id: string;
@@ -3327,9 +3328,7 @@ export default function PortailMairiePage() {
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2 flex-wrap">
                              <span className="text-[10px] font-black font-mono bg-muted px-1.5 py-0.5 rounded border">{(d as any).dossierNumber || "SANS NUMÉRO"}</span>
-                            <Badge variant={STATUS_CONFIG[d.status]?.variant ?? "outline"}>
-                              {STATUS_CONFIG[d.status]?.label ?? d.status}
-                            </Badge>
+                            <DossierStatusBadge status={d.status} className="rounded-md text-[10px]" />
                             {d.anomalyCount && d.anomalyCount > 0 ? (
                                <Badge variant="destructive" className="flex items-center gap-1 text-[10px] h-5 shadow-sm px-1.5 font-semibold font-mono tracking-tight">
                                  <AlertTriangle className="w-3 h-3" />

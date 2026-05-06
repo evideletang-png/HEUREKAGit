@@ -11,6 +11,7 @@ import { PROCEDURES } from "@/constants/procedures";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { DossierStatusBadge } from "./DossierStatusBadge";
 
 interface PieceStatus {
   code: string;
@@ -258,15 +259,7 @@ export function DossierDeposit({ dossierId: initialDossierId }: { dossierId?: st
               <Progress value={stats.rate} className="h-2 bg-muted rounded-full" />
             </div>
             <div className="shrink-0 flex items-center gap-3">
-              <Badge 
-                className={`h-9 px-4 font-black text-xs tracking-widest uppercase border-none
-                  ${dossier?.status === "DRAFT" ? "bg-gray-100 text-gray-600" :
-                    dossier?.status === "SUBMITTED" ? "bg-blue-500 text-white" :
-                    dossier?.status === "UNDER_REVIEW" ? "bg-amber-500 text-white" :
-                    dossier?.status === "APPROVED" ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}
-              >
-                Statut : {dossier?.status}
-              </Badge>
+              <DossierStatusBadge status={dossier?.status} prefix="Statut" className="h-9 px-4 text-xs uppercase tracking-widest" />
               {dossier?.status === "UNDER_REVIEW" && (
                 <div className="flex gap-1">
                    <Button variant={activeTab === "pieces" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("pieces")} className="h-9 px-4 gap-2">
@@ -493,9 +486,7 @@ export function DossierDeposit({ dossierId: initialDossierId }: { dossierId?: st
                 </Badge>
               )
             ) : (
-                <Badge className="bg-primary text-white border-none gap-1.5 px-3 py-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Dossier {dossier?.status}
-                </Badge>
+                <DossierStatusBadge status={dossier?.status} prefix="Dossier" className="px-3 py-1" />
             )}
           </div>
         </div>

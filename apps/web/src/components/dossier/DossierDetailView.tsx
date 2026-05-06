@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { DossierSIGMap } from "./DossierSIGMap";
 import { analyzeProject, type ProjectPluAnalysis } from "@/lib/urbanisme/plu/analyzeProject";
+import { DossierStatusBadge } from "./DossierStatusBadge";
 
 interface DossierDetailViewProps {
   dossierId: string;
@@ -60,9 +61,7 @@ export function DossierDetailView({ dossierId, userRole }: DossierDetailViewProp
           </p>
         </div>
         <div className="flex flex-col gap-2 md:items-end">
-          <Badge className="h-7 px-3 text-[10px] font-black uppercase tracking-widest bg-primary shadow-sm border-none">
-            {detail.status?.replace(/_/g, ' ')}
-          </Badge>
+          <DossierStatusBadge status={detail.status} className="h-7 text-[10px] uppercase tracking-widest shadow-sm" />
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
             Instruction : <span className="text-slate-900">{detail.assignedMetropoleId ? "MÉTROPOLE" : "MAIRIE"}</span>
           </p>
