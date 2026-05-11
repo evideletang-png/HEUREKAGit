@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { CheckCircle2, MapPin } from "lucide-react";
+import { CheckCircle2, Loader2, MapPin, Search } from "lucide-react";
+import { useGeocodeAddress } from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,17 +20,32 @@ function uniqueQuestions(actions: ProjectAction[]) {
   return Array.from(new Set(actions.flatMap((action) => ACTION_QUESTIONS[action] || [])));
 }
 
+function getAddressCoordinates(address: any) {
+  const lat = Number(address?.lat ?? address?.latitude ?? address?.y);
+  const lon = Number(address?.lon ?? address?.lng ?? address?.longitude ?? address?.x);
+  return {
+    lat: Number.isFinite(lat) ? lat : null,
+    lon: Number.isFinite(lon) ? lon : null,
+  };
+}
+
 export function CompositeProjectWizard(props: {
   onResult: (result: OrientationResultPayload) => void;
 }) {
   const [actions, setActions] = useState<ProjectAction[]>([]);
   const [answers, setAnswers] = useState<OrientationAnswers>({});
+  const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [parcelContext, setParcelContext] = useState<ParcelContextAnalysis | null>(null);
   const [parcelContextLoading, setParcelContextLoading] = useState(false);
   const [parcelContextError, setParcelContextError] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [expertCorrection, setExpertCorrection] = useState(false);
   const questions = useMemo(() => uniqueQuestions(actions), [actions]);
+  const geocode = useGeocodeAddress(
+    { q: answers.address || "" },
+    { query: { enabled: (answers.address || "").length > 5 && !selectedAddress } } as any,
+  );
+  const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
 
   const toggleAction = (action: ProjectAction) => {
     setActions((current) => current.includes(action) ? current.filter((item) => item !== action) : [...current, action]);
@@ -71,14 +87,21 @@ export function CompositeProjectWizard(props: {
   };
 
   const runParcelContextAnalysis = async () => {
-    if (!answers.address && !answers.parcel) return;
+    if (!selectedAddress && !answers.parcel) {
+      setParcelContextError("Sélectionnez une adresse proposée par la recherche intelligente ou saisissez une référence cadastrale.");
+      return;
+    }
     setParcelContextLoading(true);
     setParcelContextError(null);
     try {
       const analysis = await analyzeParcelContext({
-        address: answers.address,
+        address: selectedAddress?.label || answers.address,
         parcelId: answers.parcel,
-        commune: answers.commune,
+        coordinates: { lat: selectedCoordinates.lat, lon: selectedCoordinates.lon },
+        banId: selectedAddress?.id,
+        banParcelles: selectedAddress?.parcelles || selectedAddress?.banParcelles || [],
+        commune: selectedAddress?.city || answers.commune,
+        codeInsee: selectedAddress?.citycode || selectedAddress?.insee,
         dossierType: "PCMI",
       });
       setParcelContext(analysis);
@@ -174,7 +197,57 @@ export function CompositeProjectWizard(props: {
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="space-y-2">
             <Label>Adresse du projet</Label>
-            <Input value={answers.address || ""} onChange={(event) => setAnswers((current) => ({ ...current, address: event.target.value }))} />
+            <div className="relative">
+              <Input
+                value={answers.address || ""}
+                onChange={(event) => {
+                  setSelectedAddress(null);
+                  setParcelContext(null);
+                  setParcelContextError(null);
+                  setAnswers((current) => ({ ...current, address: event.target.value }));
+                }}
+                className="pl-10"
+                autoComplete="off"
+                placeholder="Ex. 15 rue Jean Mermoz 37540"
+              />
+              <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+              {geocode.isLoading ? <Loader2 className="absolute right-3.5 top-3 h-4 w-4 animate-spin text-slate-500" /> : null}
+              {geocode.data?.results?.length && (answers.address || "").length > 5 && !selectedAddress ? (
+                <div className="absolute z-40 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                  {geocode.data.results.map((result: any, index: number) => (
+                    <button
+                      key={`${result.id || result.label}-${index}`}
+                      type="button"
+                      className="block w-full border-b px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
+                      onClick={() => {
+                        setSelectedAddress(result);
+                        setParcelContext(null);
+                        setParcelContextError(null);
+                        setAnswers((current) => ({
+                          ...current,
+                          address: result.label,
+                          commune: result.city || current.commune,
+                          parcel: result.parcelles?.[0] || current.parcel,
+                        }));
+                      }}
+                    >
+                      <span className="block text-sm font-semibold text-slate-950">{result.label}</span>
+                      <span className="text-xs text-slate-500">
+                        {result.city} ({result.postcode}){result.parcelles?.length ? ` · ${result.parcelles.length} parcelle(s) candidate(s)` : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {selectedAddress ? (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Adresse sélectionnée : {selectedAddress.city}
+              </div>
+            ) : (answers.address || "").length > 5 ? (
+              <p className="text-xs text-amber-700">Sélectionnez une adresse dans la liste pour récupérer la parcelle et les coordonnées.</p>
+            ) : null}
           </label>
           <label className="space-y-2">
             <Label>Parcelle cadastrale si connue</Label>
@@ -182,7 +255,7 @@ export function CompositeProjectWizard(props: {
           </label>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={parcelContextLoading || (!answers.address && !answers.parcel)} onClick={runParcelContextAnalysis}>
+          <Button type="button" variant="outline" disabled={parcelContextLoading || (!selectedAddress && !answers.parcel)} onClick={runParcelContextAnalysis}>
             Analyser le terrain
           </Button>
           <Button type="button" variant="ghost" onClick={() => setExpertCorrection((value) => !value)}>
