@@ -39,6 +39,7 @@ function normalizeProject(row: any) {
     mainPluZone: row.mainPluZone,
     usedModules: asArray(row.usedModules),
     alerts: asArray(row.alerts),
+    metadata: row.metadata || {},
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

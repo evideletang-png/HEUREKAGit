@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ProtectedLayout } from "@/components/layout/ProtectedLayout";
 import { useCreateAnalysis, useGeocodeAddress, getGeocodeAddressQueryKey } from "@workspace/api-client-react";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { getApiUrl } from "@/lib/api";
 import { MapContainer, Polygon, TileLayer, Tooltip as LeafletTooltip, useMap } from "react-leaflet";
 import L from "leaflet";
+import type { ProjectCard } from "@/lib/projects/types";
 
 type GeoSelection = {
   label: string;
@@ -43,6 +45,10 @@ type ParcelPreviewResponse = {
     zoneCode: string | null;
     zoningLabel: string | null;
   } | null;
+};
+
+type ProjectHubPayload = {
+  project: ProjectCard;
 };
 
 function extractFirstRing(feature: Record<string, any> | null | undefined): number[][] | null {
@@ -85,6 +91,8 @@ function FitParcelPreviewBounds({
 }
 
 export default function NewAnalysisPage() {
+  const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const projectId = searchParams.get("projectId");
   const [address, setAddress] = useState("");
   const debouncedAddress = useDebounce(address, 400);
   const [selectedGeo, setSelectedGeo] = useState<GeoSelection | null>(null);
@@ -94,9 +102,21 @@ export default function NewAnalysisPage() {
   const [parcelPreviewError, setParcelPreviewError] = useState<string | null>(null);
   const [isLoadingParcelPreview, setIsLoadingParcelPreview] = useState(false);
   const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
+  const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
   
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  const { data: projectData, isLoading: isLoadingProject } = useQuery<ProjectHubPayload>({
+    queryKey: ["project-for-analysis", projectId],
+    queryFn: async () => {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId || "")}`, { credentials: "include" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || payload.error || "Projet introuvable.");
+      return payload;
+    },
+    enabled: Boolean(projectId),
+  });
 
   const { data: geoData, isFetching: isGeocoding } = useGeocodeAddress(
     { q: debouncedAddress },
@@ -164,6 +184,42 @@ export default function NewAnalysisPage() {
     setParcelPreviewError(null);
     setSelectedParcelIds([]);
   };
+
+  useEffect(() => {
+    const project = projectData?.project;
+    if (!projectId || !project || hydratedProjectId === projectId) return;
+
+    const metadataAddress = project.metadata?.address || {};
+    const metadataParcel = project.metadata?.parcelPreview || {};
+    const lat = Number(project.coordinates?.lat ?? metadataAddress.lat ?? metadataAddress.latitude);
+    const lng = Number(project.coordinates?.lon ?? metadataAddress.lon ?? metadataAddress.lng ?? metadataAddress.longitude);
+    const parcelIdu = metadataParcel.idu || metadataAddress.parcelles?.[0];
+
+    if (!project.address || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setAddress(project.address || "");
+      setHydratedProjectId(projectId);
+      return;
+    }
+
+    const projectGeo: GeoSelection = {
+      label: project.address,
+      city: project.commune || metadataAddress.city,
+      postcode: metadataAddress.postcode,
+      lat,
+      lng,
+      banId: metadataAddress.banId,
+      inseeCode: metadataAddress.inseeCode || metadataAddress.citycode,
+      parcelles: parcelIdu ? [parcelIdu] : undefined,
+    };
+
+    setAddress(projectGeo.label);
+    setSelectedGeo(projectGeo);
+    setStep("selection");
+    setParcelPreview(null);
+    setParcelPreviewError(null);
+    setSelectedParcelIds([]);
+    setHydratedProjectId(projectId);
+  }, [hydratedProjectId, projectData?.project, projectId]);
 
   useEffect(() => {
     if (selectedGeo) {
@@ -291,7 +347,11 @@ export default function NewAnalysisPage() {
       <div className="max-w-3xl mx-auto mt-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight mb-2">Nouvelle étude de faisabilité</h1>
-          <p className="text-muted-foreground">Saisissez l'adresse de la parcelle à analyser. Notre IA s'occupe de récupérer les données cadastrales et le PLU.</p>
+          <p className="text-muted-foreground">
+            {projectData?.project
+              ? "L'adresse du projet est reprise automatiquement pour lancer l'analyse parcellaire."
+              : "Saisissez l'adresse de la parcelle à analyser. Notre IA s'occupe de récupérer les données cadastrales et le PLU."}
+          </p>
         </div>
 
         <Card className="p-6 md:p-8 shadow-lg border-border/60">
@@ -325,6 +385,9 @@ export default function NewAnalysisPage() {
                   autoComplete="off"
                 />
                 {isGeocoding && (
+                  <Loader2 className="absolute right-4 top-3.5 w-5 h-5 animate-spin text-primary" />
+                )}
+                {isLoadingProject && (
                   <Loader2 className="absolute right-4 top-3.5 w-5 h-5 animate-spin text-primary" />
                 )}
               </div>
