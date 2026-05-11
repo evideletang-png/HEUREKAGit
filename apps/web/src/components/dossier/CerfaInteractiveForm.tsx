@@ -3,7 +3,6 @@ import { CheckCircle2, Loader2, Search } from "lucide-react";
 import { useGeocodeAddress } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { getCerfaFieldMapping, type CerfaFormValues, type CerfaFieldValue } from "@/lib/urbanisme/cerfa/cerfaFieldMapping";
@@ -131,31 +130,30 @@ export function CerfaInteractiveForm(props: {
                   className="min-h-28 resize-y"
                 />
               ) : field.type === "select" ? (
-                <Select value={valueAsString(values[field.id])} onValueChange={(value) => update(field, value)}>
-                  <SelectTrigger id={id}>
-                    <SelectValue placeholder="Sélectionner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(field.options || []).map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : field.type === "yes_no" ? (
-                <Select
-                  value={values[field.id] === true ? "yes" : values[field.id] === false ? "no" : ""}
-                  onValueChange={(value) => update(field, value)}
+                <select
+                  id={id}
+                  value={valueAsString(values[field.id])}
+                  onChange={(event) => update(field, event.target.value)}
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-950 shadow-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
                 >
-                  <SelectTrigger id={id}>
-                    <SelectValue placeholder="À renseigner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="yes">Oui</SelectItem>
-                    <SelectItem value="no">Non</SelectItem>
-                  </SelectContent>
-                </Select>
+                  <option value="">Sélectionner</option>
+                  {(field.options || []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : field.type === "yes_no" ? (
+                <select
+                  id={id}
+                  value={values[field.id] === true ? "yes" : values[field.id] === false ? "no" : ""}
+                  onChange={(event) => update(field, event.target.value)}
+                  className="h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-950 shadow-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">À renseigner</option>
+                  <option value="yes">Oui</option>
+                  <option value="no">Non</option>
+                </select>
               ) : (
                 <Input
                   id={id}
