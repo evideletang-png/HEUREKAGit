@@ -9,6 +9,8 @@ import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/login";
 import RegisterPage from "@/pages/register";
 import DashboardPage from "@/pages/dashboard";
+import NewProjectPage from "@/pages/project-new";
+import ProjectHubPage from "@/pages/project-hub";
 import NewAnalysisPage from "@/pages/new-analysis";
 import AnalysisDetailPage from "@/pages/analysis-detail";
 import AdminPage from "@/pages/admin";
@@ -71,6 +73,8 @@ function Router() {
 
       {/* Protected Routes - Protection logic is inside ProtectedLayout */}
       <Route path="/dashboard" component={DashboardPage} />
+      <Route path="/projects/new" component={NewProjectPage} />
+      <Route path="/projects/:id" component={ProjectHubPage} />
       <Route path="/analyses/new" component={NewAnalysisPage} />
       <Route path="/analyses/:id" component={AnalysisDetailPage} />
       <Route path="/admin/communes" component={AdminCommunesPage} />

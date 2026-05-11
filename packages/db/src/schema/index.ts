@@ -45,3 +45,4 @@ export * from "./permissionProfiles";
 export * from "./reglementAnalysis";
 export * from "./zoneRegulatoryRules";
 export * from "./regulatoryControls";
+export * from "./projects";

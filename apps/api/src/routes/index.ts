@@ -12,6 +12,7 @@ import appealsRouter from "./appeals.js";
 import conversationsRouter from "./conversations.js";
 import tilesRouter from "./tiles.js";
 import reglementRouter from "./reglement.js";
+import projectsRouter from "./projects.js";
 
 import notificationsRouter from "./notifications.js";
 
@@ -31,5 +32,6 @@ router.use("/dossiers", dossiersRouter);
 router.use("/appeals", appealsRouter);
 router.use("/conversations", conversationsRouter);
 router.use("/reglement", reglementRouter);
+router.use("/projects", projectsRouter);
 
 export default router;

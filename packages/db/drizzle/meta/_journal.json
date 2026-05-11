@@ -232,6 +232,13 @@
       "when": 1775811600000,
       "tag": "0032_town_hall_upload_chunks",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1775818800000,
+      "tag": "0033_projects",
+      "breakpoints": true
     }
   ]
 }
