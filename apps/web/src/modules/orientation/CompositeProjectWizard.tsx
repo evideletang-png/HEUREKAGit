@@ -6,6 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { analyzeParcelContext, type ParcelContextAnalysis } from "@/lib/location-intelligence/analyzeParcelContext";
+import { ParcelContextDetails } from "@/components/location/ParcelContextDetails";
+import { ParcelContextSummary } from "@/components/location/ParcelContextSummary";
+import { ParcelDetectionLoader } from "@/components/location/ParcelDetectionLoader";
 import { ACTION_QUESTIONS, QUESTION_LABELS } from "./orientation.config";
 import { determineDossierType } from "./determineDossierType";
 import { PROJECT_ACTIONS } from "./projectActions";
@@ -20,6 +24,11 @@ export function CompositeProjectWizard(props: {
 }) {
   const [actions, setActions] = useState<ProjectAction[]>([]);
   const [answers, setAnswers] = useState<OrientationAnswers>({});
+  const [parcelContext, setParcelContext] = useState<ParcelContextAnalysis | null>(null);
+  const [parcelContextLoading, setParcelContextLoading] = useState(false);
+  const [parcelContextError, setParcelContextError] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [expertCorrection, setExpertCorrection] = useState(false);
   const questions = useMemo(() => uniqueQuestions(actions), [actions]);
 
   const toggleAction = (action: ProjectAction) => {
@@ -34,6 +43,51 @@ export function CompositeProjectWizard(props: {
 
   const updateBoolean = (key: keyof OrientationAnswers, value: string) => {
     setAnswers((current) => ({ ...current, [key]: value === "yes" }));
+  };
+
+  const applyParcelContextToAnswers = (analysis: ParcelContextAnalysis) => {
+    const constraints = analysis.detectedConstraints;
+    setAnswers((current) => ({
+      ...current,
+      commune: analysis.commune || current.commune,
+      parcel: analysis.parcel?.fullReference || current.parcel,
+      pluZone: analysis.pluZone?.code || current.pluZone,
+      abf: constraints.abf,
+      monumentHistoriqueAbords: constraints.monumentHistoriqueAbords,
+      spr: constraints.spr,
+      siteClasse: constraints.siteClasse,
+      siteInscrit: constraints.siteInscrit,
+      parcNationalCore: constraints.parcNationalCore,
+      natura2000: constraints.natura2000,
+      pprRequiresStudy: constraints.pprRequiresStudy,
+      floodRisk: constraints.ppri,
+      naturalRisk: constraints.pprn,
+      soilInformationSector: constraints.sis,
+      formerIcpe: constraints.formerIcpe,
+      oap: constraints.oap,
+      servitude: constraints.sup,
+      metropoleCompetence: constraints.metropolisInstruction || constraints.roadAuthority,
+    }));
+  };
+
+  const runParcelContextAnalysis = async () => {
+    if (!answers.address && !answers.parcel) return;
+    setParcelContextLoading(true);
+    setParcelContextError(null);
+    try {
+      const analysis = await analyzeParcelContext({
+        address: answers.address,
+        parcelId: answers.parcel,
+        commune: answers.commune,
+        dossierType: "PCMI",
+      });
+      setParcelContext(analysis);
+      applyParcelContextToAnswers(analysis);
+    } catch (error) {
+      setParcelContextError(error instanceof Error ? error.message : "Analyse territoriale indisponible");
+    } finally {
+      setParcelContextLoading(false);
+    }
   };
 
   return (
@@ -112,54 +166,76 @@ export function CompositeProjectWizard(props: {
       <section className="rounded-xl border border-slate-200 bg-white p-5">
         <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
           <MapPin className="h-5 w-5 text-primary" />
-          Contexte de localisation
+          Analyse automatique du terrain
         </h3>
         <p className="mt-1 text-sm text-slate-600">
-          Facultatif : ces informations permettent d'anticiper les services consultés et les délais indicatifs. Vous pourrez aussi les renseigner plus tard dans le dépôt.
+          Renseignez uniquement une adresse ou une parcelle. Heureka détecte automatiquement les contraintes territoriales disponibles.
         </p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="space-y-2">
-            <Label>Adresse ou secteur</Label>
+            <Label>Adresse du projet</Label>
             <Input value={answers.address || ""} onChange={(event) => setAnswers((current) => ({ ...current, address: event.target.value }))} />
           </label>
           <label className="space-y-2">
-            <Label>Commune</Label>
-            <Input value={answers.commune || ""} onChange={(event) => setAnswers((current) => ({ ...current, commune: event.target.value }))} />
-          </label>
-          <label className="space-y-2">
-            <Label>Parcelle</Label>
+            <Label>Parcelle cadastrale si connue</Label>
             <Input value={answers.parcel || ""} onChange={(event) => setAnswers((current) => ({ ...current, parcel: event.target.value }))} />
           </label>
-          <label className="space-y-2">
-            <Label>Zone PLU</Label>
-            <Input value={answers.pluZone || ""} onChange={(event) => setAnswers((current) => ({ ...current, pluZone: event.target.value }))} />
-          </label>
-          {[
-            ["abf", "Périmètre ABF / abords monument historique"],
-            ["spr", "Site patrimonial remarquable"],
-            ["natura2000", "Natura 2000"],
-            ["pprRequiresStudy", "PPRI / PPRN / PPRT ou risque identifié"],
-            ["soilInformationSector", "Secteur d'information sur les sols"],
-            ["formerIcpe", "Ancienne ICPE"],
-            ["oap", "OAP"],
-            ["servitude", "Servitude d'utilité publique"],
-            ["metropoleCompetence", "Compétence métropole / voirie"],
-            ["erp", "ERP ou accessibilité"],
-          ].map(([key, label]) => (
-            <label key={key} className="rounded-lg border border-slate-200 p-3">
-              <Label className="text-sm font-medium text-slate-900">{label}</Label>
-              <Select value={(answers as any)[key] === true ? "yes" : (answers as any)[key] === false ? "no" : ""} onValueChange={(value) => updateBoolean(key as keyof OrientationAnswers, value)}>
-                <SelectTrigger className="mt-2">
-                  <SelectValue placeholder="Non renseigné" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="yes">Oui / détecté</SelectItem>
-                  <SelectItem value="no">Non identifié</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-          ))}
         </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button type="button" variant="outline" disabled={parcelContextLoading || (!answers.address && !answers.parcel)} onClick={runParcelContextAnalysis}>
+            Analyser le terrain
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setExpertCorrection((value) => !value)}>
+            Corriger ou compléter les informations
+          </Button>
+        </div>
+        <div className="mt-4 space-y-4">
+          {parcelContextLoading ? <ParcelDetectionLoader /> : null}
+          <ParcelContextSummary analysis={parcelContext} error={parcelContextError} onRetry={runParcelContextAnalysis} onShowDetails={() => setShowDetails((value) => !value)} />
+          {showDetails ? <ParcelContextDetails analysis={parcelContext} /> : null}
+        </div>
+
+        {expertCorrection ? (
+          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-950">Correction manuelle avancée</p>
+            <p className="mt-1 text-xs text-amber-800">À utiliser uniquement si une donnée automatique est manquante ou manifestement incorrecte.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="space-y-2">
+                <Label>Commune</Label>
+                <Input value={answers.commune || ""} onChange={(event) => setAnswers((current) => ({ ...current, commune: event.target.value }))} />
+              </label>
+              <label className="space-y-2">
+                <Label>Zone PLU</Label>
+                <Input value={answers.pluZone || ""} onChange={(event) => setAnswers((current) => ({ ...current, pluZone: event.target.value }))} />
+              </label>
+              {[
+                ["abf", "Périmètre ABF / abords monument historique"],
+                ["spr", "Site patrimonial remarquable"],
+                ["natura2000", "Natura 2000"],
+                ["pprRequiresStudy", "PPRI / PPRN / PPRT ou risque identifié"],
+                ["soilInformationSector", "Secteur d'information sur les sols"],
+                ["formerIcpe", "Ancienne ICPE"],
+                ["oap", "OAP"],
+                ["servitude", "Servitude d'utilité publique"],
+                ["metropoleCompetence", "Compétence métropole / voirie"],
+                ["erp", "ERP ou accessibilité"],
+              ].map(([key, label]) => (
+                <label key={key} className="rounded-lg border border-amber-200 bg-white p-3">
+                  <Label className="text-sm font-medium text-slate-900">{label}</Label>
+                  <Select value={(answers as any)[key] === true ? "yes" : (answers as any)[key] === false ? "no" : ""} onValueChange={(value) => updateBoolean(key as keyof OrientationAnswers, value)}>
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Non renseigné" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Oui / détecté</SelectItem>
+                      <SelectItem value="no">Non identifié</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <div className="flex justify-end">
