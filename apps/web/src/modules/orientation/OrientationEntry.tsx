@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCommuneModuleConfig } from "@/lib/communes/getCommuneModuleConfig";
+import type { ProjectCard } from "@/lib/projects/types";
 import { isDemoSessionActive } from "@/demo/demoModeStore";
 import { CompositeProjectWizard } from "./CompositeProjectWizard";
 import { ORIENTATION_HELP_TEXT } from "./orientation.config";
@@ -31,6 +32,7 @@ export default function OrientationEntry() {
   const [, setLocation] = useLocation();
   const [step, setStep] = useState<OrientationStep>("entry");
   const [result, setResult] = useState<OrientationResultPayload | null>(null);
+  const [projectContext, setProjectContext] = useState<ProjectCard | null>(null);
   const config = getCommuneModuleConfig({ communeName: isDemoSessionActive() ? "Commune Démo" : "Tours" });
   const searchParams = new URLSearchParams(window.location.search);
   const projectId = searchParams.get("projectId");
@@ -46,6 +48,26 @@ export default function OrientationEntry() {
       setLocation(`/citoyen/nouveau?${params.toString()}`);
     }
   }, [config.modules.orientationAssistantEnabled, setLocation, projectId]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectContext(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/projects/${encodeURIComponent(projectId)}`, { credentials: "include" })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || payload.error || "Projet introuvable.");
+        if (!cancelled) setProjectContext(payload.project || null);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectContext(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   if (!config.modules.orientationAssistantEnabled) return null;
 
@@ -114,6 +136,13 @@ export default function OrientationEntry() {
           </CardHeader>
           <CardContent>
             <CompositeProjectWizard
+              initialLocation={{
+                address: projectContext?.address,
+                commune: projectContext?.commune,
+                parcel: projectContext?.parcelReferences?.[0],
+                pluZone: projectContext?.mainPluZone,
+                coordinates: projectContext?.coordinates,
+              }}
               onResult={(nextResult) => {
                 setResult(nextResult);
                 setStep("result");

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Loader2, MapPin, Search } from "lucide-react";
 import { useGeocodeAddress } from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,14 @@ function getAddressCoordinates(address: any) {
 
 export function CompositeProjectWizard(props: {
   onResult: (result: OrientationResultPayload) => void;
+  initialLocation?: {
+    address?: string | null;
+    commune?: string | null;
+    parcel?: string | null;
+    pluZone?: string | null;
+    coordinates?: { lat?: number | null; lon?: number | null } | null;
+    codeInsee?: string | null;
+  };
 }) {
   const [actions, setActions] = useState<ProjectAction[]>([]);
   const [answers, setAnswers] = useState<OrientationAnswers>({});
@@ -40,12 +48,41 @@ export function CompositeProjectWizard(props: {
   const [parcelContextError, setParcelContextError] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [expertCorrection, setExpertCorrection] = useState(false);
+  const initialLocationApplied = useRef(false);
   const questions = useMemo(() => uniqueQuestions(actions), [actions]);
   const geocode = useGeocodeAddress(
     { q: answers.address || "" },
     { query: { enabled: (answers.address || "").length > 5 && !selectedAddress } } as any,
   );
   const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
+
+  useEffect(() => {
+    if (initialLocationApplied.current) return;
+    const initial = props.initialLocation;
+    if (!initial) return;
+    const hasInitialLocation = Boolean(initial.address || initial.parcel || initial.commune || initial.pluZone);
+    if (!hasInitialLocation) return;
+
+    initialLocationApplied.current = true;
+    setAnswers((current) => ({
+      ...current,
+      address: current.address || initial.address || undefined,
+      commune: current.commune || initial.commune || undefined,
+      parcel: current.parcel || initial.parcel || undefined,
+      pluZone: current.pluZone || initial.pluZone || undefined,
+    }));
+
+    if (initial.address) {
+      setSelectedAddress({
+        id: "project-location",
+        label: initial.address,
+        city: initial.commune || undefined,
+        citycode: initial.codeInsee || undefined,
+        lat: initial.coordinates?.lat ?? undefined,
+        lon: initial.coordinates?.lon ?? undefined,
+      });
+    }
+  }, [props.initialLocation]);
 
   const toggleAction = (action: ProjectAction) => {
     setActions((current) => current.includes(action) ? current.filter((item) => item !== action) : [...current, action]);
@@ -87,8 +124,8 @@ export function CompositeProjectWizard(props: {
   };
 
   const runParcelContextAnalysis = async () => {
-    if (!selectedAddress && !answers.parcel) {
-      setParcelContextError("Sélectionnez une adresse proposée par la recherche intelligente ou saisissez une référence cadastrale.");
+    if (!selectedAddress && !answers.address && !answers.parcel) {
+      setParcelContextError("Renseignez une adresse de projet ou une référence cadastrale.");
       return;
     }
     setParcelContextLoading(true);
@@ -255,7 +292,7 @@ export function CompositeProjectWizard(props: {
           </label>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={parcelContextLoading || (!selectedAddress && !answers.parcel)} onClick={runParcelContextAnalysis}>
+          <Button type="button" variant="outline" disabled={parcelContextLoading || (!selectedAddress && !answers.address && !answers.parcel)} onClick={runParcelContextAnalysis}>
             Analyser le terrain
           </Button>
           <Button type="button" variant="ghost" onClick={() => setExpertCorrection((value) => !value)}>
