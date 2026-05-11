@@ -8,11 +8,8 @@ import {
   ArrowLeft,
   CalendarClock,
   ChevronRight,
-  FileText,
-  FolderOpen,
   Loader2,
   MapPin,
-  Sparkles,
 } from "lucide-react";
 import { ProtectedLayout } from "@/components/layout/ProtectedLayout";
 import { Badge } from "@/components/ui/badge";
@@ -48,19 +45,16 @@ function statusLabel(status: string) {
 function moduleLink(module: ProjectModuleDefinition, project: ProjectCard) {
   const encodedId = encodeURIComponent(project.id);
   if (module.id === "parcel_analysis") return project.routes?.analysis || `/analyses/new?projectId=${encodedId}`;
-  if (module.id === "project_qualification") return `/citoyen/orientation?projectId=${encodedId}`;
-  if (module.id === "dossier_assembly" || module.id === "administrative_deposit") {
-    return project.routes?.dossier || `/citoyen/nouveau?orientation=skip&projectId=${encodedId}`;
-  }
-  if (module.id === "instruction_tracking") return project.routes?.dossier || `/citoyen`;
+  if (module.id === "project_qualification") return `/citoyen/orientation?projectId=${encodedId}&returnTo=project`;
+  if (module.id === "administrative_dossier") return project.routes?.dossier || `/citoyen/nouveau?orientation=skip&projectId=${encodedId}`;
+  if (module.id === "project_ged") return `/projects/${encodedId}`;
   if (module.id === "appeals_and_modifications") return "/recours";
   return null;
 }
 
-function ModuleCard({ module, project }: { module: ProjectModuleDefinition; project: ProjectCard }) {
+function ModuleCard({ module, project, isUsed }: { module: ProjectModuleDefinition; project: ProjectCard; isUsed: boolean }) {
   const Icon = module.icon;
   const link = moduleLink(module, project);
-  const isUsed = project.usedModules.includes(module.id);
   const stateLabel = isUsed ? "Utilisée" : module.status === "planned" ? "Prévue" : "Disponible";
 
   return (
@@ -138,6 +132,12 @@ export default function ProjectHubPage() {
   }
 
   const { project, timeline } = data;
+  const isModuleUsed = (module: ProjectModuleDefinition) => {
+    if (module.id === "administrative_dossier") {
+      return project.usedModules.some((id) => ["administrative_dossier", "dossier_assembly", "administrative_deposit", "instruction_tracking"].includes(id));
+    }
+    return project.usedModules.includes(module.id);
+  };
   const syntheticTimeline = timeline.length
     ? timeline
     : [
@@ -178,16 +178,6 @@ export default function ProjectHubPage() {
                     {project.description || "Hub projet centralisant analyses, documents, démarches, échanges et instruction."}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-                  {project.address && (
-                    <span className="inline-flex items-center gap-2">
-                      <MapPin className="h-4 w-4" /> {project.address}
-                    </span>
-                  )}
-                  <span className="inline-flex items-center gap-2">
-                    <CalendarClock className="h-4 w-4" /> Dernière activité : {formatDate(project.updatedAt || project.createdAt)}
-                  </span>
-                </div>
               </div>
 
               <div className="w-full rounded-lg border border-slate-200 bg-slate-50 p-4 lg:w-80">
@@ -196,85 +186,67 @@ export default function ProjectHubPage() {
                   <span>{project.progress}%</span>
                 </div>
                 <Progress value={project.progress} className="mt-3" />
-                <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600">
-                  <div>
-                    <p className="font-semibold uppercase tracking-wide text-slate-500">Commune</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">{project.commune || "À préciser"}</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold uppercase tracking-wide text-slate-500">Zone PLU</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">{project.mainPluZone || "À analyser"}</p>
-                  </div>
-                  <div className="col-span-2">
-                    <p className="font-semibold uppercase tracking-wide text-slate-500">Parcelle</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">{project.parcelReferences.join(", ") || "À détecter"}</p>
-                  </div>
-                </div>
+                <p className="mt-3 text-xs text-slate-500">
+                  Dernière activité : {formatDate(project.updatedAt || project.createdAt)}
+                </p>
               </div>
             </div>
           </CardContent>
         </Card>
 
+        <Card className="rounded-lg border-slate-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-primary" /> Contexte de la parcelle
+            </CardTitle>
+            <CardDescription>Adresse, références cadastrales et contexte réglementaire disponibles pour ce projet.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Adresse</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">{project.address || "À renseigner"}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Commune</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">{project.commune || "À préciser"}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Parcelle</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">{project.parcelReferences.join(", ") || "À détecter"}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Zone PLU</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">{project.mainPluZone || "À analyser"}</p>
+              </div>
+            </div>
+            {project.detectedConstraints.length > 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <span className="font-semibold">Contraintes détectées : </span>
+                {project.detectedConstraints.join(", ")}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                Aucune contrainte territoriale consolidée dans le projet pour l'instant. Lancez l'analyse parcellaire pour fiabiliser le zonage, les servitudes, les risques et les consultations.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-slate-200">
+          <CardHeader>
+            <CardTitle>Briques projet</CardTitle>
+            <CardDescription>Les briques sont indépendantes et peuvent être utilisées dans l'ordre utile au projet.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {PROJECT_MODULES.map((module) => (
+              <ModuleCard key={module.id} module={module} project={project} isUsed={isModuleUsed(module)} />
+            ))}
+          </CardContent>
+        </Card>
+
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-6">
-            <Card className="rounded-lg border-slate-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" /> Résumé IA
-                </CardTitle>
-                <CardDescription>Vue synthétique du projet et des prochaines actions utiles.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm leading-6 text-slate-700">
-                <p>
-                  Ce hub regroupe les briques utilisables autour du projet : analyse du terrain, qualification de la démarche, GED,
-                  constitution du dossier et suivi d'instruction. Les anciens dossiers restent accessibles depuis leurs parcours
-                  historiques.
-                </p>
-                {project.detectedConstraints.length > 0 ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                    <p className="font-semibold text-amber-900">Contraintes détectées</p>
-                    <p className="mt-1 text-amber-800">{project.detectedConstraints.join(", ")}</p>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <p className="font-semibold text-slate-900">Analyse territoriale à consolider</p>
-                    <p className="mt-1 text-slate-600">L'analyse parcellaire permettra d'alimenter automatiquement le zonage, les servitudes, risques et consultations.</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-lg border-slate-200">
-              <CardHeader>
-                <CardTitle>Briques disponibles</CardTitle>
-                <CardDescription>Chaque brique peut être utilisée seule ou enchaînée dans le workflow complet.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {PROJECT_MODULES.map((module) => (
-                  <ModuleCard key={module.id} module={module} project={project} />
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="space-y-6">
-            <Card className="rounded-lg border-slate-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FolderOpen className="h-5 w-5 text-primary" /> GED projet
-                </CardTitle>
-                <CardDescription>Arborescence cible du projet.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-slate-700">
-                {["Administratif", "Plans", "Photos", "Études", "Documents réglementaires", "Dépôts administratifs", "Échanges", "Historique"].map((folder) => (
-                  <div key={folder} className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2">
-                    <FolderOpen className="h-4 w-4 text-slate-500" />
-                    {folder}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
+          <div>
             <Card className="rounded-lg border-slate-200">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -291,7 +263,9 @@ export default function ProjectHubPage() {
                 ))}
               </CardContent>
             </Card>
+          </div>
 
+          <div>
             <Card className="rounded-lg border-slate-200">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -310,9 +284,7 @@ export default function ProjectHubPage() {
                 )}
                 <Button asChild variant="outline" className="w-full justify-between">
                   <Link href={project.routes?.dossier || `/citoyen/nouveau?orientation=skip&projectId=${encodeURIComponent(project.id)}`}>
-                    <span className="inline-flex items-center gap-2">
-                      <FileText className="h-4 w-4" /> Préparer une démarche
-                    </span>
+                    Préparer le dossier administratif
                     <ChevronRight className="h-4 w-4" />
                   </Link>
                 </Button>

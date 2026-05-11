@@ -1,14 +1,12 @@
 import {
   Blocks,
   ClipboardCheck,
-  FileArchive,
-  FileCheck2,
   FolderOpen,
   Landmark,
   Map,
-  MessagesSquare,
   PenTool,
   ScanSearch,
+  ScrollText,
 } from "lucide-react";
 
 export type ProjectModuleId =
@@ -18,9 +16,7 @@ export type ProjectModuleId =
   | "section_plan"
   | "landscape_insertion"
   | "project_ged"
-  | "dossier_assembly"
-  | "administrative_deposit"
-  | "instruction_tracking"
+  | "administrative_dossier"
   | "appeals_and_modifications";
 
 export type ProjectModuleDefinition = {
@@ -75,25 +71,11 @@ export const PROJECT_MODULES: ProjectModuleDefinition[] = [
     icon: FolderOpen,
   },
   {
-    id: "dossier_assembly",
-    title: "Constitution dossier",
-    description: "Association GED ↔ pièces CERFA, détection des pièces, cohérence et manquants.",
+    id: "administrative_dossier",
+    title: "Dossier administratif",
+    description: "Constitution CERFA, dépôt officiel, complétude, échanges et suivi d'instruction.",
     status: "connected",
-    icon: FileArchive,
-  },
-  {
-    id: "administrative_deposit",
-    title: "Dépôt administratif",
-    description: "Dépôt officiel à partir des données projet, analyses, GED et pièces générées.",
-    status: "connected",
-    icon: FileCheck2,
-  },
-  {
-    id: "instruction_tracking",
-    title: "Instruction",
-    description: "Timeline, échanges contextualisés, versioning, consultations et décision.",
-    status: "connected",
-    icon: MessagesSquare,
+    icon: ScrollText,
   },
   {
     id: "appeals_and_modifications",
@@ -105,5 +87,8 @@ export const PROJECT_MODULES: ProjectModuleDefinition[] = [
 ];
 
 export function getProjectModule(id: string) {
+  if (["dossier_assembly", "administrative_deposit", "instruction_tracking"].includes(id)) {
+    return PROJECT_MODULES.find((module) => module.id === "administrative_dossier");
+  }
   return PROJECT_MODULES.find((module) => module.id === id);
 }

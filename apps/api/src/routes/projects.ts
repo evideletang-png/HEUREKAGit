@@ -15,9 +15,7 @@ const DEFAULT_MODULES = [
   "parcel_analysis",
   "project_qualification",
   "project_ged",
-  "dossier_assembly",
-  "administrative_deposit",
-  "instruction_tracking",
+  "administrative_dossier",
 ];
 
 function asArray(value: unknown): unknown[] {
@@ -41,6 +39,7 @@ function normalizeProject(row: any) {
     mainPluZone: row.mainPluZone,
     usedModules: asArray(row.usedModules),
     alerts: asArray(row.alerts),
+    metadata: row.metadata || {},
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -94,7 +93,7 @@ function dossierAsProject(dossier: any) {
     progress: dossier.status === "EN_INSTRUCTION" || dossier.status === "SUBMITTED" ? 70 : 55,
     detectedConstraints: constraints,
     mainPluZone: locationContext.pluZone || metadata?.parcelAnalysis?.zoneCode || null,
-    usedModules: ["project_qualification", "dossier_assembly", "administrative_deposit"],
+    usedModules: ["project_qualification", "administrative_dossier"],
     alerts: dossier.status === "INCOMPLET" ? ["Pièces complémentaires ou corrections attendues"] : [],
     createdAt: dossier.createdAt,
     updatedAt: dossier.updatedAt,
@@ -167,9 +166,7 @@ router.get("/:id/modules", authenticate, async (_req: AuthRequest, res) => {
       "section_plan",
       "landscape_insertion",
       "project_ged",
-      "dossier_assembly",
-      "administrative_deposit",
-      "instruction_tracking",
+      "administrative_dossier",
       "appeals_and_modifications",
     ],
   });

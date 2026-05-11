@@ -15,6 +15,7 @@ export type ProjectCard = {
   mainPluZone?: string | null;
   usedModules: string[];
   alerts: string[];
+  metadata?: Record<string, any>;
   createdAt: string;
   updatedAt: string;
   routes?: {

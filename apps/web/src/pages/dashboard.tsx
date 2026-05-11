@@ -42,7 +42,7 @@ function sourceLabel(source: ProjectCard["source"]) {
 }
 
 function ProjectCardView({ project }: { project: ProjectCard }) {
-  const modules = project.usedModules.map(getProjectModule).filter(Boolean).slice(0, 4);
+  const modules = Array.from(new Map(project.usedModules.map(getProjectModule).filter(Boolean).map((module) => [module!.id, module])).values()).slice(0, 4);
   return (
     <Card className="group overflow-hidden rounded-lg border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
       <CardContent className="p-5">
