@@ -40,10 +40,14 @@ import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urban
 import type { DossierType, ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
 import { triggerSourceLabel } from "@/lib/urbanisme/cerfa/pieceTriggers";
 import { computeInstructionTimeline } from "@/lib/urbanisme/timeline/computeInstructionTimeline";
+import { analyzeParcelContext, type ParcelContextAnalysis } from "@/lib/location-intelligence/analyzeParcelContext";
 import { getRequiredPieces, normalizeProcedureType } from "@/lib/pieceRequirements";
 import { CerfaInteractiveForm } from "@/components/dossier/CerfaInteractiveForm";
 import { CerfaSectionSidebar } from "@/components/dossier/CerfaSectionSidebar";
 import { DossierActionRail } from "@/components/dossier/DossierActionRail";
+import { ParcelContextDetails } from "@/components/location/ParcelContextDetails";
+import { ParcelContextSummary } from "@/components/location/ParcelContextSummary";
+import { ParcelDetectionLoader } from "@/components/location/ParcelDetectionLoader";
 import { demoDossier, demoProjectContext, demoUploadedDocuments } from "@/demo/demoSeedData";
 import { isDemoSessionActive } from "@/demo/demoModeStore";
 import { ORIENTATION_STORAGE_KEY, type OrientationResultPayload } from "@/modules/orientation/orientation.types";
@@ -343,6 +347,8 @@ export default function CitoyenNewDossierPage() {
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
   const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
   const [parcelAnalysisLoading, setParcelAnalysisLoading] = useState(false);
+  const [locationIntelligence, setLocationIntelligence] = useState<ParcelContextAnalysis | null>(null);
+  const [showLocationDetails, setShowLocationDetails] = useState(false);
   const [parcelAnalysisRetryToken, setParcelAnalysisRetryToken] = useState(0);
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
@@ -481,6 +487,14 @@ export default function CitoyenNewDossierPage() {
       source: "demoParcelProvider",
       contenanceM2: 650,
     });
+    void analyzeParcelContext({
+      address: demoDossier.address,
+      parcelId: demoDossier.parcelRef,
+      commune: demoDossier.commune,
+      dossierType: "PCMI",
+      projectFlags: demoProjectContext.projectFlags,
+      demo: true,
+    }).then(setLocationIntelligence);
     setLastSavedAt(new Date());
     if (files.length === 0 && typeof File !== "undefined") {
       setFiles(demoUploadedDocuments.map((document) => new File(["demo"], document.fileName, { type: "application/pdf" })));
@@ -492,6 +506,7 @@ export default function CitoyenNewDossierPage() {
     async function loadParcelPreview() {
       if (isDemoSessionActive()) return;
       setParcelAnalysis(null);
+      setLocationIntelligence(null);
       setParcelAnalysisError(null);
       setParcelAnalysisLoading(false);
       if (!selectedAddress || selectedCoordinates.lat === null || selectedCoordinates.lon === null) return;
@@ -513,7 +528,7 @@ export default function CitoyenNewDossierPage() {
         const preview = await response.json();
         if (!cancelled) {
           const primaryParcel = preview.primaryParcel || preview.parcels?.[0] || {};
-          setParcelAnalysis({
+          const nextParcelAnalysis = {
             ...preview,
             constraints: preview.constraints || preview.geoConstraints || [],
             geoConstraints: preview.geoConstraints || preview.constraints || [],
@@ -529,6 +544,34 @@ export default function CitoyenNewDossierPage() {
             zoneCode: preview.zoningPreview?.zoneCode || null,
             zoningLabel: preview.zoningPreview?.zoningLabel || null,
             source: "parcel-analysis",
+          };
+          const intelligence = await analyzeParcelContext({
+            address: selectedAddress.label,
+            parcelId: nextParcelAnalysis.parcelRef,
+            coordinates: { lat: selectedCoordinates.lat, lon: selectedCoordinates.lon },
+            banId: selectedAddress.id,
+            banParcelles: selectedAddress.parcelles || selectedAddress.banParcelles || [],
+            commune: selectedAddress.city || nextParcelAnalysis.commune || undefined,
+            existingParcelAnalysis: nextParcelAnalysis,
+            dossierType: docType,
+            projectFlags,
+          });
+          setLocationIntelligence(intelligence);
+          setParcelAnalysis({
+            ...nextParcelAnalysis,
+            locationIntelligence: intelligence,
+            constraints: [
+              ...(nextParcelAnalysis.constraints || []),
+              ...Object.entries(intelligence.detectedConstraints)
+                .filter(([, value]) => value === true)
+                .map(([key]) => key),
+            ],
+            zoneCode: intelligence.pluZone?.code || nextParcelAnalysis.zoneCode,
+            zoningLabel: intelligence.pluZone?.label || nextParcelAnalysis.zoningLabel,
+            commune: intelligence.commune || nextParcelAnalysis.commune,
+            codeInsee: intelligence.codeInsee || nextParcelAnalysis.codeInsee,
+            parcelRef: intelligence.parcel?.fullReference || nextParcelAnalysis.parcelRef,
+            contenanceM2: intelligence.parcel?.surfaceM2 || nextParcelAnalysis.contenanceM2,
           });
         }
       } catch (error) {
@@ -539,7 +582,7 @@ export default function CitoyenNewDossierPage() {
     }
     loadParcelPreview();
     return () => { cancelled = true; };
-  }, [selectedAddress, selectedCoordinates.lat, selectedCoordinates.lon, parcelAnalysisRetryToken]);
+  }, [selectedAddress, selectedCoordinates.lat, selectedCoordinates.lon, parcelAnalysisRetryToken, docType, projectFlags]);
 
   const sections = useMemo(() => getCerfaSections(docType), [docType]);
   const activeSection = sections.find((section) => section.id === activeSectionId) || sections[0];
@@ -550,13 +593,32 @@ export default function CitoyenNewDossierPage() {
   const locationContext = useMemo(
     () => {
       const live = buildLocationContext({ selectedAddress, parcelAnalysis, isAnalyzing: parcelAnalysisLoading });
+      const intelligenceConstraints = locationIntelligence?.detectedConstraints;
+      const intelligenceLocation = locationIntelligence ? {
+        commune: locationIntelligence.commune || undefined,
+        parcel: locationIntelligence.parcel?.fullReference || undefined,
+        pluZone: locationIntelligence.pluZone?.code || null,
+        abf: intelligenceConstraints?.abf,
+        monumentHistoriqueAbords: intelligenceConstraints?.monumentHistoriqueAbords,
+        spr: intelligenceConstraints?.spr,
+        siteClasse: intelligenceConstraints?.siteClasse,
+        siteInscrit: intelligenceConstraints?.siteInscrit,
+        parcNationalCore: intelligenceConstraints?.parcNationalCore,
+        natura2000: intelligenceConstraints?.natura2000,
+        pprRequiresStudy: intelligenceConstraints?.pprRequiresStudy,
+        sis: intelligenceConstraints?.sis,
+        formerIcpe: intelligenceConstraints?.formerIcpe,
+        confidence: locationIntelligence.confidence,
+        unresolvedChecks: locationIntelligence.unresolvedChecks,
+      } : {};
       const liveEntries = Object.entries(live).filter(([, value]) => value !== undefined && value !== null && value !== "");
       return {
         ...orientationResult?.locationFlags,
+        ...intelligenceLocation,
         ...Object.fromEntries(liveEntries),
       };
     },
-    [selectedAddress, parcelAnalysis, parcelAnalysisLoading, orientationResult],
+    [selectedAddress, parcelAnalysis, parcelAnalysisLoading, orientationResult, locationIntelligence],
   );
   const projectContext: ProjectContext = useMemo(
     () => ({ dossierType: docType, projectFlags: derivedProjectFlags, locationContext }),
@@ -684,6 +746,7 @@ export default function CitoyenNewDossierPage() {
               lon: selectedCoordinates.lon,
             },
             parcelAnalysis,
+            locationIntelligence,
             locationContext,
             orientationContext: orientationResult ? {
               locationConstraints: orientationResult.locationConstraints,
@@ -905,6 +968,16 @@ export default function CitoyenNewDossierPage() {
                 </div>
               ) : null}
               {parcelAnalysisError ? <p className="mt-2 text-sm text-amber-700">{parcelAnalysisError}</p> : null}
+              <div className="mt-4 space-y-4">
+                {parcelAnalysisLoading ? <ParcelDetectionLoader /> : null}
+                <ParcelContextSummary
+                  analysis={locationIntelligence}
+                  error={parcelAnalysisError}
+                  onRetry={() => setParcelAnalysisRetryToken((token) => token + 1)}
+                  onShowDetails={() => setShowLocationDetails((value) => !value)}
+                />
+                {showLocationDetails ? <ParcelContextDetails analysis={locationIntelligence} /> : null}
+              </div>
             </div>
           ) : null}
 
