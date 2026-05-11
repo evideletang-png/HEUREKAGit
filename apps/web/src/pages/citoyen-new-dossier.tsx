@@ -188,6 +188,37 @@ function getParcelAreaM2(parcelAnalysis: any) {
   return area ? Math.round(area) : "";
 }
 
+function mergeChangedCerfaValues(current: CerfaFormValues, patch: CerfaFormValues) {
+  let changed = false;
+  const next = { ...current };
+  Object.entries(patch).forEach(([key, value]) => {
+    if (value === undefined) return;
+    if (next[key] !== value) {
+      next[key] = value;
+      changed = true;
+    }
+  });
+  return changed ? next : current;
+}
+
+function mergeChangedProjectFlags(
+  current: ProjectContext["projectFlags"],
+  patch: ProjectContext["projectFlags"] | undefined,
+) {
+  if (!patch) return current;
+  let changed = false;
+  const next = { ...current };
+  Object.entries(patch).forEach(([key, value]) => {
+    if (value === undefined) return;
+    const typedKey = key as keyof ProjectContext["projectFlags"];
+    if (next[typedKey] !== value) {
+      (next as Record<string, unknown>)[key] = value;
+      changed = true;
+    }
+  });
+  return changed ? next : current;
+}
+
 function constraintsFrom(parcelAnalysis: any) {
   const values = [
     ...(Array.isArray(parcelAnalysis?.constraints) ? parcelAnalysis.constraints : []),
@@ -484,8 +515,8 @@ export default function CitoyenNewDossierPage() {
     const typeFromQuery = params.get("type");
     if (typeFromQuery) {
       const normalized = normalizeOfficialDossierType(typeFromQuery);
-      setDocType(normalized);
-      setCerfaValues((current) => ({ ...current, "project.dossierType": normalized }));
+      setDocType((current) => current === normalized ? current : normalized);
+      setCerfaValues((current) => mergeChangedCerfaValues(current, { "project.dossierType": normalized }));
     }
 
     const rawOrientation = params.get("orientation") === "guided" ? sessionStorage.getItem(ORIENTATION_STORAGE_KEY) : null;
@@ -494,11 +525,11 @@ export default function CitoyenNewDossierPage() {
       const orientation = JSON.parse(rawOrientation) as OrientationResultPayload;
       setOrientationResult(orientation);
       if (orientation.recommendedDossierType === "PCMI" || orientation.recommendedDossierType === "PC" || orientation.recommendedDossierType === "DPC" || orientation.recommendedDossierType === "DPA" || orientation.recommendedDossierType === "PA" || orientation.recommendedDossierType === "PD") {
-        setDocType(orientation.recommendedDossierType);
-        setProjectFlags((current) => ({ ...current, ...orientation.projectFlags }));
-        setCerfaValues((current) => ({
-          ...current,
-          "project.dossierType": orientation.recommendedDossierType,
+        const recommendedDossierType = orientation.recommendedDossierType;
+        setDocType((current) => current === recommendedDossierType ? current : recommendedDossierType);
+        setProjectFlags((current) => mergeChangedProjectFlags(current, orientation.projectFlags));
+        setCerfaValues((current) => mergeChangedCerfaValues(current, {
+          "project.dossierType": recommendedDossierType,
           "works.createsConstruction": orientation.projectFlags.createsConstruction,
           "works.modifiesFacadesOrRoof": orientation.projectFlags.modifiesFacadesOrRoof,
           "works.modifiesTerrainProfile": orientation.projectFlags.modifiesTerrainProfile,
@@ -564,19 +595,19 @@ export default function CitoyenNewDossierPage() {
     [files],
   );
 
+  const cerfaDossierType = cerfaValues["project.dossierType"] as string | undefined;
+
   useEffect(() => {
-    const nextType = normalizeOfficialDossierType(cerfaValues["project.dossierType"] as string || docType);
+    const nextType = normalizeOfficialDossierType(cerfaDossierType || docType);
     if (nextType !== docType) setDocType(nextType);
-  }, [cerfaValues, docType]);
+  }, [cerfaDossierType, docType]);
 
   useEffect(() => {
     setCerfaValues((current) => {
-      if (current["project.title"] === title && current["project.dossierType"] === docType) return current;
-      return {
-        ...current,
+      return mergeChangedCerfaValues(current, {
         "project.title": title,
         "project.dossierType": docType,
-      };
+      });
     });
   }, [title, docType]);
 
@@ -608,11 +639,10 @@ export default function CitoyenNewDossierPage() {
 
   useEffect(() => {
     if (!isDemoSessionActive()) return;
-    setTitle(demoDossier.title);
-    setDocType("PCMI");
-    setProjectFlags(demoProjectContext.projectFlags);
-    setCerfaValues((current) => ({
-      ...current,
+    setTitle((current) => current === demoDossier.title ? current : demoDossier.title);
+    setDocType((current) => current === "PCMI" ? current : "PCMI");
+    setProjectFlags((current) => mergeChangedProjectFlags(current, demoProjectContext.projectFlags));
+    setCerfaValues((current) => mergeChangedCerfaValues(current, {
       "project.title": demoDossier.title,
       "project.dossierType": "PCMI",
       "applicant.fullName": "Jean Martin",
@@ -840,8 +870,8 @@ export default function CitoyenNewDossierPage() {
   );
 
   useEffect(() => {
-    setTransmissionAccepted(false);
-  }, [transmissionPackageSignature]);
+    if (transmissionAccepted) setTransmissionAccepted(false);
+  }, [transmissionAccepted, transmissionPackageSignature]);
 
   const upload = useMutation({
     mutationFn: async ({ formData, dossierId }: { formData: FormData; dossierId: string }) => {
@@ -877,9 +907,12 @@ export default function CitoyenNewDossierPage() {
     event.target.value = "";
     if (!file) return;
     const imported = await importCerfaPdf(file);
-    setDocType(imported.dossierType);
-    setCerfaValues((current) => ({ ...current, ...imported.values, "project.dossierType": imported.dossierType }));
-    if (imported.values["project.title"]) setTitle(String(imported.values["project.title"]));
+    setDocType((current) => current === imported.dossierType ? current : imported.dossierType);
+    setCerfaValues((current) => mergeChangedCerfaValues(current, { ...imported.values, "project.dossierType": imported.dossierType }));
+    if (imported.values["project.title"]) {
+      const nextTitle = String(imported.values["project.title"]);
+      setTitle((current) => current === nextTitle ? current : nextTitle);
+    }
     toast({
       title: "CERFA importé partiellement",
       description: imported.warnings[0],
@@ -1051,9 +1084,21 @@ export default function CitoyenNewDossierPage() {
   };
 
   const updateCerfaValues = (values: CerfaFormValues) => {
-    setCerfaValues(values);
-    if (typeof values["project.title"] === "string") setTitle(values["project.title"]);
-    if (typeof values["project.dossierType"] === "string") setDocType(normalizeOfficialDossierType(values["project.dossierType"]));
+    setCerfaValues((current) => {
+      if (current === values) return current;
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(values);
+      if (currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === values[key])) return current;
+      return values;
+    });
+    if (typeof values["project.title"] === "string") {
+      const nextTitle = values["project.title"];
+      setTitle((current) => current === nextTitle ? current : nextTitle);
+    }
+    if (typeof values["project.dossierType"] === "string") {
+      const nextType = normalizeOfficialDossierType(values["project.dossierType"]);
+      setDocType((current) => current === nextType ? current : nextType);
+    }
   };
 
   const renderActiveSection = (section: CerfaSectionDefinition) => {
@@ -1258,8 +1303,7 @@ export default function CitoyenNewDossierPage() {
                       onClick={() => {
                         setSelectedAddress(result);
                         setAddress(result.label);
-                        setCerfaValues((current) => ({
-                          ...current,
+                        setCerfaValues((current) => mergeChangedCerfaValues(current, {
                           "terrain.address": result.label,
                           "terrain.commune": result.city || "",
                         }));
