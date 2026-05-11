@@ -15,6 +15,7 @@ export type CerfaFieldDefinition = {
   options?: { value: string; label: string }[];
   dossierTypes?: DossierType[];
   visibleWhen?: { fieldId: string; equals: CerfaFormValues[string] };
+  visibleWhenAll?: { fieldId: string; equals: CerfaFormValues[string] }[];
 };
 
 export type CerfaSectionKind = "form" | "pieces" | "verification" | "transmission";
@@ -115,7 +116,10 @@ const COMMON_SECTIONS: CerfaSectionDefinition[] = [
         label: "Précisez la qualité du co-demandeur",
         type: "text",
         required: true,
-        visibleWhen: { fieldId: "coApplicant.quality", equals: "other" },
+        visibleWhenAll: [
+          { fieldId: "coApplicant.enabled", equals: true },
+          { fieldId: "coApplicant.quality", equals: "other" },
+        ],
       },
       {
         id: "coApplicant.email",
@@ -277,8 +281,9 @@ function fieldAppliesTo(field: CerfaFieldDefinition, dossierType: DossierType) {
 }
 
 export function fieldIsVisible(field: CerfaFieldDefinition, values: CerfaFormValues) {
-  if (!field.visibleWhen) return true;
-  return values[field.visibleWhen.fieldId] === field.visibleWhen.equals;
+  if (field.visibleWhen && values[field.visibleWhen.fieldId] !== field.visibleWhen.equals) return false;
+  if (field.visibleWhenAll?.some((condition) => values[condition.fieldId] !== condition.equals)) return false;
+  return true;
 }
 
 export function getCerfaSections(dossierType: DossierType): CerfaSectionDefinition[] {
