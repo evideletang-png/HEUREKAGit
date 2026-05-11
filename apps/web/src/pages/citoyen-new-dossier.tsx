@@ -570,11 +570,14 @@ export default function CitoyenNewDossierPage() {
   }, [cerfaValues, docType]);
 
   useEffect(() => {
-    setCerfaValues((current) => ({
-      ...current,
-      "project.title": title,
-      "project.dossierType": docType,
-    }));
+    setCerfaValues((current) => {
+      if (current["project.title"] === title && current["project.dossierType"] === docType) return current;
+      return {
+        ...current,
+        "project.title": title,
+        "project.dossierType": docType,
+      };
+    });
   }, [title, docType]);
 
   useEffect(() => {
@@ -597,6 +600,8 @@ export default function CitoyenNewDossierPage() {
         next["terrain.area"] = areaM2;
         lastAutoTerrainAreaRef.current = areaM2;
       }
+      const changed = Object.keys(next).some((key) => next[key] !== current[key]);
+      if (!changed) return current;
       return next;
     });
   }, [address, selectedAddress, parcelAnalysis]);
