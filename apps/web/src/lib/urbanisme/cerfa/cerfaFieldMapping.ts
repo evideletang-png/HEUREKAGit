@@ -34,6 +34,42 @@ export const CERFA_FIELD_MAPPINGS: CerfaFieldMapping[] = [
     dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
   },
   {
+    fieldId: "applicant.quality",
+    cerfaReference: "CERFA - Qualité du demandeur",
+    label: "Qualité du demandeur",
+    dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
+  },
+  {
+    fieldId: "coApplicant.fullName",
+    cerfaReference: "CERFA - Identité du co-demandeur",
+    label: "Nom et prénom ou raison sociale du co-demandeur",
+    dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
+  },
+  {
+    fieldId: "coApplicant.quality",
+    cerfaReference: "CERFA - Qualité du co-demandeur",
+    label: "Qualité du co-demandeur",
+    dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
+  },
+  {
+    fieldId: "coApplicant.email",
+    cerfaReference: "CERFA - Coordonnées du co-demandeur",
+    label: "Adresse électronique du co-demandeur",
+    dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
+  },
+  {
+    fieldId: "coApplicant.phone",
+    cerfaReference: "CERFA - Coordonnées du co-demandeur",
+    label: "Téléphone du co-demandeur",
+    dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
+  },
+  {
+    fieldId: "coApplicant.address",
+    cerfaReference: "CERFA - Adresse du co-demandeur",
+    label: "Adresse postale du co-demandeur",
+    dossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
+  },
+  {
     fieldId: "terrain.address",
     cerfaReference: "CERFA - Adresse du terrain",
     label: "Adresse du terrain",

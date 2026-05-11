@@ -14,6 +14,7 @@ export type CerfaFieldDefinition = {
   helpText?: string;
   options?: { value: string; label: string }[];
   dossierTypes?: DossierType[];
+  visibleWhen?: { fieldId: string; equals: CerfaFormValues[string] };
 };
 
 export type CerfaSectionKind = "form" | "pieces" | "verification" | "transmission";
@@ -58,7 +59,84 @@ const COMMON_SECTIONS: CerfaSectionDefinition[] = [
     kind: "form",
     fields: [
       { id: "applicant.fullName", label: "Nom et prénom ou raison sociale", type: "text", required: true },
-      { id: "applicant.quality", label: "Qualité du demandeur", type: "text", placeholder: "Propriétaire, mandataire..." },
+      {
+        id: "applicant.quality",
+        label: "Qualité du demandeur",
+        type: "select",
+        required: true,
+        options: [
+          { value: "owner", label: "Propriétaire" },
+          { value: "co_owner", label: "Indivisaire / copropriétaire" },
+          { value: "mandatary", label: "Mandataire" },
+          { value: "company_representative", label: "Représentant d'une personne morale" },
+          { value: "usufructuary", label: "Usufruitier" },
+          { value: "future_owner", label: "Acquéreur ou futur propriétaire" },
+          { value: "tenant_authorized", label: "Locataire autorisé par le propriétaire" },
+          { value: "public_authority", label: "Collectivité / personne publique" },
+          { value: "other", label: "Autre" },
+        ],
+      },
+      {
+        id: "applicant.qualityOther",
+        label: "Précisez la qualité du demandeur",
+        type: "text",
+        required: true,
+        visibleWhen: { fieldId: "applicant.quality", equals: "other" },
+        placeholder: "Ex. bénéficiaire d'une promesse de vente...",
+      },
+      { id: "coApplicant.enabled", label: "Ajouter un co-demandeur", type: "yes_no" },
+      {
+        id: "coApplicant.fullName",
+        label: "Nom et prénom ou raison sociale du co-demandeur",
+        type: "text",
+        required: true,
+        visibleWhen: { fieldId: "coApplicant.enabled", equals: true },
+      },
+      {
+        id: "coApplicant.quality",
+        label: "Qualité du co-demandeur",
+        type: "select",
+        required: true,
+        visibleWhen: { fieldId: "coApplicant.enabled", equals: true },
+        options: [
+          { value: "owner", label: "Propriétaire" },
+          { value: "co_owner", label: "Indivisaire / copropriétaire" },
+          { value: "mandatary", label: "Mandataire" },
+          { value: "company_representative", label: "Représentant d'une personne morale" },
+          { value: "usufructuary", label: "Usufruitier" },
+          { value: "future_owner", label: "Acquéreur ou futur propriétaire" },
+          { value: "tenant_authorized", label: "Locataire autorisé par le propriétaire" },
+          { value: "public_authority", label: "Collectivité / personne publique" },
+          { value: "other", label: "Autre" },
+        ],
+      },
+      {
+        id: "coApplicant.qualityOther",
+        label: "Précisez la qualité du co-demandeur",
+        type: "text",
+        required: true,
+        visibleWhen: { fieldId: "coApplicant.quality", equals: "other" },
+      },
+      {
+        id: "coApplicant.email",
+        label: "Adresse électronique du co-demandeur",
+        type: "text",
+        visibleWhen: { fieldId: "coApplicant.enabled", equals: true },
+      },
+      {
+        id: "coApplicant.phone",
+        label: "Téléphone du co-demandeur",
+        type: "text",
+        visibleWhen: { fieldId: "coApplicant.enabled", equals: true },
+      },
+      {
+        id: "coApplicant.address",
+        label: "Adresse postale du co-demandeur",
+        type: "address",
+        placeholder: "Rechercher l'adresse du co-demandeur...",
+        helpText: "Sélectionnez une adresse proposée pour fiabiliser les coordonnées du co-demandeur.",
+        visibleWhen: { fieldId: "coApplicant.enabled", equals: true },
+      },
     ],
   },
   {
@@ -198,6 +276,11 @@ function fieldAppliesTo(field: CerfaFieldDefinition, dossierType: DossierType) {
   return !field.dossierTypes || field.dossierTypes.includes(dossierType);
 }
 
+export function fieldIsVisible(field: CerfaFieldDefinition, values: CerfaFormValues) {
+  if (!field.visibleWhen) return true;
+  return values[field.visibleWhen.fieldId] === field.visibleWhen.equals;
+}
+
 export function getCerfaSections(dossierType: DossierType): CerfaSectionDefinition[] {
   return COMMON_SECTIONS.map((section) => ({
     ...section,
@@ -208,6 +291,7 @@ export function getCerfaSections(dossierType: DossierType): CerfaSectionDefiniti
 export function getMissingRequiredFields(sections: CerfaSectionDefinition[], values: CerfaFormValues) {
   return sections.flatMap((section) =>
     section.fields
+      .filter((field) => fieldIsVisible(field, values))
       .filter((field) => field.required)
       .filter((field) => values[field.id] === undefined || values[field.id] === null || values[field.id] === "")
       .map((field) => ({ sectionId: section.id, sectionTitle: section.title, field })),
@@ -231,8 +315,9 @@ export function getCerfaSectionStatus(args: {
   if (section.optional && section.fields.every((field) => values[field.id] === undefined || values[field.id] === "")) {
     return "not_applicable";
   }
-  const requiredFields = section.fields.filter((field) => field.required);
-  const answeredFields = section.fields.filter((field) => values[field.id] !== undefined && values[field.id] !== null && values[field.id] !== "");
+  const visibleFields = section.fields.filter((field) => fieldIsVisible(field, values));
+  const requiredFields = visibleFields.filter((field) => field.required);
+  const answeredFields = visibleFields.filter((field) => values[field.id] !== undefined && values[field.id] !== null && values[field.id] !== "");
   if (requiredFields.some((field) => values[field.id] === undefined || values[field.id] === null || values[field.id] === "")) {
     return answeredFields.length > 0 ? "in_progress" : "not_started";
   }

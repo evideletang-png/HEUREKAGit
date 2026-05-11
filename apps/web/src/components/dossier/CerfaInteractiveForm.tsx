@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { getCerfaFieldMapping, type CerfaFormValues, type CerfaFieldValue } from "@/lib/urbanisme/cerfa/cerfaFieldMapping";
-import type { CerfaSectionDefinition, CerfaFieldDefinition } from "@/lib/urbanisme/cerfa/cerfaFormSchema";
+import { fieldIsVisible, type CerfaSectionDefinition, type CerfaFieldDefinition } from "@/lib/urbanisme/cerfa/cerfaFormSchema";
 
 function valueAsString(value: CerfaFieldValue) {
   if (value === undefined || value === null) return "";
@@ -98,7 +98,7 @@ export function CerfaInteractiveForm(props: {
       </div>
 
       <div className="grid gap-5">
-        {section.fields.map((field) => {
+        {section.fields.filter((field) => fieldIsVisible(field, values)).map((field) => {
           const mapping = getCerfaFieldMapping(field.id);
           const id = `cerfa-${field.id.replace(/[^a-z0-9]/gi, "-")}`;
           return (
