@@ -1,6 +1,8 @@
 import type { ProjectContext } from "@/lib/urbanisme/cerfa/officialPieces.types";
 import type { OrientationAnswers, OrientationResultPayload, ProjectAction } from "./orientation.types";
 import { getProjectActionLabel } from "./projectActions";
+import { analyzeLocationConstraints, buildOrientationLocationContext } from "./locationConstraintsAnalyzer";
+import { estimateOrientationTimeline, resolveOrientationConsultations } from "./consultationDelayResolver";
 
 function includes(actions: ProjectAction[], ...targets: ProjectAction[]) {
   return targets.some((target) => actions.includes(target));
@@ -26,6 +28,36 @@ function buildProjectFlags(actions: ProjectAction[], answers: OrientationAnswers
     terrainDivisionBeforeCompletion: includes(actions, "land_division"),
     roadOrPublicSpaceModification: includes(actions, "public_space_modification") || answers.publicSpaceTouched === true,
     metropoleCompetence: includes(actions, "public_space_modification") || answers.publicSpaceTouched === true,
+    erp: answers.erp === true || /erp|commerce|public|restaurant|boutique|école|ecole/i.test(answers.projectDescription || ""),
+    riskPreventionPlanRequiresStudy: answers.pprRequiresStudy === true,
+    requiresNatura2000Assessment: answers.natura2000 === true,
+    soilInformationSector: answers.soilInformationSector === true,
+    formerIcpeSiteDifferentUse: answers.formerIcpe === true,
+  };
+}
+
+function completeResult(base: Omit<OrientationResultPayload, "locationConstraints" | "expectedConsultations" | "estimatedInstructionTimeline">, answers: OrientationAnswers): OrientationResultPayload {
+  const locationConstraints = analyzeLocationConstraints({ answers, selectedActions: base.selectedActions });
+  const locationFlags = buildOrientationLocationContext(answers);
+  const expectedConsultations = resolveOrientationConsultations({
+    dossierType: base.recommendedDossierType,
+    projectFlags: base.projectFlags,
+    locationContext: locationFlags,
+    locationConstraints,
+  });
+  const estimatedInstructionTimeline = estimateOrientationTimeline({
+    dossierType: base.recommendedDossierType,
+    projectFlags: base.projectFlags,
+    locationContext: locationFlags,
+    expectedConsultations,
+  });
+
+  return {
+    ...base,
+    locationFlags,
+    locationConstraints,
+    expectedConsultations,
+    estimatedInstructionTimeline,
   };
 }
 
@@ -37,7 +69,7 @@ export function determineDossierType(actions: ProjectAction[], answers: Orientat
   let confidence: OrientationResultPayload["confidence"] = "medium";
 
   if (actions.length === 0) {
-    return {
+    return completeResult({
       recommendedDossierType: "UNKNOWN",
       confidence: "low",
       selectedActions: [],
@@ -46,7 +78,7 @@ export function determineDossierType(actions: ProjectAction[], answers: Orientat
       alternativeDossierTypes: ["PCMI", "PC", "DPC", "DPA", "PA", "PD"],
       projectFlags: {},
       locationFlags: {},
-    };
+    }, answers);
   }
 
   if (actions.length > 1) {
@@ -119,7 +151,7 @@ export function determineDossierType(actions: ProjectAction[], answers: Orientat
     warnings.push("La visibilité depuis l'espace public peut renforcer les exigences de pièces graphiques et photographiques.");
   }
 
-  return {
+  return completeResult({
     recommendedDossierType: recommended,
     confidence,
     selectedActions: actions,
@@ -128,5 +160,5 @@ export function determineDossierType(actions: ProjectAction[], answers: Orientat
     alternativeDossierTypes: Array.from(alternatives).filter((type) => type !== recommended),
     projectFlags: buildProjectFlags(actions, answers),
     locationFlags: {},
-  };
+  }, answers);
 }

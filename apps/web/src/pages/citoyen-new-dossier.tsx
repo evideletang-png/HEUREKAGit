@@ -339,6 +339,7 @@ export default function CitoyenNewDossierPage() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [verificationRequested, setVerificationRequested] = useState(false);
   const lastAutoTerrainAreaRef = useRef<number | "">("");
+  const [orientationResult, setOrientationResult] = useState<OrientationResultPayload | null>(null);
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
   const [parcelAnalysisError, setParcelAnalysisError] = useState<string | null>(null);
   const [parcelAnalysisLoading, setParcelAnalysisLoading] = useState(false);
@@ -360,6 +361,7 @@ export default function CitoyenNewDossierPage() {
     if (!rawOrientation) return;
     try {
       const orientation = JSON.parse(rawOrientation) as OrientationResultPayload;
+      setOrientationResult(orientation);
       if (orientation.recommendedDossierType === "PCMI" || orientation.recommendedDossierType === "PC" || orientation.recommendedDossierType === "DPC" || orientation.recommendedDossierType === "DPA" || orientation.recommendedDossierType === "PA" || orientation.recommendedDossierType === "PD") {
         setDocType(orientation.recommendedDossierType);
         setProjectFlags((current) => ({ ...current, ...orientation.projectFlags }));
@@ -374,6 +376,9 @@ export default function CitoyenNewDossierPage() {
           "demolition.pcIncludesDemolition": orientation.projectFlags.pcIncludesDemolition,
           "related.deforestationRequired": orientation.projectFlags.deforestationRequired,
           "related.lotissement": orientation.projectFlags.lotissement,
+          "terrain.commune": orientation.locationFlags.commune,
+          "terrain.parcel": orientation.locationFlags.parcel,
+          "terrain.pluZone": orientation.locationFlags.pluZone || "",
         }));
       }
     } catch {
@@ -543,8 +548,15 @@ export default function CitoyenNewDossierPage() {
     [projectFlags, cerfaValues],
   );
   const locationContext = useMemo(
-    () => buildLocationContext({ selectedAddress, parcelAnalysis, isAnalyzing: parcelAnalysisLoading }),
-    [selectedAddress, parcelAnalysis, parcelAnalysisLoading],
+    () => {
+      const live = buildLocationContext({ selectedAddress, parcelAnalysis, isAnalyzing: parcelAnalysisLoading });
+      const liveEntries = Object.entries(live).filter(([, value]) => value !== undefined && value !== null && value !== "");
+      return {
+        ...orientationResult?.locationFlags,
+        ...Object.fromEntries(liveEntries),
+      };
+    },
+    [selectedAddress, parcelAnalysis, parcelAnalysisLoading, orientationResult],
   );
   const projectContext: ProjectContext = useMemo(
     () => ({ dossierType: docType, projectFlags: derivedProjectFlags, locationContext }),
@@ -673,6 +685,13 @@ export default function CitoyenNewDossierPage() {
             },
             parcelAnalysis,
             locationContext,
+            orientationContext: orientationResult ? {
+              locationConstraints: orientationResult.locationConstraints,
+              expectedConsultations: orientationResult.expectedConsultations,
+              estimatedInstructionTimeline: orientationResult.estimatedInstructionTimeline,
+              reasons: orientationResult.reasons,
+              warnings: orientationResult.warnings,
+            } : null,
             officialPieces: resolvedPieces,
             completeness,
             pieceChecklist,
