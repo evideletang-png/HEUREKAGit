@@ -34,7 +34,7 @@ import {
   mergeCerfaValuesWithPrefill,
   type CerfaFormValues,
 } from "@/lib/urbanisme/cerfa/cerfaFieldMapping";
-import { downloadBlob, generateCerfaPdf } from "@/lib/urbanisme/cerfa/generateCerfaPdf";
+import { downloadBlob, generateCerfaPdf, getCerfaFormDescriptor } from "@/lib/urbanisme/cerfa/generateCerfaPdf";
 import { importCerfaPdf } from "@/lib/urbanisme/cerfa/importCerfaPdf";
 import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
 import type { DossierType, ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
@@ -158,6 +158,15 @@ function extractDetectedCode(filename: string) {
 function formatFileSize(size: number) {
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} Ko`;
   return `${(size / 1024 / 1024).toFixed(1)} Mo`;
+}
+
+function safeFilePart(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "dossier";
 }
 
 function getParcelAreaM2(parcelAnalysis: any) {
@@ -419,6 +428,7 @@ export default function CitoyenNewDossierPage() {
   const [activeSectionId, setActiveSectionId] = useState("receipt");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [verificationRequested, setVerificationRequested] = useState(false);
+  const [transmissionAccepted, setTransmissionAccepted] = useState(false);
   const lastAutoTerrainAreaRef = useRef<number | "">("");
   const [orientationResult, setOrientationResult] = useState<OrientationResultPayload | null>(null);
   const [parcelAnalysis, setParcelAnalysis] = useState<any>(null);
@@ -768,9 +778,9 @@ export default function CitoyenNewDossierPage() {
       } : {};
       const liveEntries = Object.entries(live).filter(([, value]) => value !== undefined && value !== null && value !== "");
       return {
+        ...Object.fromEntries(liveEntries),
         ...orientationResult?.locationFlags,
         ...intelligenceLocation,
-        ...Object.fromEntries(liveEntries),
       };
     },
     [selectedAddress, parcelAnalysis, parcelAnalysisLoading, orientationResult, locationIntelligence],
@@ -779,6 +789,7 @@ export default function CitoyenNewDossierPage() {
     () => ({ dossierType: docType, projectFlags: derivedProjectFlags, locationContext }),
     [docType, derivedProjectFlags, locationContext],
   );
+  const cerfaDescriptor = useMemo(() => getCerfaFormDescriptor(docType), [docType]);
   const resolvedPieces = useMemo(() => resolveOfficialPieces(projectContext), [projectContext]);
   const completeness = useMemo(
     () => checkCompleteness({ requiredPieces: resolvedPieces, uploadedDocuments: uploadedDocumentsForCompleteness }),
@@ -812,6 +823,20 @@ export default function CitoyenNewDossierPage() {
   const completionRate = Math.round((sectionRate * 0.55) + (pieceRate * 0.45));
   const canTransmit = !hasBlockingErrors && !!selectedAddress && !!title;
   const dossierStatus = canTransmit ? "complete" : title || selectedAddress ? "incomplete" : "draft";
+  const transmissionPackageSignature = useMemo(
+    () => JSON.stringify({
+      docType,
+      title,
+      cerfaValues,
+      files: files.map((item) => ({ id: item.id, name: item.file.name, size: item.file.size, pieceCode: item.pieceCode })),
+      completeness: completeness.status,
+    }),
+    [docType, title, cerfaValues, files, completeness.status],
+  );
+
+  useEffect(() => {
+    setTransmissionAccepted(false);
+  }, [transmissionPackageSignature]);
 
   const upload = useMutation({
     mutationFn: async ({ formData, dossierId }: { formData: FormData; dossierId: string }) => {
@@ -895,6 +920,16 @@ export default function CitoyenNewDossierPage() {
     downloadBlob(blob, `${docType}-${title || "dossier"}.pdf`);
   };
 
+  const generateCerfaFile = async () => {
+    const blob = await generateCerfaPdf({ dossierType: docType, values: cerfaValues, title });
+    return new File([blob], `${docType}-${safeFilePart(title)}-cerfa-prefilled.pdf`, { type: "application/pdf" });
+  };
+
+  const downloadGeneratedCerfa = async () => {
+    const file = await generateCerfaFile();
+    downloadBlob(file, file.name);
+  };
+
   const verifyDossier = () => {
     setVerificationRequested(true);
     setActiveSectionId("verification");
@@ -909,7 +944,17 @@ export default function CitoyenNewDossierPage() {
       verifyDossier();
       return;
     }
+    if (!transmissionAccepted) {
+      setActiveSectionId("transmission");
+      toast({
+        title: "Acceptation requise",
+        description: "Téléchargez ou relisez le CERFA prérempli, puis confirmez l'accord de transmission.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
+      const cerfaFile = await generateCerfaFile();
       const pieceChecklist = getRequiredPieces({ procedureType: docType, parcelAnalysis, selectedAddress, projectDetails: derivedProjectFlags });
       const createResponse = await fetch("/api/dossiers", {
         method: "POST",
@@ -944,6 +989,22 @@ export default function CitoyenNewDossierPage() {
             completeness,
             pieceChecklist,
             projectFlags: derivedProjectFlags,
+            generatedCerfa: {
+              fileName: cerfaFile.name,
+              generatedAt: new Date().toISOString(),
+              dossierType: docType,
+              formFamily: cerfaDescriptor.formFamily,
+              officialName: cerfaDescriptor.officialName,
+              servicePublicCode: cerfaDescriptor.servicePublicCode || null,
+              templateStatus: cerfaDescriptor.templateStatus,
+              acceptedForTransmission: true,
+            },
+            annexes: files.map((item) => ({
+              fileName: item.file.name,
+              size: item.file.size,
+              mimeType: item.file.type,
+              pieceCode: item.pieceCode || null,
+            })),
           },
         }),
       });
@@ -952,6 +1013,8 @@ export default function CitoyenNewDossierPage() {
       const dossierId = created.dossier.id as string;
 
       const formData = new FormData();
+      formData.append("files", cerfaFile);
+      formData.append("pieceCodes", "CERFA");
       files.forEach((item) => {
         formData.append("files", item.file);
         formData.append("pieceCodes", item.pieceCode || "");
@@ -960,7 +1023,7 @@ export default function CitoyenNewDossierPage() {
       formData.append("commune", selectedAddress.city || parcelAnalysis?.commune || "");
       formData.append("title", title);
       formData.append("documentType", documentTypeForProcedure(docType));
-      if (files.length > 0) await upload.mutateAsync({ formData, dossierId });
+      await upload.mutateAsync({ formData, dossierId });
 
       const submitResponse = await fetch(`/api/dossiers/${dossierId}/submit`, { method: "PATCH", credentials: "include" });
       if (!submitResponse.ok) throw new Error((await submitResponse.json().catch(() => ({}))).message || "Soumission impossible.");
@@ -969,8 +1032,9 @@ export default function CitoyenNewDossierPage() {
       void clearDraftFiles().catch(() => undefined);
       toast({
         title: submitted.dossier?.status === "INCOMPLET" ? "Dossier transmis, pièces à compléter" : "Dossier transmis",
-        description: "Votre demande a été envoyée au service instructeur.",
+        description: "Votre demande, le CERFA prérempli et les pièces annexes ont été envoyés au service instructeur.",
       });
+      downloadBlob(cerfaFile, cerfaFile.name);
       setLocation("/citoyen");
     } catch (error: any) {
       toast({
@@ -1013,20 +1077,75 @@ export default function CitoyenNewDossierPage() {
       );
     }
     if (section.kind === "transmission") {
+      const annexFiles = files.filter((item) => item.pieceCode);
       return (
         <div className="space-y-6">
           <div>
             <h2 className="text-2xl font-semibold text-slate-950">Transmission</h2>
             <p className="mt-1 text-sm text-slate-600">Relisez la synthèse, vérifiez le dossier puis transmettez la demande à la mairie.</p>
           </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="font-semibold text-slate-950">Dossier généré avant transmission</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Heureka produit le CERFA prérempli avec les informations saisies et joint les pièces annexes codées CERFA au dépôt.
+                </p>
+              </div>
+              <Button type="button" variant="outline" onClick={downloadGeneratedCerfa}>
+                <FileText className="mr-2 h-4 w-4" />
+                Télécharger le CERFA prérempli
+              </Button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">CERFA</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">{docType} - {cerfaDescriptor.formFamily}</p>
+                <p className="mt-1 text-xs text-slate-500">{cerfaDescriptor.officialName}</p>
+                {cerfaDescriptor.templateStatus === "app_export" ? (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Export applicatif en attente de branchement du PDF officiel remplissable.
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pièces annexes</p>
+                <p className="mt-1 text-sm font-semibold text-slate-950">
+                  {annexFiles.length} pièce{annexFiles.length > 1 ? "s" : ""} codée{annexFiles.length > 1 ? "s" : ""} CERFA
+                </p>
+                <p className="mt-1 text-xs text-slate-500">Les fichiers ajoutés sont transmis avec leur code officiel quand il est renseigné.</p>
+              </div>
+            </div>
+            {files.length > 0 ? (
+              <div className="mt-4 divide-y divide-slate-100 rounded-md border border-slate-200">
+                {files.map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                    <span className="font-medium text-slate-800">{item.file.name}</span>
+                    <span className="text-slate-500">{item.pieceCode || "Pièce non codée"} · {formatFileSize(item.file.size)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <label className="mt-4 flex gap-3 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+                checked={transmissionAccepted}
+                onChange={(event) => setTransmissionAccepted(event.target.checked)}
+              />
+              <span>
+                J'ai vérifié le CERFA prérempli et les pièces annexes listées ci-dessus, et j'accepte que ce dossier soit transmis au service instructeur.
+              </span>
+            </label>
+          </div>
           <div className={`rounded-lg border p-5 ${canTransmit ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
             <p className="font-semibold text-slate-950">
               {canTransmit ? "Votre dossier peut être transmis." : "Transmission désactivée tant que le dossier est incomplet."}
             </p>
             <p className="mt-2 text-sm text-slate-600">{completeness.message}</p>
-            <Button type="button" className="mt-4" disabled={!canTransmit || upload.isPending} onClick={submitDossier}>
+            <Button type="button" className="mt-4" disabled={!canTransmit || !transmissionAccepted || upload.isPending} onClick={submitDossier}>
               {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Transmettre ma demande
+              J'accepte et je transmets ma demande
             </Button>
           </div>
         </div>
@@ -1185,7 +1304,7 @@ export default function CitoyenNewDossierPage() {
 
         <DossierActionRail
           completionRate={completionRate}
-          canTransmit={canTransmit}
+          canTransmit={canTransmit && transmissionAccepted}
           isTransmitting={upload.isPending}
           onImport={() => importInputRef.current?.click()}
           onExport={exportDossier}

@@ -80,6 +80,7 @@
     "@workspace/ai-core": "workspace:*",
     "@workspace/shared": "workspace:*",
     "leaflet": "^1.9.4",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.296",
     "react-leaflet": "^5.0.0",
     "react-pdf": "^10.4.1"

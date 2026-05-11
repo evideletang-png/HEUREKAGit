@@ -55,6 +55,27 @@ export const PROCEDURES: Record<string, ProcedureType> = {
       { code: "DP5", name: "Plans des façades et toitures", description: "Si modification de l'aspect.", isMandatory: false },
     ]
   },
+  DPC: {
+    code: "DPC",
+    label: "Déclaration préalable - constructions et travaux",
+    description: "Pour les déclarations préalables portant sur des constructions ou travaux.",
+    pieces: [
+      { code: "CERFA", name: "Formulaire CERFA", description: "Le formulaire officiel complété et signé.", isMandatory: true },
+      { code: "DPC1", name: "Plan de situation du terrain", description: "Situation du terrain dans la commune.", isMandatory: true },
+      { code: "DPC2", name: "Plan de masse", description: "Si le projet crée une construction ou modifie le volume d'une construction existante.", isMandatory: false },
+      { code: "DPC3", name: "Plan en coupe", description: "Si le projet modifie le profil du terrain.", isMandatory: false },
+      { code: "DPC4", name: "Plan des façades et des toitures", description: "Si le projet modifie les façades ou les toitures.", isMandatory: false },
+    ]
+  },
+  DPA: {
+    code: "DPA",
+    label: "Déclaration préalable - installations et aménagements",
+    description: "Pour les déclarations préalables portant sur des installations ou aménagements.",
+    pieces: [
+      { code: "CERFA", name: "Formulaire CERFA", description: "Le formulaire officiel complété et signé.", isMandatory: true },
+      { code: "DPA1", name: "Plan de situation du terrain", description: "Situation du terrain dans la commune.", isMandatory: true },
+    ]
+  },
   CUA: {
     code: "CUA",
     label: "Certificat d'Urbanisme d'Information",
