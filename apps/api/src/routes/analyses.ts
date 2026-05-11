@@ -32,6 +32,10 @@ import { buildArticlesFromUrbanRules, loadStructuredRulesForAnalysis } from "../
 import { buildMunicipalityTextFilter, resolveMunicipalityAliases, uniqueNonEmpty } from "../services/municipalityAliasService.js";
 import { generateCadastralExtractPDF } from "../services/cadastralExtractService.js";
 import { fetchGeoConstraints } from "../services/geoConstraintsService.js";
+import {
+  buildParcelAnalysisState,
+  type ParcelAnalysisState,
+} from "../services/parcelAnalysisState.js";
 
 const router: IRouter = Router();
 
@@ -169,6 +173,22 @@ async function logEvent(analysisId: string, step: string, status: string, messag
   await db.insert(eventLogsTable).values({ analysisId, step, status, message });
 }
 
+async function logEventWithPayload(
+  analysisId: string,
+  step: string,
+  status: string,
+  message: string,
+  payload: unknown,
+) {
+  await db.insert(eventLogsTable).values({
+    analysisId,
+    step,
+    status,
+    message,
+    payloadJson: JSON.stringify(payload),
+  });
+}
+
 function buildPersistedParcelMetadata(parcelData: ParcelData) {
   return {
     ...(parcelData.metadata || {}),
@@ -188,8 +208,9 @@ function buildLockedAnalysisContext(args: {
   zoningInfo?: Awaited<ReturnType<typeof getZoningByCoords>> | null;
   parcelData: ParcelData;
   selectedParcels?: SelectedParcelPayload[];
+  parcelAnalysisState?: ParcelAnalysisState | null;
 }) {
-  const { address, geo, zoningInfo, parcelData, selectedParcels } = args;
+  const { address, geo, zoningInfo, parcelData, selectedParcels, parcelAnalysisState } = args;
   const parcelRefs = Array.isArray((parcelData.metadata as any)?.parcelRefs)
     ? (parcelData.metadata as any).parcelRefs
     : [[parcelData.cadastralSection, parcelData.parcelNumber].filter(Boolean).join(" ")].filter(Boolean);
@@ -212,6 +233,7 @@ function buildLockedAnalysisContext(args: {
       parcelIdus: selectedParcels?.map((parcel) => parcel.idu).filter(Boolean) || [String((parcelData.metadata as any)?.idu || "")].filter(Boolean),
       selectionMode: selectedParcels && selectedParcels.length > 1 ? "land_assembly" : "single_parcel",
     },
+    parcel_analysis_state: parcelAnalysisState || null,
   };
 }
 
@@ -447,12 +469,38 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
       console.warn("[analyses/create] zoning preview unavailable:", zoningErr);
     }
 
+    let geoConstraints: Awaited<ReturnType<typeof fetchGeoConstraints>> = [];
+    try {
+      geoConstraints = await fetchGeoConstraints(geo.lat, geo.lng, parcelData.geometryJson || undefined);
+    } catch (constraintsErr) {
+      console.warn("[analyses/create] geo constraints unavailable:", constraintsErr);
+    }
+
+    const parcelAnalysisState = buildParcelAnalysisState({
+      parcelData,
+      zoningInfo,
+      geoConstraints,
+    });
+
     const selectedParcelRefs =
       Array.isArray((parcelData.metadata as any)?.parcelRefs) && (parcelData.metadata as any).parcelRefs.length > 0
         ? (parcelData.metadata as any).parcelRefs.join(" + ")
         : [parcelData.cadastralSection, parcelData.parcelNumber].filter(Boolean).join(" ");
 
     await persistAnalysisParcelContext(analysis.id, parcelData, buildingData);
+    await db.delete(constraintsTable).where(eq(constraintsTable.analysisId, analysis.id));
+    if (geoConstraints.length > 0) {
+      await db.insert(constraintsTable).values(
+        geoConstraints.map((constraint) => ({
+          analysisId: analysis.id,
+          category: constraint.category,
+          title: constraint.title,
+          description: constraint.description,
+          severity: constraint.severity,
+          source: constraint.source,
+        })),
+      );
+    }
 
     const [updatedAnalysis] = await db.update(analysesTable).set({
       parcelRef: selectedParcelRefs || parcelRef || null,
@@ -466,6 +514,7 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
         zoningInfo,
         parcelData,
         selectedParcels,
+        parcelAnalysisState,
       })),
       updatedAt: new Date(),
     }).where(eq(analysesTable.id, analysis.id)).returning();
@@ -476,6 +525,20 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
     if (zoningInfo?.zoneCode) {
       await logEvent(analysis.id, "zoning_preview", "completed", `Zone détectée avant lancement : ${zoningInfo.zoneCode}.`);
     }
+    await logEventWithPayload(
+      analysis.id,
+      "parcel_analysis_state",
+      "completed",
+      "État parcellaire consolidé : contraintes, consultations, délais, pièces et workflow calculés.",
+      {
+        parcel: parcelAnalysisState.parcel,
+        consultations: parcelAnalysisState.consultations,
+        delays: parcelAnalysisState.delays,
+        requiredDocuments: parcelAnalysisState.requiredDocuments,
+        instructionWorkflow: parcelAnalysisState.instructionWorkflow,
+        debug: parcelAnalysisState.debug,
+      },
+    );
 
     setImmediate(() => runAnalysisPipeline(analysis.id, parcelData, req.user!.userId, analysis.title || ""));
 
@@ -670,6 +733,67 @@ router.post("/:id/run", authenticate, async (req: AuthRequest, res) => {
       sideBoundaryLengthM: parcel.sideBoundaryLengthM || 0,
       metadata: parcel.metadataJson ? JSON.parse(parcel.metadataJson) : {},
     } : null;
+
+    if (parcelData?.centroidLat && parcelData?.centroidLng) {
+      let zoningInfo: Awaited<ReturnType<typeof getZoningByCoords>> | null = null;
+      let geoConstraints: Awaited<ReturnType<typeof fetchGeoConstraints>> = [];
+      try {
+        zoningInfo = await getZoningByCoords(
+          parcelData.centroidLat,
+          parcelData.centroidLng,
+          analysis.city || undefined,
+        );
+      } catch (zoningErr) {
+        console.warn("[analyses/run] zoning refresh unavailable:", zoningErr);
+      }
+      try {
+        geoConstraints = await fetchGeoConstraints(parcelData.centroidLat, parcelData.centroidLng, parcelData.geometryJson || undefined);
+      } catch (constraintsErr) {
+        console.warn("[analyses/run] geo constraints refresh unavailable:", constraintsErr);
+      }
+
+      const parcelAnalysisState = buildParcelAnalysisState({ parcelData, zoningInfo, geoConstraints });
+      if (geoConstraints.length > 0) {
+        await db.insert(constraintsTable).values(
+          geoConstraints.map((constraint) => ({
+            analysisId: idStr,
+            category: constraint.category,
+            title: constraint.title,
+            description: constraint.description,
+            severity: constraint.severity,
+            source: constraint.source,
+          })),
+        );
+      }
+
+      const existingGeoContext = analysis.geoContextJson
+        ? (typeof analysis.geoContextJson === "string" ? JSON.parse(analysis.geoContextJson) : analysis.geoContextJson)
+        : {};
+      await db.update(analysesTable).set({
+        zoneCode: zoningInfo?.zoneCode || analysis.zoneCode,
+        zoningLabel: zoningInfo?.zoningLabel || analysis.zoningLabel,
+        geoContextJson: JSON.stringify({
+          ...(existingGeoContext && typeof existingGeoContext === "object" ? existingGeoContext : {}),
+          parcel_analysis_state: parcelAnalysisState,
+        }),
+        updatedAt: new Date(),
+      }).where(eq(analysesTable.id, idStr));
+
+      await logEventWithPayload(
+        idStr,
+        "parcel_analysis_state",
+        "completed",
+        "État parcellaire consolidé recalculé avant relance du pipeline.",
+        {
+          parcel: parcelAnalysisState.parcel,
+          consultations: parcelAnalysisState.consultations,
+          delays: parcelAnalysisState.delays,
+          requiredDocuments: parcelAnalysisState.requiredDocuments,
+          instructionWorkflow: parcelAnalysisState.instructionWorkflow,
+          debug: parcelAnalysisState.debug,
+        },
+      );
+    }
 
     runAnalysisPipeline(idStr, parcelData, userId, analysis.title || "").catch(err => {
       console.error(`[pipeline/restart-error][${idStr}]`, err);

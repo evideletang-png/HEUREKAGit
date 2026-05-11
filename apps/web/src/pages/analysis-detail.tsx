@@ -723,6 +723,7 @@ export default function AnalysisDetailPage() {
   const ag = gc?.admin_guide ?? null;
   const fa = gc?.financial_analysis ?? null;
   const sourceLock = gc?.source_lock ?? null;
+  const parcelAnalysisState = gc?.parcel_analysis_state ?? gc?.parcelAnalysisState ?? null;
   const dataQuality = gc?.data_quality ?? {};
   const missingRequirements = gc?.missing_requirements ?? {};
   const missingPluIssue = zoneIssues.find((issue: any) => issue?.type === "NO_PLU_DATA" || issue?.code === "NO_PLU_DATA")
@@ -2474,6 +2475,168 @@ export default function AnalysisDetailPage() {
 
         {/* TAB CONTRAINTES */}
         <TabsContent value="contraintes" className="space-y-6 focus-visible:outline-none">
+          {parcelAnalysisState && (
+            <Card className="border-primary/20 bg-white">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-primary">
+                      <ShieldCheck className="w-4 h-4" />
+                      Analyse parcellaire consolidée
+                    </CardTitle>
+                    <CardDescription>
+                      Résultat fusionné depuis la parcelle, les intersections GPU, les servitudes, risques et protections détectées.
+                    </CardDescription>
+                  </div>
+                  {parcelAnalysisState.parcel?.parcelInfoUrl && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={parcelAnalysisState.parcel.parcelInfoUrl} target="_blank" rel="noreferrer">
+                        Fiche parcelle GPU
+                        <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                      </a>
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {parcelAnalysisState.warnings?.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {parcelAnalysisState.warnings.map((warning: string, index: number) => (
+                      <p key={index}>{warning}</p>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    ["Zonage", parcelAnalysisState.zoning?.[0]?.label || "Non déterminé"],
+                    ["Patrimoine", `${parcelAnalysisState.heritage?.length || 0} contrainte(s)`],
+                    ["Risques", `${parcelAnalysisState.risks?.length || 0} contrainte(s)`],
+                    ["Servitudes", `${parcelAnalysisState.servitudes?.length || 0} contrainte(s)`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-border bg-muted/20 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <div className="rounded-lg border border-border p-4">
+                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                      <Users className="h-4 w-4 text-primary" />
+                      Services à consulter
+                    </h4>
+                    {parcelAnalysisState.consultations?.length ? (
+                      <div className="space-y-3">
+                        {parcelAnalysisState.consultations.map((consultation: any, index: number) => (
+                          <div key={`${consultation.service}-${index}`} className="rounded-md bg-muted/30 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-sm">{consultation.service}</span>
+                              <Badge variant={consultation.required ? "default" : "outline"}>
+                                {consultation.required ? "Obligatoire" : "Probable"}
+                              </Badge>
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">{consultation.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Aucune consultation obligatoire détectée à ce stade.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                      <Clock className="h-4 w-4 text-primary" />
+                      Majoration de délais
+                    </h4>
+                    {parcelAnalysisState.delays?.length ? (
+                      <div className="space-y-3">
+                        {parcelAnalysisState.delays.map((delay: any, index: number) => (
+                          <div key={`${delay.reason}-${index}`} className="rounded-md bg-muted/30 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-sm">{delay.reason}</span>
+                              <Badge variant="outline">+{delay.durationMonths} mois</Badge>
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">Source: {delay.source}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Aucune majoration automatique identifiée.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                      <FileCheck className="h-4 w-4 text-primary" />
+                      Pièces et workflow
+                    </h4>
+                    {parcelAnalysisState.requiredDocuments?.length ? (
+                      <div className="space-y-3">
+                        {parcelAnalysisState.requiredDocuments.map((document: any, index: number) => (
+                          <div key={`${document.label}-${index}`} className="rounded-md bg-muted/30 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-sm">{document.label}</span>
+                              <Badge variant={document.required ? "default" : "outline"}>
+                                {document.required ? "Requise" : "À confirmer"}
+                              </Badge>
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">{document.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Aucune pièce complémentaire déduite automatiquement.</p>
+                    )}
+                    {parcelAnalysisState.instructionWorkflow?.length > 0 && (
+                      <div className="mt-4 border-t border-border pt-3">
+                        <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Étapes générées</p>
+                        <div className="space-y-2">
+                          {parcelAnalysisState.instructionWorkflow.map((step: any) => (
+                            <div key={step.step} className="flex items-start gap-2 text-xs text-muted-foreground">
+                              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-emerald-600" />
+                              <span>{step.label} — {step.reason}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <details className="rounded-lg border border-border bg-muted/20 p-4">
+                  <summary className="cursor-pointer text-sm font-semibold text-primary">Debug technique de l'analyse parcellaire</summary>
+                  <div className="mt-3 grid gap-4 text-xs text-muted-foreground lg:grid-cols-3">
+                    <div>
+                      <p className="mb-2 font-semibold text-foreground">API appelées</p>
+                      <ul className="space-y-1">
+                        {parcelAnalysisState.debug?.apiCalls?.map((item: string) => <li key={item}>{item}</li>)}
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="mb-2 font-semibold text-foreground">Règles appliquées</p>
+                      <ul className="space-y-1">
+                        {parcelAnalysisState.debug?.appliedRules?.length
+                          ? parcelAnalysisState.debug.appliedRules.map((item: string) => <li key={item}>{item}</li>)
+                          : <li>Aucune règle métier déclenchée.</li>}
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="mb-2 font-semibold text-foreground">À confirmer</p>
+                      <ul className="space-y-1">
+                        {parcelAnalysisState.debug?.unresolvedChecks?.length
+                          ? parcelAnalysisState.debug.unresolvedChecks.map((item: string) => <li key={item}>{item}</li>)
+                          : <li>Aucun point bloquant identifié.</li>}
+                      </ul>
+                    </div>
+                  </div>
+                </details>
+              </CardContent>
+            </Card>
+          )}
+
           {constraints && constraints.length > 0 ? (
             <>
               <Card className="border-amber-200/50 bg-amber-50/30">
