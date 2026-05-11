@@ -61,6 +61,79 @@ const DOSSIER_TYPES: { value: DossierType; label: string }[] = [
   { value: "PD", label: "PD - Permis de démolir" },
 ];
 
+const CITIZEN_DRAFT_KEY = "heureka.citizenDraft";
+const CITIZEN_DRAFT_DB = "heureka-citizen-draft";
+const CITIZEN_DRAFT_FILES_STORE = "files";
+
+type UploadedDossierFile = {
+  id: string;
+  file: File;
+  pieceCode?: string;
+};
+
+type StoredDraftFile = {
+  id: string;
+  file: File;
+  pieceCode?: string;
+};
+
+function fileId(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`;
+}
+
+function openDraftDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(CITIZEN_DRAFT_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(CITIZEN_DRAFT_FILES_STORE)) {
+        db.createObjectStore(CITIZEN_DRAFT_FILES_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveDraftFiles(files: UploadedDossierFile[]) {
+  if (typeof indexedDB === "undefined") return;
+  const db = await openDraftDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(CITIZEN_DRAFT_FILES_STORE, "readwrite");
+    const store = tx.objectStore(CITIZEN_DRAFT_FILES_STORE);
+    store.clear();
+    files.forEach((item) => store.put({ id: item.id, file: item.file, pieceCode: item.pieceCode } satisfies StoredDraftFile));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+async function loadDraftFiles(): Promise<UploadedDossierFile[]> {
+  if (typeof indexedDB === "undefined") return [];
+  const db = await openDraftDb();
+  const files = await new Promise<UploadedDossierFile[]>((resolve, reject) => {
+    const tx = db.transaction(CITIZEN_DRAFT_FILES_STORE, "readonly");
+    const request = tx.objectStore(CITIZEN_DRAFT_FILES_STORE).getAll();
+    request.onsuccess = () => resolve((request.result as StoredDraftFile[]).map((item) => ({ id: item.id, file: item.file, pieceCode: item.pieceCode })));
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return files;
+}
+
+async function clearDraftFiles() {
+  if (typeof indexedDB === "undefined") return;
+  const db = await openDraftDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(CITIZEN_DRAFT_FILES_STORE, "readwrite");
+    tx.objectStore(CITIZEN_DRAFT_FILES_STORE).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
 function getAddressCoordinates(address: any) {
   const lat = Number(address?.lat ?? address?.latitude ?? address?.y);
   const lon = Number(address?.lon ?? address?.lng ?? address?.longitude ?? address?.x);
@@ -151,7 +224,7 @@ function statusLabel(status: string) {
 function PieceRow(props: {
   piece: ResolvedPiece;
   matched: boolean;
-  onAdd: () => void;
+  onAdd: (pieceCode?: string) => void;
 }) {
   const stateLabel = props.piece.requirementState === "required" ? "Requis" : "À confirmer";
   return (
@@ -177,7 +250,7 @@ function PieceRow(props: {
             </p>
           ) : null}
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={props.onAdd} className="shrink-0 gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => props.onAdd(props.piece.code)} className="shrink-0 gap-2">
           <Upload className="h-4 w-4" />
           Ajouter
         </Button>
@@ -188,9 +261,9 @@ function PieceRow(props: {
 
 function PiecesSection(props: {
   pieces: ResolvedPiece[];
-  files: File[];
+  files: UploadedDossierFile[];
   matchedCodes: Set<string>;
-  onAdd: () => void;
+  onAdd: (pieceCode?: string) => void;
   onRemoveFile: (index: number) => void;
 }) {
   const mandatory = props.pieces.filter((piece) => piece.status === "mandatory");
@@ -215,7 +288,7 @@ function PiecesSection(props: {
         <Upload className="mx-auto h-8 w-8 text-slate-500" />
         <p className="mt-2 text-sm font-semibold text-slate-900">Ajouter des pièces justificatives</p>
         <p className="mt-1 text-xs text-slate-500">Le code officiel dans le nom du fichier améliore le contrôle : PCMI1-plan-situation.pdf.</p>
-        <Button type="button" variant="outline" className="mt-4" onClick={props.onAdd}>
+        <Button type="button" variant="outline" className="mt-4" onClick={() => props.onAdd()}>
           Sélectionner des documents
         </Button>
       </div>
@@ -225,12 +298,15 @@ function PiecesSection(props: {
           <p className="text-sm font-semibold text-slate-900">Documents ajoutés ({props.files.length})</p>
           <div className="mt-3 grid gap-2">
             {props.files.map((file, index) => (
-              <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2">
+              <div key={file.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2">
                 <div className="flex min-w-0 items-center gap-3">
                   <FileText className="h-4 w-4 shrink-0 text-slate-500" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-900">{file.name}</p>
-                    <p className="text-xs text-slate-500">{formatFileSize(file.size)}</p>
+                    <p className="truncate text-sm font-medium text-slate-900">{file.file.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {formatFileSize(file.file.size)}
+                      {file.pieceCode ? ` · rattaché à ${file.pieceCode}` : ""}
+                    </p>
                   </div>
                 </div>
                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => props.onRemoveFile(index)}>
@@ -332,7 +408,8 @@ export default function CitoyenNewDossierPage() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [files, setFiles] = useState<File[]>([]);
+  const pendingPieceCodeRef = useRef<string | undefined>(undefined);
+  const [files, setFiles] = useState<UploadedDossierFile[]>([]);
   const [address, setAddress] = useState("");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
   const [docType, setDocType] = useState<DossierType>("PCMI");
@@ -350,9 +427,47 @@ export default function CitoyenNewDossierPage() {
   const [locationIntelligence, setLocationIntelligence] = useState<ParcelContextAnalysis | null>(null);
   const [showLocationDetails, setShowLocationDetails] = useState(false);
   const [parcelAnalysisRetryToken, setParcelAnalysisRetryToken] = useState(0);
+  const [draftRestored, setDraftRestored] = useState(false);
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
   const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function restoreDraft() {
+      if (isDemoSessionActive()) {
+        setDraftRestored(true);
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("orientation") === "guided") {
+        setDraftRestored(true);
+        return;
+      }
+      try {
+        const raw = localStorage.getItem(CITIZEN_DRAFT_KEY);
+        if (!raw) return;
+        const draft = JSON.parse(raw);
+        if (cancelled) return;
+        if (draft.docType) setDocType(normalizeOfficialDossierType(draft.docType));
+        if (typeof draft.title === "string") setTitle(draft.title);
+        if (typeof draft.address === "string") setAddress(draft.address);
+        if (draft.selectedAddress) setSelectedAddress(draft.selectedAddress);
+        if (draft.parcelAnalysis) setParcelAnalysis(draft.parcelAnalysis);
+        if (draft.locationIntelligence) setLocationIntelligence(draft.locationIntelligence);
+        if (draft.orientationResult) setOrientationResult(draft.orientationResult);
+        if (draft.projectFlags) setProjectFlags(draft.projectFlags);
+        if (draft.cerfaValues) setCerfaValues(draft.cerfaValues);
+        if (draft.savedAt) setLastSavedAt(new Date(draft.savedAt));
+        const restoredFiles = await loadDraftFiles().catch(() => []);
+        if (!cancelled && restoredFiles.length > 0) setFiles(restoredFiles);
+      } finally {
+        if (!cancelled) setDraftRestored(true);
+      }
+    }
+    void restoreDraft();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -392,12 +507,49 @@ export default function CitoyenNewDossierPage() {
     }
   }, [location]);
 
+  useEffect(() => {
+    if (!draftRestored || isDemoSessionActive()) return;
+    const hasDraftContent = !!title || !!address || !!selectedAddress || Object.keys(cerfaValues).length > 0 || files.length > 0;
+    if (!hasDraftContent) return;
+
+    const timeout = window.setTimeout(() => {
+      const savedAt = new Date().toISOString();
+      const payload = {
+        docType,
+        title,
+        address,
+        selectedAddress,
+        parcelAnalysis,
+        locationIntelligence,
+        orientationResult,
+        projectFlags,
+        cerfaValues,
+        activeSectionId,
+        files: files.map((item) => ({
+          id: item.id,
+          name: item.file.name,
+          size: item.file.size,
+          type: item.file.type,
+          lastModified: item.file.lastModified,
+          pieceCode: item.pieceCode,
+        })),
+        savedAt,
+      };
+      localStorage.setItem(CITIZEN_DRAFT_KEY, JSON.stringify(payload));
+      void saveDraftFiles(files).catch(() => undefined);
+      setLastSavedAt(new Date(savedAt));
+    }, 600);
+
+    return () => window.clearTimeout(timeout);
+  }, [draftRestored, docType, title, address, selectedAddress, parcelAnalysis, locationIntelligence, orientationResult, projectFlags, cerfaValues, activeSectionId, files]);
+
   const uploadedDocumentsForCompleteness = useMemo(
-    () => files.map((file) => ({
-      filename: file.name,
-      type: file.type,
-      detectedCode: extractDetectedCode(file.name),
-      confidence: extractDetectedCode(file.name) ? 0.78 : undefined,
+    () => files.map((item) => ({
+      code: item.pieceCode,
+      filename: item.file.name,
+      type: item.file.type,
+      detectedCode: extractDetectedCode(item.file.name),
+      confidence: item.pieceCode ? 0.98 : extractDetectedCode(item.file.name) ? 0.78 : undefined,
     })),
     [files],
   );
@@ -497,7 +649,10 @@ export default function CitoyenNewDossierPage() {
     }).then(setLocationIntelligence);
     setLastSavedAt(new Date());
     if (files.length === 0 && typeof File !== "undefined") {
-      setFiles(demoUploadedDocuments.map((document) => new File(["demo"], document.fileName, { type: "application/pdf" })));
+      setFiles(demoUploadedDocuments.map((document) => {
+        const file = new File(["demo"], document.fileName, { type: "application/pdf" });
+        return { id: fileId(file), file, pieceCode: document.code };
+      }));
     }
   }, []);
 
@@ -675,7 +830,15 @@ export default function CitoyenNewDossierPage() {
   });
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files) setFiles((prev) => [...prev, ...Array.from(event.target.files!)]);
+    const selectedFiles = Array.from(event.target.files || []);
+    const pieceCode = pendingPieceCodeRef.current;
+    if (selectedFiles.length > 0) {
+      setFiles((prev) => [
+        ...prev,
+        ...selectedFiles.map((file) => ({ id: fileId(file), file, pieceCode })),
+      ]);
+    }
+    pendingPieceCodeRef.current = undefined;
     event.target.value = "";
   };
 
@@ -698,8 +861,30 @@ export default function CitoyenNewDossierPage() {
   };
 
   const saveDraft = () => {
-    const payload = { docType, title, address, selectedAddress, parcelAnalysis, cerfaValues, savedAt: new Date().toISOString() };
-    localStorage.setItem("heureka.citizenDraft", JSON.stringify(payload));
+    const savedAt = new Date().toISOString();
+    const payload = {
+      docType,
+      title,
+      address,
+      selectedAddress,
+      parcelAnalysis,
+      locationIntelligence,
+      orientationResult,
+      projectFlags,
+      cerfaValues,
+      activeSectionId,
+      files: files.map((item) => ({
+        id: item.id,
+        name: item.file.name,
+        size: item.file.size,
+        type: item.file.type,
+        lastModified: item.file.lastModified,
+        pieceCode: item.pieceCode,
+      })),
+      savedAt,
+    };
+    localStorage.setItem(CITIZEN_DRAFT_KEY, JSON.stringify(payload));
+    void saveDraftFiles(files).catch(() => undefined);
     const now = new Date();
     setLastSavedAt(now);
     toast({ title: "Brouillon sauvegardé", description: `Dernière sauvegarde à ${now.toLocaleTimeString("fr-FR")}.` });
@@ -767,7 +952,10 @@ export default function CitoyenNewDossierPage() {
       const dossierId = created.dossier.id as string;
 
       const formData = new FormData();
-      files.forEach((file) => formData.append("files", file));
+      files.forEach((item) => {
+        formData.append("files", item.file);
+        formData.append("pieceCodes", item.pieceCode || "");
+      });
       formData.append("adresse", selectedAddress.label);
       formData.append("commune", selectedAddress.city || parcelAnalysis?.commune || "");
       formData.append("title", title);
@@ -777,6 +965,8 @@ export default function CitoyenNewDossierPage() {
       const submitResponse = await fetch(`/api/dossiers/${dossierId}/submit`, { method: "PATCH", credentials: "include" });
       if (!submitResponse.ok) throw new Error((await submitResponse.json().catch(() => ({}))).message || "Soumission impossible.");
       const submitted = await submitResponse.json();
+      localStorage.removeItem(CITIZEN_DRAFT_KEY);
+      void clearDraftFiles().catch(() => undefined);
       toast({
         title: submitted.dossier?.status === "INCOMPLET" ? "Dossier transmis, pièces à compléter" : "Dossier transmis",
         description: "Votre demande a été envoyée au service instructeur.",
@@ -804,7 +994,10 @@ export default function CitoyenNewDossierPage() {
           pieces={resolvedPieces}
           files={files}
           matchedCodes={matchedCodes}
-          onAdd={() => fileInputRef.current?.click()}
+          onAdd={(pieceCode) => {
+            pendingPieceCodeRef.current = pieceCode;
+            fileInputRef.current?.click();
+          }}
           onRemoveFile={removeFile}
         />
       );

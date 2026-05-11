@@ -289,7 +289,7 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
     const inputFiles = req.files as Record<string, Express.Multer.File[]> | undefined;
     const files = [...(inputFiles?.files ?? []), ...(inputFiles?.file ?? [])];
 
-    const { title, documentType = "permis_de_construire", analysisId, referenceDocumentId, commune, adresse, dossierId, pieceCode } = req.body as {
+    const { title, documentType = "permis_de_construire", analysisId, referenceDocumentId, commune, adresse, dossierId, pieceCode, pieceCodes } = req.body as {
       title?: string;
       documentType?: string;
       analysisId?: string;
@@ -298,7 +298,13 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
       adresse?: string;
       dossierId?: string;
       pieceCode?: string;
+      pieceCodes?: string | string[];
     };
+    const pieceCodeList = Array.isArray(pieceCodes)
+      ? pieceCodes
+      : typeof pieceCodes === "string"
+        ? [pieceCodes]
+        : [];
 
     if (!files || files.length === 0) {
       logger.warn("[Upload] No files provided");
@@ -337,19 +343,20 @@ router.post("/upload", authenticate, upload.fields([{ name: "files", maxCount: 5
     }
 
     // Create records for ALL files
-    const docs = await Promise.all(files.map(async (file: Express.Multer.File) => {
+    const docs = await Promise.all(files.map(async (file: Express.Multer.File, index: number) => {
+      const resolvedPieceCode = pieceCodeList[index] || pieceCode || null;
       const [doc] = await db.insert(documentReviewsTable).values({
         userId: req.user!.userId,
         analysisId: (linkedAnalysis?.id as any) ?? null,
         dossierId: finalDossierId as any,
-        pieceCode: pieceCode || null,
+        pieceCode: resolvedPieceCode,
         commune: commune || linkedAnalysis?.city || (linkedAnalysis?.address?.toLowerCase().includes("nogent") ? "Nogent-sur-Marne" : null),
         title: title || file.originalname,
         documentType: documentType as any,
         fileName: file.originalname,
         address: adresse || null,
         status: "processing",
-        pieceStatus: pieceCode ? "valide" : undefined,
+        pieceStatus: resolvedPieceCode ? "valide" : undefined,
       }).returning();
       return doc;
     }));
