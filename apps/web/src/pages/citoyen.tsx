@@ -110,7 +110,7 @@ export default function CitoyenPage() {
 
   const demoActive = isDemoSessionActive();
 
-  if (!demoActive && (authLoading || docsLoading || portalContextLoading)) {
+  if (!demoActive && (authLoading || (!!user && docsLoading))) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/40">
         <p>Chargement...</p>
@@ -198,7 +198,7 @@ export default function CitoyenPage() {
         <section className="rounded-3xl border border-primary/10 bg-white shadow-sm p-6 md:p-8">
           <div className="space-y-2 mb-5">
             <Badge variant="outline" className="rounded-full px-3 py-1 text-xs">
-              Informations relatives au portail citoyen
+              {portalContextLoading ? "Chargement des informations du portail..." : "Informations relatives au portail citoyen"}
             </Badge>
             <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
               Un espace unique pour suivre vos demandes d’urbanisme
