@@ -64,11 +64,12 @@ function pushDelay(
 
 export function computeInstructionTimeline(input: InstructionTimelineInput): InstructionTimelineResult {
   const location = input.locationContext || {};
+  const detected = (location as any).detectedConstraints || {};
   const flags = input.projectFlags || {};
   const baseDelay = baseDelayFor(input.dossierType);
   const additionalDelays: InstructionTimelineResult["additionalDelays"] = [];
 
-  if (location.abf || location.spr || location.monumentHistoriqueAbords) {
+  if (location.abf || location.spr || location.monumentHistoriqueAbords || detected.abf || detected.spr || detected.monumentHistoriqueAbords) {
     pushDelay(additionalDelays, "Consultation patrimoniale / ABF", 1, "Code de l'urbanisme - périmètre patrimonial");
   }
 
@@ -80,19 +81,19 @@ export function computeInstructionTimeline(input: InstructionTimelineInput): Ins
     pushDelay(additionalDelays, "Consultation de services extérieurs", 1, "Consultations administratives requises");
   }
 
-  if (location.parcNationalCore) {
+  if (location.parcNationalCore || detected.parcNationalCore) {
     pushDelay(additionalDelays, "Projet situé en coeur de parc national", 1, "Code de l'urbanisme - parc national");
   }
 
-  if (location.siteClasse || location.siteInscrit || location.reserveNaturelle || location.natura2000) {
+  if (location.siteClasse || location.siteInscrit || location.reserveNaturelle || location.natura2000 || detected.siteClasse || detected.siteInscrit || detected.reserveNaturelle || detected.natura2000) {
     pushDelay(additionalDelays, "Protection environnementale ou paysagère à consulter", 1, "Code de l'environnement / protections locales");
   }
 
-  if (location.pprRequiresStudy || flags.riskPreventionPlanRequiresStudy) {
+  if (location.pprRequiresStudy || detected.pprRequiresStudy || detected.ppri || detected.pprn || detected.pprt || flags.riskPreventionPlanRequiresStudy) {
     pushDelay(additionalDelays, "Analyse du plan de prévention des risques", 1, "PPR / règlement de risque applicable");
   }
 
-  if (location.sis || location.formerIcpe || flags.soilInformationSector || flags.formerIcpeSiteDifferentUse) {
+  if (location.sis || location.formerIcpe || detected.sis || detected.formerIcpe || flags.soilInformationSector || flags.formerIcpeSiteDifferentUse) {
     pushDelay(additionalDelays, "Vérification sols pollués ou ancien site ICPE", 1, "Secteur d'information sur les sols / ICPE");
   }
 

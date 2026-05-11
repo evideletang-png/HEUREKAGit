@@ -23,6 +23,13 @@ const withAbf = computeInstructionTimeline({ dossierType: "PCMI", locationContex
 assert(withAbf.totalDelay === 3, "ABF doit majorer de 1 mois");
 assert(withAbf.additionalDelays.some((delay) => delay.reason.includes("ABF")), "La majoration ABF doit être expliquée");
 
+const withSigDetectedAbf = computeInstructionTimeline({
+  dossierType: "DPC",
+  locationContext: { detectedConstraints: { abf: true, monumentHistoriqueAbords: true } } as any,
+  startDate,
+});
+assert(withSigDetectedAbf.totalDelay === 2, "Les contraintes SIG ABF doivent majorer une DPC de 1 mois");
+
 const withImpact = computeInstructionTimeline({ dossierType: "PA", projectFlags: { requiresImpactStudy: true }, startDate });
 assert(withImpact.totalDelay === 5, "Étude d'impact doit majorer de 2 mois");
 
