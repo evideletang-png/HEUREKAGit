@@ -96,7 +96,8 @@ export async function fetchGeoConstraints(
     natHabitatFeats, natOiseauxFeats,
     pnFeats, pnrFeats, rnnFeats,
     supSurfFeats, supLinFeats,
-    prescSurfFeats,
+    prescSurfFeats, prescLinFeats, prescPointFeats,
+    infoSurfFeats, infoLinFeats, infoPointFeats,
   ] = await Promise.all([
     fetchNature("znieff1",         geomStr),
     fetchNature("znieff2",         geomStr),
@@ -108,6 +109,11 @@ export async function fetchGeoConstraints(
     fetchGpuLayer("assiette-sup-s", geomStr),
     fetchGpuLayer("assiette-sup-l", geomStr),
     fetchGpuLayer("prescription-surf", geomStr),
+    fetchGpuLayer("prescription-lin", geomStr),
+    fetchGpuLayer("prescription-pct", geomStr),
+    fetchGpuLayer("information-surf", geomStr),
+    fetchGpuLayer("information-lin", geomStr),
+    fetchGpuLayer("information-pct", geomStr),
   ]);
 
   const constraints: GeoConstraint[] = [];
@@ -233,7 +239,7 @@ export async function fetchGeoConstraints(
   // ── PLU Prescriptions surfaciques (EBC, emplacements réservés…) ──────────
 
   const seenPrescTypes = new Set<string>();
-  for (const f of prescSurfFeats) {
+  for (const f of [...prescSurfFeats, ...prescLinFeats, ...prescPointFeats]) {
     const typekey = (f.properties?.typepsc || "").trim().toUpperCase();
     if (seenPrescTypes.has(typekey) && typekey !== "") continue;
     seenPrescTypes.add(typekey);
@@ -248,6 +254,27 @@ export async function fetchGeoConstraints(
       description: detail || "Prescription surfacique inscrite au Géoportail de l'Urbanisme — vérification recommandée.",
       severity:    "medium",
       source:      "GPU / IGN Géoportail Urbanisme",
+    });
+  }
+
+  // ── GPU information layers (OAP, risks, contextual records…) ─────────────
+
+  const seenInfoTypes = new Set<string>();
+  for (const f of [...infoSurfFeats, ...infoLinFeats, ...infoPointFeats]) {
+    const typekey = (f.properties?.typeinf || f.properties?.type || "").trim().toUpperCase();
+    const label = f.properties?.libelle || f.properties?.txt || f.properties?.nom || typekey || "Information réglementaire";
+    const detail = f.properties?.observation || f.properties?.description || "";
+    const dedupe = `${typekey}:${label}`;
+    if (seenInfoTypes.has(dedupe)) continue;
+    seenInfoTypes.add(dedupe);
+    if (!label || label.length < 2) continue;
+
+    constraints.push({
+      category: "autre",
+      title: `Information GPU : ${String(label).substring(0, 100)}`,
+      description: detail || "Information réglementaire associée à la parcelle dans le Géoportail de l'Urbanisme.",
+      severity: /risque|ppr|inond|patrimoine|servitude|oap/i.test(`${label} ${detail}`) ? "medium" : "info",
+      source: "GPU / IGN Géoportail Urbanisme",
     });
   }
 
