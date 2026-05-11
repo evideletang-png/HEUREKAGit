@@ -490,7 +490,8 @@ export default function CitoyenNewDossierPage() {
         if (!raw) return;
         const draft = JSON.parse(raw);
         if (cancelled) return;
-        if (draft.docType) setDocType(normalizeOfficialDossierType(draft.docType));
+        const restoredDocType = normalizeOfficialDossierType(draft.cerfaValues?.["project.dossierType"] || draft.docType);
+        setDocType(restoredDocType);
         if (typeof draft.title === "string") setTitle(draft.title);
         if (typeof draft.address === "string") setAddress(draft.address);
         if (draft.selectedAddress) setSelectedAddress(draft.selectedAddress);
@@ -498,7 +499,9 @@ export default function CitoyenNewDossierPage() {
         if (draft.locationIntelligence) setLocationIntelligence(draft.locationIntelligence);
         if (draft.orientationResult) setOrientationResult(draft.orientationResult);
         if (draft.projectFlags) setProjectFlags(draft.projectFlags);
-        if (draft.cerfaValues) setCerfaValues(draft.cerfaValues);
+        if (draft.cerfaValues) {
+          setCerfaValues(mergeChangedCerfaValues(draft.cerfaValues, { "project.dossierType": restoredDocType }));
+        }
         if (draft.savedAt) setLastSavedAt(new Date(draft.savedAt));
         const restoredFiles = await loadDraftFiles().catch(() => []);
         if (!cancelled && restoredFiles.length > 0) setFiles(restoredFiles);
@@ -594,13 +597,6 @@ export default function CitoyenNewDossierPage() {
     })),
     [files],
   );
-
-  const cerfaDossierType = cerfaValues["project.dossierType"] as string | undefined;
-
-  useEffect(() => {
-    const nextType = normalizeOfficialDossierType(cerfaDossierType || docType);
-    if (nextType !== docType) setDocType(nextType);
-  }, [cerfaDossierType, docType]);
 
   useEffect(() => {
     setCerfaValues((current) => {
