@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useGetApiDocuments } from "@workspace/api-client-react";
 import { AppShell } from "@/components/layout/AppShell";
+import { getCommuneModuleConfig } from "@/lib/communes/getCommuneModuleConfig";
 import { getDemoCitizenPortalContext, getDemoDossierForStatus } from "@/demo/demoSeedData";
 import { readDemoState, isDemoSessionActive } from "@/demo/demoModeStore";
 
@@ -129,6 +130,8 @@ export default function CitoyenPage() {
   const portalContext = demoActive ? getDemoCitizenPortalContext() : portalContextData?.portalContext;
   const communeName = portalContext?.commune || getPortalCommuneName(documents);
   const townHallName = portalContext?.townHallName || `Mairie de ${communeName}`;
+  const moduleConfig = getCommuneModuleConfig({ communeName: demoActive ? "Commune Démo" : communeName });
+  const newDossierHref = moduleConfig.modules.orientationAssistantEnabled ? "/citoyen/orientation" : "/citoyen/nouveau";
   const hasPortalAddress = Boolean(
     portalContext?.addressLine1 || portalContext?.addressLine2 || portalContext?.postalCode || portalContext?.city,
   );
@@ -161,7 +164,7 @@ export default function CitoyenPage() {
             </div>
             <div className="flex flex-col gap-3 min-w-[240px]">
               <Button size="lg" className="w-full gap-2" asChild>
-                <Link href="/citoyen/nouveau">
+                <Link href={newDossierHref}>
                   <Plus className="w-4 h-4" />
                   Déposer un nouveau dossier
                 </Link>
@@ -255,7 +258,7 @@ export default function CitoyenPage() {
                 Commencez votre première démarche urbanisme en quelques minutes : la mairie sera notifiée automatiquement dès l'envoi.
               </p>
               <Button asChild>
-                <Link href="/citoyen/nouveau">Commencer ma demande</Link>
+                <Link href={newDossierHref}>Commencer ma demande</Link>
               </Button>
             </CardContent>
           </Card>

@@ -46,6 +46,7 @@ import { CerfaSectionSidebar } from "@/components/dossier/CerfaSectionSidebar";
 import { DossierActionRail } from "@/components/dossier/DossierActionRail";
 import { demoDossier, demoProjectContext, demoUploadedDocuments } from "@/demo/demoSeedData";
 import { isDemoSessionActive } from "@/demo/demoModeStore";
+import { ORIENTATION_STORAGE_KEY, type OrientationResultPayload } from "@/modules/orientation/orientation.types";
 
 const DOSSIER_TYPES: { value: DossierType; label: string }[] = [
   { value: "PCMI", label: "PCMI - Permis de construire maison individuelle" },
@@ -323,7 +324,7 @@ function VerificationSection(props: {
 }
 
 export default function CitoyenNewDossierPage() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -345,6 +346,40 @@ export default function CitoyenNewDossierPage() {
 
   const geocode = useGeocodeAddress({ q: address }, { query: { enabled: address.length > 5 } } as any);
   const selectedCoordinates = useMemo(() => getAddressCoordinates(selectedAddress), [selectedAddress]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const typeFromQuery = params.get("type");
+    if (typeFromQuery) {
+      const normalized = normalizeOfficialDossierType(typeFromQuery);
+      setDocType(normalized);
+      setCerfaValues((current) => ({ ...current, "project.dossierType": normalized }));
+    }
+
+    const rawOrientation = params.get("orientation") === "guided" ? sessionStorage.getItem(ORIENTATION_STORAGE_KEY) : null;
+    if (!rawOrientation) return;
+    try {
+      const orientation = JSON.parse(rawOrientation) as OrientationResultPayload;
+      if (orientation.recommendedDossierType === "PCMI" || orientation.recommendedDossierType === "PC" || orientation.recommendedDossierType === "DPC" || orientation.recommendedDossierType === "DPA" || orientation.recommendedDossierType === "PA" || orientation.recommendedDossierType === "PD") {
+        setDocType(orientation.recommendedDossierType);
+        setProjectFlags((current) => ({ ...current, ...orientation.projectFlags }));
+        setCerfaValues((current) => ({
+          ...current,
+          "project.dossierType": orientation.recommendedDossierType,
+          "works.createsConstruction": orientation.projectFlags.createsConstruction,
+          "works.modifiesFacadesOrRoof": orientation.projectFlags.modifiesFacadesOrRoof,
+          "works.modifiesTerrainProfile": orientation.projectFlags.modifiesTerrainProfile,
+          "works.visibleFromPublicSpace": orientation.projectFlags.visibleFromPublicSpace,
+          "demolition.demolitionRequired": orientation.projectFlags.demolitionRequired,
+          "demolition.pcIncludesDemolition": orientation.projectFlags.pcIncludesDemolition,
+          "related.deforestationRequired": orientation.projectFlags.deforestationRequired,
+          "related.lotissement": orientation.projectFlags.lotissement,
+        }));
+      }
+    } catch {
+      sessionStorage.removeItem(ORIENTATION_STORAGE_KEY);
+    }
+  }, [location]);
 
   const uploadedDocumentsForCompleteness = useMemo(
     () => files.map((file) => ({
