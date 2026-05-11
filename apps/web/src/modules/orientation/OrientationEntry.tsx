@@ -14,8 +14,17 @@ import { ORIENTATION_STORAGE_KEY, type OrientationResultPayload } from "./orient
 
 type OrientationStep = "entry" | "wizard" | "result";
 
-function directDepositRoute(type?: string) {
-  return `/citoyen/nouveau${type ? `?type=${encodeURIComponent(type)}&orientation=guided` : "?orientation=skip"}`;
+function projectReturnRoute(projectId: string | null) {
+  return projectId ? `/projects/${encodeURIComponent(projectId)}` : "/citoyen";
+}
+
+function directDepositRoute(type?: string, projectId?: string | null) {
+  const params = new URLSearchParams();
+  params.set("orientation", type ? "guided" : "skip");
+  if (type) params.set("type", type);
+  if (projectId) params.set("projectId", projectId);
+  if (projectId) params.set("returnTo", "project");
+  return `/citoyen/nouveau?${params.toString()}`;
 }
 
 export default function OrientationEntry() {
@@ -23,10 +32,20 @@ export default function OrientationEntry() {
   const [step, setStep] = useState<OrientationStep>("entry");
   const [result, setResult] = useState<OrientationResultPayload | null>(null);
   const config = getCommuneModuleConfig({ communeName: isDemoSessionActive() ? "Commune Démo" : "Tours" });
+  const searchParams = new URLSearchParams(window.location.search);
+  const projectId = searchParams.get("projectId");
+  const returnToProject = searchParams.get("returnTo") === "project" && Boolean(projectId);
+  const backRoute = returnToProject ? projectReturnRoute(projectId) : "/citoyen";
 
   useEffect(() => {
-    if (!config.modules.orientationAssistantEnabled) setLocation("/citoyen/nouveau?orientation=disabled");
-  }, [config.modules.orientationAssistantEnabled, setLocation]);
+    if (!config.modules.orientationAssistantEnabled) {
+      const params = new URLSearchParams();
+      params.set("orientation", "disabled");
+      if (projectId) params.set("projectId", projectId);
+      if (projectId) params.set("returnTo", "project");
+      setLocation(`/citoyen/nouveau?${params.toString()}`);
+    }
+  }, [config.modules.orientationAssistantEnabled, setLocation, projectId]);
 
   if (!config.modules.orientationAssistantEnabled) return null;
 
@@ -34,7 +53,7 @@ export default function OrientationEntry() {
     <AppShell className="bg-slate-50 pb-16" mainClassName="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-center gap-3">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/citoyen">
+          <Link href={backRoute}>
             <ArrowLeft className="h-5 w-5" />
           </Link>
         </Button>
@@ -77,7 +96,7 @@ export default function OrientationEntry() {
               <p className="text-sm text-slate-600">
                 Accédez directement au dépôt classique et choisissez vous-même PCMI, PC, DPC, DPA, PA ou PD.
               </p>
-              <Button className="mt-5 w-full" variant="outline" onClick={() => setLocation(directDepositRoute())}>
+              <Button className="mt-5 w-full" variant="outline" onClick={() => setLocation(directDepositRoute(undefined, projectId))}>
                 Aller au dépôt
               </Button>
             </CardContent>
@@ -109,11 +128,11 @@ export default function OrientationEntry() {
           <CardContent className="pt-6">
             <OrientationResult
               result={result}
-              onCreate={(type) => setLocation(directDepositRoute(type))}
+              onCreate={(type) => setLocation(directDepositRoute(type, projectId))}
               onEdit={() => setStep("wizard")}
               onChooseOther={() => {
                 sessionStorage.removeItem(ORIENTATION_STORAGE_KEY);
-                setLocation(directDepositRoute());
+                setLocation(directDepositRoute(undefined, projectId));
               }}
             />
           </CardContent>
