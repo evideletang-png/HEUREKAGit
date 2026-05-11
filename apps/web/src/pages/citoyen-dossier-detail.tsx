@@ -303,19 +303,25 @@ export default function CitoyenDossierDetailPage() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/documents/${id}/submit`, {
+      const r = await fetch(`/api/dossiers/${id}/submit`, {
         method: "PATCH",
         credentials: "include"
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        const payload = await r.json().catch(() => ({}));
+        throw new Error(payload.message || payload.error || `HTTP ${r.status}`);
+      }
       return r.json();
     },
-    onSuccess: () => {
-      toast({ title: "Dossier soumis !", description: "Votre dossier a été transmis au service Mairie." });
+    onSuccess: (data) => {
+      toast({
+        title: data?.dossier?.status === "INCOMPLET" ? "Dossier transmis, pièces à compléter" : "Dossier soumis !",
+        description: data?.preControl?.message || "Votre dossier a été transmis au service Mairie.",
+      });
       queryClient.invalidateQueries({ queryKey: ["citoyen-dossier", id] });
     },
-    onError: () => {
-      toast({ title: "Erreur", description: "Impossible de soumettre le dossier.", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Erreur", description: error instanceof Error ? error.message : "Impossible de soumettre le dossier.", variant: "destructive" });
     }
   });
 
