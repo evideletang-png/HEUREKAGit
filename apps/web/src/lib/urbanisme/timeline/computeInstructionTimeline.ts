@@ -84,6 +84,18 @@ export function computeInstructionTimeline(input: InstructionTimelineInput): Ins
     pushDelay(additionalDelays, "Projet situé en coeur de parc national", 1, "Code de l'urbanisme - parc national");
   }
 
+  if (location.siteClasse || location.siteInscrit || location.reserveNaturelle || location.natura2000) {
+    pushDelay(additionalDelays, "Protection environnementale ou paysagère à consulter", 1, "Code de l'environnement / protections locales");
+  }
+
+  if (location.pprRequiresStudy || flags.riskPreventionPlanRequiresStudy) {
+    pushDelay(additionalDelays, "Analyse du plan de prévention des risques", 1, "PPR / règlement de risque applicable");
+  }
+
+  if (location.sis || location.formerIcpe || flags.soilInformationSector || flags.formerIcpeSiteDifferentUse) {
+    pushDelay(additionalDelays, "Vérification sols pollués ou ancien site ICPE", 1, "Secteur d'information sur les sols / ICPE");
+  }
+
   const totalDelay = baseDelay + additionalDelays.reduce((sum, delay) => sum + delay.duration, 0);
   const legalDeadlineDate = addMonths(startDateOf(input.startDate), totalDelay);
 

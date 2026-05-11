@@ -23,6 +23,11 @@ import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 import { getDemoDossierForStatus } from "@/demo/demoSeedData";
 import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
+import type {
+  OrientationEstimatedTimeline,
+  OrientationExpectedConsultation,
+  OrientationLocationConstraint,
+} from "@/modules/orientation/orientation.types";
 
 type DossierDetail = {
   id: string;
@@ -177,9 +182,22 @@ export default function DossierMairieDetailPage() {
     || "Non renseignée";
   const zoneLabel = parcelAnalysis.zoneLabel || parcelAnalysis.zoningLabel || dossier.metadata?.pluAnalysis?.zone?.label;
   const parcelRef = dossier.parcelRef || parcelAnalysis.parcelRef || dossier.metadata?.parcel_ref || dossier.metadata?.parcelRef || null;
+  const orientationContext = dossier.metadata?.orientationContext as {
+    locationConstraints?: OrientationLocationConstraint[];
+    expectedConsultations?: OrientationExpectedConsultation[];
+    estimatedInstructionTimeline?: OrientationEstimatedTimeline;
+  } | undefined;
+  const orientationConstraints = Array.isArray(orientationContext?.locationConstraints)
+    ? orientationContext.locationConstraints.filter((constraint) => constraint.detected)
+    : [];
+  const orientationConsultations = Array.isArray(orientationContext?.expectedConsultations)
+    ? orientationContext.expectedConsultations
+    : [];
+  const orientationTimeline = orientationContext?.estimatedInstructionTimeline;
   const locationConstraints = [
     ...(Array.isArray(parcelAnalysis.constraints) ? parcelAnalysis.constraints : []),
     ...(Array.isArray(parcelAnalysis.overlays) ? parcelAnalysis.overlays : []),
+    ...orientationConstraints.map((constraint) => constraint.label),
   ];
   const surface = dossier.metadata?.surfacePlancher || dossier.metadata?.surface_plancher || dossier.metadata?.requested_surface_m2 || 120;
   const documents = dossier.documents?.length ? dossier.documents : demoDossier.documents || [];
@@ -280,6 +298,52 @@ export default function DossierMairieDetailPage() {
                       <p className="mt-1 text-lg font-semibold">{value}</p>
                     </div>
                   ))}
+                </div>
+              </InfoCard>
+
+              <InfoCard title="Analyse de contexte">
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">Contraintes détectées</p>
+                    {orientationConstraints.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        {orientationConstraints.map((constraint) => (
+                          <div key={`${constraint.type}-${constraint.label}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-semibold text-slate-900">{constraint.label}</p>
+                              <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">{constraint.confidence}</span>
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">Source : {constraint.source}</p>
+                            {constraint.impact.decisionImpact ? <p className="mt-1 text-sm text-slate-700">{constraint.impact.decisionImpact}</p> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-600">Aucune contrainte issue de l'orientation n'a été transmise.</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-500">Services à consulter</p>
+                    {orientationConsultations.length > 0 ? (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {orientationConsultations.map((consultation) => (
+                          <div key={`${consultation.service}-${consultation.reason}`} className="rounded-lg border border-slate-200 p-3">
+                            <p className="font-semibold text-slate-950">{consultation.service}</p>
+                            <p className="mt-1 text-sm text-slate-600">{consultation.reason}</p>
+                            <p className="mt-1 text-xs text-slate-500">{consultation.required ? "Consultation probable" : "À confirmer"}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-slate-600">Aucun service additionnel proposé à ce stade.</p>
+                    )}
+                  </div>
+                  {orientationTimeline ? (
+                    <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
+                      Délai indicatif orientation : {orientationTimeline.baseDelay.durationMonths} mois de base
+                      {orientationTimeline.possibleMajorations.length > 0 ? `, ${orientationTimeline.possibleMajorations.length} majoration(s) possible(s)` : ""}.
+                    </div>
+                  ) : null}
                 </div>
               </InfoCard>
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,10 @@ export function CompositeProjectWizard(props: {
     const question = QUESTION_LABELS[key];
     const parsed = question?.type === "number" ? Number(value) : question?.type === "boolean" ? value === "yes" : value;
     setAnswers((current) => ({ ...current, [key]: parsed }));
+  };
+
+  const updateBoolean = (key: keyof OrientationAnswers, value: string) => {
+    setAnswers((current) => ({ ...current, [key]: value === "yes" }));
   };
 
   return (
@@ -104,6 +108,59 @@ export function CompositeProjectWizard(props: {
           </div>
         </section>
       ) : null}
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5">
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-950">
+          <MapPin className="h-5 w-5 text-primary" />
+          Contexte de localisation
+        </h3>
+        <p className="mt-1 text-sm text-slate-600">
+          Facultatif : ces informations permettent d'anticiper les services consultés et les délais indicatifs. Vous pourrez aussi les renseigner plus tard dans le dépôt.
+        </p>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <label className="space-y-2">
+            <Label>Adresse ou secteur</Label>
+            <Input value={answers.address || ""} onChange={(event) => setAnswers((current) => ({ ...current, address: event.target.value }))} />
+          </label>
+          <label className="space-y-2">
+            <Label>Commune</Label>
+            <Input value={answers.commune || ""} onChange={(event) => setAnswers((current) => ({ ...current, commune: event.target.value }))} />
+          </label>
+          <label className="space-y-2">
+            <Label>Parcelle</Label>
+            <Input value={answers.parcel || ""} onChange={(event) => setAnswers((current) => ({ ...current, parcel: event.target.value }))} />
+          </label>
+          <label className="space-y-2">
+            <Label>Zone PLU</Label>
+            <Input value={answers.pluZone || ""} onChange={(event) => setAnswers((current) => ({ ...current, pluZone: event.target.value }))} />
+          </label>
+          {[
+            ["abf", "Périmètre ABF / abords monument historique"],
+            ["spr", "Site patrimonial remarquable"],
+            ["natura2000", "Natura 2000"],
+            ["pprRequiresStudy", "PPRI / PPRN / PPRT ou risque identifié"],
+            ["soilInformationSector", "Secteur d'information sur les sols"],
+            ["formerIcpe", "Ancienne ICPE"],
+            ["oap", "OAP"],
+            ["servitude", "Servitude d'utilité publique"],
+            ["metropoleCompetence", "Compétence métropole / voirie"],
+            ["erp", "ERP ou accessibilité"],
+          ].map(([key, label]) => (
+            <label key={key} className="rounded-lg border border-slate-200 p-3">
+              <Label className="text-sm font-medium text-slate-900">{label}</Label>
+              <Select value={(answers as any)[key] === true ? "yes" : (answers as any)[key] === false ? "no" : ""} onValueChange={(value) => updateBoolean(key as keyof OrientationAnswers, value)}>
+                <SelectTrigger className="mt-2">
+                  <SelectValue placeholder="Non renseigné" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">Oui / détecté</SelectItem>
+                  <SelectItem value="no">Non identifié</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+          ))}
+        </div>
+      </section>
 
       <div className="flex justify-end">
         <Button type="button" size="lg" disabled={actions.length === 0} onClick={() => props.onResult(determineDossierType(actions, answers))}>
