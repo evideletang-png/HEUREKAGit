@@ -24,6 +24,7 @@ import PortailABFPage from "@/pages/portail-abf";
 import CitoyenPage from "@/pages/citoyen";
 import CitoyenDossierDetailPage from "@/pages/citoyen-dossier-detail";
 import CitoyenNewDossierPage from "@/pages/citoyen-new-dossier";
+import OrientationEntry from "@/modules/orientation/OrientationEntry";
 import TasksPage from "@/pages/tasks";
 import AppealsPage from "@/pages/appeals";
 import AppealDetailPage from "@/pages/appeal-detail";
@@ -109,6 +110,7 @@ function Router() {
 
       {/* Citizen Portal Routes */}
       <Route path="/citoyen" component={CitoyenPage} />
+      <Route path="/citoyen/orientation" component={OrientationEntry} />
       <Route path="/citoyen/nouveau" component={CitoyenNewDossierPage} />
       <Route path="/citoyen/dossier/:id" component={CitoyenDossierDetailPage} />
       <Route path="/tasks" component={TasksPage} />
