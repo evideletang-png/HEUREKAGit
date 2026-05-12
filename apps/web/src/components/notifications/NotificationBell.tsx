@@ -17,14 +17,19 @@ import { Link } from "wouter";
  * NotificationBell Component
  * Displays a bell icon with an unread badge and a popover listing recent alerts.
  */
-export function NotificationBell() {
+type NotificationBellProps = {
+  excludeTypes?: string[];
+};
+
+export function NotificationBell({ excludeTypes = [] }: NotificationBellProps) {
   const { data } = useListNotifications();
   const queryClient = useQueryClient();
   const markRead = useMarkNotificationAsRead();
   const markAllRead = useMarkAllNotificationsAsRead();
 
   const notifications = (data?.notifications as Notification[]) || [];
-  const unreadCount = notifications.filter((n: Notification) => !n.isRead).length;
+  const visibleNotifications = notifications.filter((n: Notification) => !excludeTypes.includes(n.type));
+  const unreadCount = visibleNotifications.filter((n: Notification) => !n.isRead).length;
 
   const handleMarkRead = async (id: string) => {
     try {
@@ -37,7 +42,11 @@ export function NotificationBell() {
 
   const handleMarkAllRead = async () => {
     try {
-      await markAllRead.mutateAsync();
+      if (excludeTypes.length > 0) {
+        await Promise.all(visibleNotifications.filter((n) => !n.isRead).map((n) => markRead.mutateAsync({ id: n.id })));
+      } else {
+        await markAllRead.mutateAsync();
+      }
       queryClient.invalidateQueries({ queryKey: getListNotificationsQueryKey() });
     } catch (err) {
       console.error("Failed to mark all as read", err);
@@ -84,14 +93,14 @@ export function NotificationBell() {
           )}
         </div>
         <ScrollArea className="h-[350px]">
-          {notifications.length === 0 ? (
+          {visibleNotifications.length === 0 ? (
             <div className="py-12 px-4 text-center text-muted-foreground text-sm">
               <Bell className="w-8 h-8 mx-auto mb-3 opacity-20" />
               <p>Aucune notification pour le moment.</p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
-              {notifications.map((n) => (
+              {visibleNotifications.map((n) => (
                 <div 
                   key={n.id} 
                   className={`p-4 hover:bg-muted/30 transition-colors relative group cursor-pointer ${!n.isRead ? 'bg-primary/5' : ''}`}

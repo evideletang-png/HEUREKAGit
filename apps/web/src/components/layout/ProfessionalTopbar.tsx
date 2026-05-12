@@ -1,5 +1,7 @@
 import { Link } from "wouter";
-import { LogOut, Menu, User as UserIcon } from "lucide-react";
+import { LogOut, Menu, MessageSquare, User as UserIcon } from "lucide-react";
+import { useListNotifications, type Notification } from "@workspace/api-client-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -19,6 +21,32 @@ type ProfessionalTopbarProps = {
   commune?: string | null;
   onOpenMenu: () => void;
 };
+
+const MESSAGE_NOTIFICATION_TYPES = ["MESSAGE", "MENTION"];
+
+function getMessageRoute(portalType: ProfessionalPortalType) {
+  if (portalType === "mairie") return "/dashboard-mairie/messagerie";
+  return "/messagerie";
+}
+
+function ProfessionalMessageButton({ portalType }: { portalType: ProfessionalPortalType }) {
+  const { data } = useListNotifications();
+  const notifications = (data?.notifications as Notification[]) || [];
+  const unreadMessageCount = notifications.filter((notification) => MESSAGE_NOTIFICATION_TYPES.includes(notification.type) && !notification.isRead).length;
+
+  return (
+    <Button variant="ghost" size="icon" className="relative rounded-full hover:bg-slate-100/50" asChild>
+      <Link href={getMessageRoute(portalType)} aria-label="Ouvrir la messagerie">
+        <MessageSquare className="h-5 w-5 text-slate-600 transition-colors hover:text-primary" />
+        {unreadMessageCount > 0 ? (
+          <Badge className="absolute -right-1 -top-1 flex h-5 min-w-[1.25rem] items-center justify-center border-2 border-white bg-primary px-1.5 text-[10px] font-bold text-white shadow-sm">
+            {unreadMessageCount > 9 ? "9+" : unreadMessageCount}
+          </Badge>
+        ) : null}
+      </Link>
+    </Button>
+  );
+}
 
 export function ProfessionalTopbar({ portalType, commune, onOpenMenu }: ProfessionalTopbarProps) {
   const { user, logout } = useAuth();
@@ -58,7 +86,8 @@ export function ProfessionalTopbar({ portalType, commune, onOpenMenu }: Professi
             </SelectContent>
           </Select>
         ) : null}
-        <NotificationBell />
+        <ProfessionalMessageButton portalType={portalType} />
+        <NotificationBell excludeTypes={MESSAGE_NOTIFICATION_TYPES} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="icon" className="h-10 w-10 rounded-full border-slate-200 bg-white shadow-sm">
