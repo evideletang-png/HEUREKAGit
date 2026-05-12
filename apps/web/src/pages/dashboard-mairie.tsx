@@ -437,7 +437,7 @@ function DashboardView() {
             <Download className="h-4 w-4" /> Exporter
           </Button>
           <Button asChild className="gap-2 rounded-lg bg-slate-950 text-white hover:bg-slate-800">
-            <Link href="/conformite"><Plus className="h-4 w-4" /> Nouveau dossier</Link>
+            <Link href="/mairie/nouveau?mode=mairie"><Plus className="h-4 w-4" /> Nouveau dossier</Link>
           </Button>
         </div>
       </div>

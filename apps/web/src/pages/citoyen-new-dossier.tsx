@@ -35,6 +35,7 @@ import {
   type CerfaFormValues,
 } from "@/lib/urbanisme/cerfa/cerfaFieldMapping";
 import { downloadBlob, generateCerfaPdf, getCerfaFormDescriptor } from "@/lib/urbanisme/cerfa/generateCerfaPdf";
+import { extractCerfaScan, type CerfaExtractionResult } from "@/lib/urbanisme/cerfa/cerfaExtractionService";
 import { importCerfaPdf } from "@/lib/urbanisme/cerfa/importCerfaPdf";
 import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
 import type { DossierType, ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
@@ -51,6 +52,7 @@ import { ParcelDetectionLoader } from "@/components/location/ParcelDetectionLoad
 import { demoDossier, demoProjectContext, demoUploadedDocuments } from "@/demo/demoSeedData";
 import { isDemoSessionActive } from "@/demo/demoModeStore";
 import { ORIENTATION_STORAGE_KEY, type OrientationResultPayload } from "@/modules/orientation/orientation.types";
+import type { ProjectCard } from "@/lib/projects/types";
 
 const DOSSIER_TYPES: { value: DossierType; label: string }[] = [
   { value: "PCMI", label: "PCMI - Permis de construire maison individuelle" },
@@ -448,7 +450,20 @@ export default function CitoyenNewDossierPage() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
   const pendingPieceCodeRef = useRef<string | undefined>(undefined);
+  const params = useMemo(() => new URLSearchParams(window.location.search), [location]);
+  const projectId = params.get("projectId");
+  const isMairieCreation = location.startsWith("/mairie/nouveau") || params.get("role") === "mairie" || params.get("mode") === "mairie";
+  const returnPath = isMairieCreation ? "/dashboard-mairie" : (params.get("returnTo") === "project" && projectId ? `/projects/${encodeURIComponent(projectId)}` : "/citoyen");
+  const [mairieStartStep, setMairieStartStep] = useState<"choice" | "manual" | "scan_review">("choice");
+  const [scanExtraction, setScanExtraction] = useState<CerfaExtractionResult | null>(null);
+  const [scanFile, setScanFile] = useState<File | null>(null);
+  const [scanValues, setScanValues] = useState<CerfaFormValues>({});
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [projectPrefillContext, setProjectPrefillContext] = useState<ProjectCard | null>(null);
+  const projectPrefillApplied = useRef(false);
   const [files, setFiles] = useState<UploadedDossierFile[]>([]);
   const [address, setAddress] = useState("");
   const [selectedAddress, setSelectedAddress] = useState<any>(null);
@@ -512,6 +527,59 @@ export default function CitoyenNewDossierPage() {
     void restoreDraft();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectPrefillContext(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/projects/${encodeURIComponent(projectId)}`, { credentials: "include" })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || payload.error || "Projet introuvable.");
+        if (!cancelled) setProjectPrefillContext(payload.project || null);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectPrefillContext(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!draftRestored || projectPrefillApplied.current || !projectPrefillContext) return;
+    projectPrefillApplied.current = true;
+    const projectAddress = projectPrefillContext.address || "";
+    const projectParcel = projectPrefillContext.parcelReferences?.[0] || "";
+    const projectCoordinates = projectPrefillContext.coordinates || null;
+    if (projectPrefillContext.name) setTitle((current) => current || projectPrefillContext.name);
+    if (projectAddress) {
+      setAddress((current) => current || projectAddress);
+      setSelectedAddress((current: any) => current || {
+        id: "project-location",
+        label: projectAddress,
+        city: projectPrefillContext.commune || undefined,
+        lat: projectCoordinates?.lat ?? undefined,
+        lon: projectCoordinates?.lon ?? undefined,
+        parcelles: projectParcel ? [projectParcel] : [],
+      });
+    }
+    setParcelAnalysis((current: any) => current || {
+      parcelRef: projectParcel || null,
+      commune: projectPrefillContext.commune || null,
+      zoneCode: projectPrefillContext.mainPluZone || null,
+      source: "project-prefill",
+    });
+    setCerfaValues((current) => mergeChangedCerfaValues(current, {
+      "project.title": projectPrefillContext.name || current["project.title"],
+      "terrain.address": projectAddress || current["terrain.address"],
+      "terrain.commune": projectPrefillContext.commune || current["terrain.commune"],
+      "terrain.parcel": projectParcel || current["terrain.parcel"],
+      "terrain.pluZone": projectPrefillContext.mainPluZone || current["terrain.pluZone"],
+    }));
+  }, [draftRestored, projectPrefillContext]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -915,6 +983,57 @@ export default function CitoyenNewDossierPage() {
     });
   };
 
+  const handleScanImportChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setScanLoading(true);
+    setScanError(null);
+    try {
+      const extraction = await extractCerfaScan(file);
+      setScanFile(file);
+      setScanExtraction(extraction);
+      setScanValues(extraction.rawValues);
+      setMairieStartStep("scan_review");
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "Cerfa illisible ou incomplet.");
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const validateScannedCerfa = () => {
+    if (!scanExtraction) return;
+    const nextType = normalizeOfficialDossierType(String(scanValues["project.dossierType"] || scanExtraction.dossierType.value));
+    setDocType((current) => current === nextType ? current : nextType);
+    setCerfaValues((current) => mergeChangedCerfaValues(current, {
+      ...scanValues,
+      "project.dossierType": nextType,
+    }));
+    if (typeof scanValues["project.title"] === "string") {
+      setTitle((current) => current || String(scanValues["project.title"]));
+    }
+    if (typeof scanValues["terrain.address"] === "string") {
+      const scannedAddress = String(scanValues["terrain.address"]);
+      setAddress((current) => current || scannedAddress);
+      setSelectedAddress((current: any) => current || {
+        id: "scanned-cerfa-address",
+        label: scannedAddress,
+        city: typeof scanValues["terrain.commune"] === "string" ? scanValues["terrain.commune"] : undefined,
+      });
+    }
+    if (scanFile) {
+      setFiles((current) => current.some((item) => item.file === scanFile)
+        ? current
+        : [...current, { id: fileId(scanFile), file: scanFile, pieceCode: "CERFA_ORIGINAL" }]);
+    }
+    setMairieStartStep("manual");
+    toast({
+      title: "Cerfa scanné repris",
+      description: "Les champs détectés ont été préremplis. Les informations à faible confiance restent à vérifier.",
+    });
+  };
+
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
@@ -1200,6 +1319,143 @@ export default function CitoyenNewDossierPage() {
     return <CerfaInteractiveForm section={section} values={cerfaValues} onValuesChange={updateCerfaValues} />;
   };
 
+  if (isMairieCreation && mairieStartStep === "choice") {
+    return (
+      <AppShell className="bg-slate-50 pb-12" mainClassName="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+        <input ref={scanInputRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleScanImportChange} />
+        <div className="mb-6 flex items-center gap-3">
+          <Button variant="ghost" size="icon" asChild>
+            <Link href={returnPath}>
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+          </Button>
+          <div>
+            <Badge variant="outline">Portail Mairie</Badge>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Nouveau dossier</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Créez un dossier avec le nouveau workflow de dépôt, ou importez un Cerfa scanné pour préremplir la saisie.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle>Créer un dossier manuellement</CardTitle>
+              <CardDescription>Saisie guidée CERFA, pièces officielles, complétude et transmission.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={() => setMairieStartStep("manual")}>
+                Démarrer la saisie
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-primary/20 shadow-sm">
+            <CardHeader>
+              <CardTitle>Importer un Cerfa scanné</CardTitle>
+              <CardDescription>PDF ou image. Heureka préremplit les champs détectables, puis l’instructeur valide.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button className="w-full" variant="outline" onClick={() => scanInputRef.current?.click()} disabled={scanLoading}>
+                {scanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                Importer un Cerfa
+              </Button>
+              {scanError ? <p className="text-sm text-red-600">{scanError}</p> : null}
+              <p className="text-xs text-slate-500">
+                Le Cerfa original sera conservé dans les pièces du dossier. Les champs incertains seront signalés “à vérifier”.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (isMairieCreation && mairieStartStep === "scan_review" && scanExtraction) {
+    const reviewFields = [
+      ["project.title", "Titre / référence dossier"],
+      ["project.dossierType", "Type de demande"],
+      ["applicant.fullName", "Identité du demandeur"],
+      ["applicant.address", "Adresse du demandeur"],
+      ["applicant.email", "E-mail"],
+      ["applicant.phone", "Téléphone"],
+      ["terrain.address", "Adresse du terrain"],
+      ["terrain.commune", "Commune"],
+      ["terrain.parcel", "Références cadastrales"],
+      ["works.description", "Description du projet"],
+      ["surfaces.created", "Surface créée"],
+      ["surfaces.modified", "Surface modifiée"],
+      ["surfaces.demolished", "Surface démolie"],
+      ["works.height", "Hauteur"],
+      ["parking.spaces", "Stationnement"],
+      ["signature.date", "Date de signature / dépôt"],
+    ];
+
+    return (
+      <AppShell className="bg-slate-50 pb-12" mainClassName="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mb-6 flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => setMairieStartStep("choice")}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div>
+            <Badge variant="outline">Revue instructeur</Badge>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Cerfa scanné interprété</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Vérifiez les champs extraits avant de créer le dossier. Les valeurs incertaines restent modifiables.
+            </p>
+          </div>
+        </div>
+
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>{scanFile?.name || "Cerfa importé"}</CardTitle>
+            <CardDescription>
+              Type détecté : {scanExtraction.dossierType.value} · confiance {Math.round(scanExtraction.dossierType.confidence * 100)}%
+              {scanExtraction.cerfaReference ? ` · Cerfa ${scanExtraction.cerfaReference.value}` : ""}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {scanExtraction.warnings.length > 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                {scanExtraction.warnings[0]}
+              </div>
+            ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              {reviewFields.map(([key, label]) => {
+                const extracted = scanExtraction.values[key];
+                return (
+                  <label key={key} className="rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-sm font-semibold text-slate-900">{label}</Label>
+                      {extracted?.needsReview ? <Badge variant="outline" className="text-amber-700">À vérifier</Badge> : null}
+                    </div>
+                    <Input
+                      className="mt-2"
+                      value={String(scanValues[key] ?? "")}
+                      onChange={(event) => setScanValues((current) => ({ ...current, [key]: event.target.value }))}
+                    />
+                    {extracted ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Confiance {Math.round(extracted.confidence * 100)}% · page {extracted.sourcePage || 1}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-500">Non détecté automatiquement.</p>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" onClick={() => setMairieStartStep("choice")}>Annuler</Button>
+              <Button onClick={validateScannedCerfa}>Valider et créer le dossier</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell className="bg-slate-50 pb-12" mainClassName="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} />
@@ -1207,7 +1463,7 @@ export default function CitoyenNewDossierPage() {
 
       <div className="mb-5 flex items-center gap-3">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/citoyen">
+          <Link href={returnPath}>
             <ArrowLeft className="h-5 w-5" />
           </Link>
         </Button>
@@ -1215,8 +1471,12 @@ export default function CitoyenNewDossierPage() {
           <Plus className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold text-slate-950">Nouveau dépôt de dossier</h1>
-          <p className="text-sm text-slate-600">Formulaire CERFA interactif, pièces officielles et vérification avant transmission.</p>
+          <h1 className="text-2xl font-semibold text-slate-950">{isMairieCreation ? "Nouveau dossier instructeur" : "Nouveau dépôt de dossier"}</h1>
+          <p className="text-sm text-slate-600">
+            {isMairieCreation
+              ? "Création interne depuis le nouveau workflow CERFA, avec revue des pièces et complétude."
+              : "Formulaire CERFA interactif, pièces officielles et vérification avant transmission."}
+          </p>
         </div>
       </div>
 
@@ -1327,12 +1587,14 @@ export default function CitoyenNewDossierPage() {
               {parcelAnalysisError ? <p className="mt-2 text-sm text-amber-700">{parcelAnalysisError}</p> : null}
               <div className="mt-4 space-y-4">
                 {parcelAnalysisLoading ? <ParcelDetectionLoader /> : null}
-                <ParcelContextSummary
-                  analysis={locationIntelligence}
-                  error={parcelAnalysisError}
-                  onRetry={() => setParcelAnalysisRetryToken((token) => token + 1)}
-                  onShowDetails={() => setShowLocationDetails((value) => !value)}
-                />
+                {!parcelAnalysisLoading ? (
+                  <ParcelContextSummary
+                    analysis={locationIntelligence}
+                    error={parcelAnalysisError}
+                    onRetry={() => setParcelAnalysisRetryToken((token) => token + 1)}
+                    onShowDetails={() => setShowLocationDetails((value) => !value)}
+                  />
+                ) : null}
                 {showLocationDetails ? <ParcelContextDetails analysis={locationIntelligence} /> : null}
               </div>
             </div>
@@ -1356,7 +1618,7 @@ export default function CitoyenNewDossierPage() {
           onVerify={verifyDossier}
           onSave={saveDraft}
           onTransmit={submitDossier}
-          onBack={() => setLocation("/citoyen")}
+          onBack={() => setLocation(returnPath)}
         />
       </div>
     </AppShell>
