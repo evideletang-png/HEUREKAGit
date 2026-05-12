@@ -91,6 +91,7 @@ function Router() {
       <Route path="/dashboard-mairie/statistiques" component={DashboardMairiePage} />
       <Route path="/dashboard-mairie/parametres" component={DashboardMairiePage} />
       <Route path="/dashboard-mairie" component={DashboardMairiePage} />
+      <Route path="/mairie/nouveau" component={CitoyenNewDossierPage} />
       <Route path="/dossier/:id" component={DossierMairieDetailPage} />
       <Route path="/portail-mairie/base-ia/zones/:zoneId" component={PortailMairiePage} />
       <Route path="/portail-mairie/base-ia" component={PortailMairiePage} />
