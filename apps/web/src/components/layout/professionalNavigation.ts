@@ -11,7 +11,6 @@ import {
   Landmark,
   LayoutDashboard,
   BarChart3,
-  MessageSquare,
   Network,
   ScrollText,
   Settings,
@@ -79,7 +78,6 @@ export const professionalNavigation: Record<ProfessionalPortalType, Professional
     {
       title: "Collaboration",
       items: [
-        { label: "Messagerie", href: "/dashboard-mairie/messagerie", icon: MessageSquare, permission: "message.read" },
         { label: "Recours", href: "/recours", icon: Gavel, permission: "dossier.read" },
       ],
     },
@@ -101,7 +99,6 @@ export const professionalNavigation: Record<ProfessionalPortalType, Professional
         { label: "Documents opposables", href: "/portail-metropole/documents-opposables", icon: Archive, permission: "plu.read" },
         { label: "Contrôles réglementaires", href: "/portail-metropole/controles-reglementaires", icon: FileCheck2, permission: "dossier.instruct" },
         { label: "Services consultés", href: "/portail-metropole/services-consultes", icon: Network, permission: "dossier.consult_services" },
-        { label: "Messagerie", href: "/messagerie", icon: MessageSquare, permission: "message.read" },
         { label: "Paramètres", href: "/portail-metropole/parametres", icon: Settings, permission: "settings.read" },
       ],
     },
@@ -113,7 +110,6 @@ export const professionalNavigation: Record<ProfessionalPortalType, Professional
         { label: "Avis à rendre", href: "/portail-abf", icon: Landmark, activeMatches: ["exact:/portail-abf"], permission: "dossier.read" },
         { label: "Dossiers consultés", href: "/portail-abf/dossiers-consultes", icon: FileText, permission: "dossier.read" },
         { label: "Prescriptions patrimoniales", href: "/portail-abf/prescriptions-patrimoniales", icon: ScrollText, permission: "plu.read" },
-        { label: "Messagerie", href: "/messagerie", icon: MessageSquare, permission: "message.read" },
         { label: "Paramètres", href: "/portail-abf/parametres", icon: Settings, permission: "settings.read" },
       ],
     },
