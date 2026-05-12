@@ -13,6 +13,12 @@ import {
   Send,
   XCircle,
 } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,6 +33,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -40,6 +53,7 @@ import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 import { OFFICIAL_PIECES } from "@/lib/urbanisme/cerfa/officialPieces.registry";
 import { normalizeOfficialDossierType } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
 import type { DossierType, OfficialPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
+import { buildConformityAnalysis, type ConformityAnalysisResult } from "@/lib/urbanisme/conformity/conformityAnalysisService";
 import { MockSignatureProvider } from "@/lib/urbanisme/signature/providers/mockSignatureProvider";
 import { startSignatureWorkflow } from "@/lib/urbanisme/signature/signatureWorkflow";
 import type { SignatureWorkflowResult } from "@/lib/urbanisme/signature/signatureProvider.interface";
@@ -198,6 +212,27 @@ function buildPieceRequestList(pieces: OfficialPiece[], states: Record<string, R
     .join("\n");
 }
 
+function inferDocumentCode(document: NonNullable<DossierDetail["documents"]>[number]) {
+  const raw = `${document.title || ""} ${document.fileName || ""} ${document.documentType || ""}`;
+  return raw.match(/\b(PCMI|DPC|DPA|PC|PA|PD)\s*[-_ ]?\s*(\d+(?:-\d+)?)\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
+}
+
+function flagFromConstraints(constraints: OrientationLocationConstraint[], pattern: RegExp) {
+  return constraints.some((constraint) => pattern.test(`${constraint.type} ${constraint.label}`));
+}
+
+function scoreClass(analysis: ConformityAnalysisResult) {
+  if (analysis.severity === "success") return "bg-emerald-50 text-emerald-800 border-emerald-200";
+  if (analysis.severity === "warning") return "bg-amber-50 text-amber-900 border-amber-200";
+  if (analysis.severity === "danger") return "bg-red-50 text-red-900 border-red-200";
+  return "bg-slate-50 text-slate-700 border-slate-200";
+}
+
+function compactBool(value: boolean | "unknown") {
+  if (value === "unknown") return "À confirmer";
+  return value ? "Oui" : "Non";
+}
+
 const demoDossier: DossierDetail = {
   id: "d2",
   dossierNumber: "PC-13120-26-00123",
@@ -279,6 +314,7 @@ export default function DossierMairieDetailPage() {
   const [pieceRequestNote, setPieceRequestNote] = useState("");
   const [signatureResult, setSignatureResult] = useState<SignatureWorkflowResult | null>(null);
   const [isPreparingSignature, setIsPreparingSignature] = useState(false);
+  const [conformityOpen, setConformityOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || !["mairie", "admin", "super_admin"].includes((user?.role as string) || ""))) {
@@ -349,6 +385,48 @@ export default function DossierMairieDetailPage() {
   const dossierType = normalizeOfficialDossierType(dossier.typeProcedure || dossier.title || dossier.dossierNumber || "DPC");
   const allProcedurePieces = useMemo(() => getOfficialPiecesForProcedure(dossierType), [dossierType]);
   const selectedPieces = useMemo(() => allProcedurePieces.filter((piece) => pieceStates[piece.code]), [allProcedurePieces, pieceStates]);
+  const conformityAnalysis = useMemo(() => {
+    const projectContext = {
+      dossierType,
+      projectFlags: {
+        ...(dossier.metadata?.projectFlags || {}),
+        modifiesFacadesOrRoof: Boolean(dossier.metadata?.projectFlags?.modifiesFacadesOrRoof || /façade|facade|toiture|menuiserie/i.test(`${dossier.title || ""} ${dossier.metadata?.description || ""}`)),
+        visibleFromPublicSpace: Boolean(dossier.metadata?.projectFlags?.visibleFromPublicSpace || flagFromConstraints(orientationConstraints, /abf|spr|monument/i)),
+      },
+      locationContext: {
+        commune: dossier.commune || parcelAnalysis.commune,
+        parcel: parcelRef || undefined,
+        pluZone: zone === "Non renseignée" ? null : String(zone),
+        abf: flagFromConstraints(orientationConstraints, /abf/i) || Boolean(parcelAnalysis.abf),
+        spr: flagFromConstraints(orientationConstraints, /spr|site patrimonial/i) || Boolean(parcelAnalysis.spr),
+        monumentHistoriqueAbords: flagFromConstraints(orientationConstraints, /abords|monument/i) || Boolean(parcelAnalysis.monumentHistoriqueAbords),
+        natura2000: flagFromConstraints(orientationConstraints, /natura/i) || Boolean(parcelAnalysis.natura2000),
+        pprRequiresStudy: flagFromConstraints(orientationConstraints, /ppri|pprn|pprt|inondation/i) || Boolean(parcelAnalysis.pprRequiresStudy || parcelAnalysis.ppri),
+        sis: flagFromConstraints(orientationConstraints, /sis|sols/i) || Boolean(parcelAnalysis.sis),
+        confidence: typeof parcelAnalysis.confidence === "number" ? parcelAnalysis.confidence : 0.72,
+        unresolvedChecks: Array.isArray(parcelAnalysis.unresolvedChecks) ? parcelAnalysis.unresolvedChecks : [],
+      },
+    };
+
+    return buildConformityAnalysis({
+      projectContext,
+      uploadedDocuments: documents.map((doc) => ({
+        code: inferDocumentCode(doc),
+        detectedCode: doc.documentType || undefined,
+        filename: doc.fileName || doc.title || doc.documentType || "document",
+        type: doc.documentType || doc.title || undefined,
+        confidence: doc.status === "validated" ? 0.96 : 0.74,
+      })),
+      parcelAnalysis,
+      orientationConstraints,
+      projectFacts: {
+        surface,
+        height: dossier.metadata?.height || dossier.metadata?.hauteur,
+        parking: dossier.metadata?.parking || dossier.metadata?.stationnement,
+        destination: dossier.metadata?.destination || dossier.metadata?.projectDestination,
+      },
+    });
+  }, [dossier, documents, dossierType, orientationConstraints, parcelAnalysis, parcelRef, surface, zone]);
   const letterSettings = settingsQuery.data?.settings?.formulas?.letterSettings || fallbackLetterSettings;
   const currentDecisionTemplate = decisionDialog
     ? findTemplate(letterSettings, decisionDialog === "accept" ? "acceptation" : "refus")
@@ -463,6 +541,59 @@ export default function DossierMairieDetailPage() {
             </div>
             <DossierStatusBadge status={dossier.status || "in_instruction"} className="px-6 py-4 text-lg" />
           </div>
+
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 p-5 sm:p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-black uppercase tracking-wide text-slate-400">Analyse de conformité</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <span className={`rounded-full border px-4 py-2 text-sm font-black ${scoreClass(conformityAnalysis)}`}>
+                      {conformityAnalysis.label}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700">
+                      Score {conformityAnalysis.score}/100
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700">
+                      {conformityAnalysis.riskLabel}
+                    </span>
+                  </div>
+                  <div className="mt-4 max-w-3xl space-y-1 text-sm leading-6 text-slate-600">
+                    {conformityAnalysis.summary.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                </div>
+                <Button variant="outline" className="rounded-lg border-slate-300" onClick={() => setConformityOpen(true)}>
+                  Voir l'analyse détaillée
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-bold text-slate-500">Pièces</p>
+                <p className="mt-2 text-2xl font-black text-slate-950">{conformityAnalysis.cards.pieces.detected} détectées</p>
+                <p className="mt-1 text-sm text-slate-600">{conformityAnalysis.cards.pieces.missing} manquante(s), {conformityAnalysis.cards.pieces.incoherent} incohérence(s)</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-bold text-slate-500">Urbanisme</p>
+                <p className="mt-2 text-lg font-black text-slate-950">Zone {conformityAnalysis.cards.urbanism.zone}</p>
+                <p className="mt-1 text-sm text-slate-600">ABF : {compactBool(conformityAnalysis.cards.urbanism.abf)} · PPRI : {compactBool(conformityAnalysis.cards.urbanism.ppri)} · OAP : {compactBool(conformityAnalysis.cards.urbanism.oap)}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-bold text-slate-500">Vigilances</p>
+                {conformityAnalysis.cards.vigilances.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {conformityAnalysis.cards.vigilances.slice(0, 5).map((check) => (
+                      <Badge key={check.topic} variant="outline" className="bg-white">{check.label}</Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-600">Aucune vigilance majeure.</p>
+                )}
+              </div>
+            </div>
+          </section>
 
           <InfoCard title="Actions">
             <div className="grid gap-3 sm:grid-cols-3">
@@ -735,6 +866,145 @@ export default function DossierMairieDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={conformityOpen} onOpenChange={setConformityOpen}>
+        <SheetContent side="right" className="w-[min(96vw,46rem)] overflow-y-auto sm:max-w-none">
+          <SheetHeader>
+            <SheetTitle>Analyse détaillée de conformité</SheetTitle>
+            <SheetDescription>
+              Assistance à l'instruction : les constats restent des vigilances à vérifier par le service instructeur.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-6 space-y-4">
+            <div className={`rounded-xl border p-4 ${scoreClass(conformityAnalysis)}`}>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold opacity-80">Niveau global</p>
+                  <p className="mt-1 text-2xl font-black">{conformityAnalysis.label}</p>
+                </div>
+                <p className="text-3xl font-black">{conformityAnalysis.score}/100</p>
+              </div>
+            </div>
+
+            <Accordion type="multiple" defaultValue={["completeness", "urbanism"]} className="rounded-xl border border-slate-200 bg-white px-4">
+              <AccordionItem value="completeness">
+                <AccordionTrigger>1. Complétude du dossier</AccordionTrigger>
+                <AccordionContent>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-bold text-slate-500">Pièces requises</p>
+                      <p className="mt-1 text-xl font-black">{conformityAnalysis.requiredPieces.filter((piece) => piece.requirementState === "required").length}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-bold text-slate-500">Correspondances</p>
+                      <p className="mt-1 text-xl font-black">{conformityAnalysis.completeness.matchedPieces.length}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs font-bold text-slate-500">Manquantes</p>
+                      <p className="mt-1 text-xl font-black">{conformityAnalysis.completeness.missingPieces.length}</p>
+                    </div>
+                  </div>
+                  {conformityAnalysis.completeness.missingPieces.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {conformityAnalysis.completeness.missingPieces.map((piece) => (
+                        <div key={piece.code} className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-950">
+                          <p className="font-bold">{piece.code} — {piece.label}</p>
+                          {piece.conditionLabel ? <p className="mt-1 italic">{piece.conditionLabel}</p> : null}
+                          {piece.legalReference ? <p className="mt-1 text-xs">{piece.legalReference}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-950">Aucune pièce obligatoire manquante détectée.</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="consistency">
+                <AccordionTrigger>2. Cohérence inter-documents</AccordionTrigger>
+                <AccordionContent>
+                  {conformityAnalysis.completeness.ambiguousMatches.length > 0 ? (
+                    <div className="space-y-2">
+                      {conformityAnalysis.completeness.ambiguousMatches.map((match) => (
+                        <div key={match.piece.code} className="rounded-lg border border-amber-100 bg-amber-50 p-3 text-sm text-amber-950">
+                          <p className="font-bold">{match.piece.code} — correspondance à confirmer</p>
+                          <p className="mt-1">{match.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Aucune contradiction documentaire automatique n'est remontée. Les valeurs de surface, stationnement, hauteur et destination restent à recouper si elles figurent dans les documents.</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="urbanism">
+                <AccordionTrigger>3. Contraintes urbanistiques impactantes</AccordionTrigger>
+                <AccordionContent>
+                  {conformityAnalysis.findings.filter((finding) => finding.category === "urbanism").length > 0 ? (
+                    <div className="space-y-2">
+                      {conformityAnalysis.findings.filter((finding) => finding.category === "urbanism").map((finding) => (
+                        <div key={finding.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-bold text-slate-950">{finding.title}</p>
+                            {typeof finding.confidence === "number" ? <Badge variant="outline">{Math.round(finding.confidence * 100)}%</Badge> : null}
+                          </div>
+                          <p className="mt-1 text-slate-600">{finding.message}</p>
+                          {finding.source ? <p className="mt-1 text-xs text-slate-500">Source : {finding.source}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Aucune contrainte territoriale impactante n'est confirmée à ce stade.</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="regulation">
+                <AccordionTrigger>4. Analyse réglementaire</AccordionTrigger>
+                <AccordionContent>
+                  {conformityAnalysis.regulationChecks.length > 0 ? (
+                    <div className="space-y-2">
+                      {conformityAnalysis.regulationChecks.map((check) => (
+                        <div key={check.topic} className="rounded-lg border border-slate-200 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-bold text-slate-950">{check.label}</p>
+                            <Badge variant="outline">{check.status === "a_verifier" ? "À vérifier" : check.status}</Badge>
+                          </div>
+                          <p className="mt-1 text-slate-600">{check.explanation}</p>
+                          {typeof check.confidence === "number" ? <p className="mt-1 text-xs text-slate-500">Confiance IA : {Math.round(check.confidence * 100)}%</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Aucun contrôle réglementaire automatique n'est exploitable avec les données actuelles.</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="traceability">
+                <AccordionTrigger>5. Traçabilité</AccordionTrigger>
+                <AccordionContent>
+                  {conformityAnalysis.traceability.length > 0 ? (
+                    <div className="space-y-2">
+                      {conformityAnalysis.traceability.map((item) => (
+                        <div key={`${item.label}-${item.source}`} className="rounded-lg bg-slate-50 p-3 text-sm">
+                          <p className="font-bold text-slate-950">{item.label}</p>
+                          <p className="mt-1 text-slate-600">{item.source}</p>
+                          {typeof item.confidence === "number" ? <p className="mt-1 text-xs text-slate-500">Confiance : {Math.round(item.confidence * 100)}%</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Aucune source exploitable n'a encore été rattachée à l'analyse.</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={pieceDialogOpen} onOpenChange={setPieceDialogOpen}>
         <DialogContent className="max-w-5xl">
