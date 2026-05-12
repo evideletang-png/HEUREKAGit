@@ -3297,13 +3297,20 @@ export default function PortailMairiePage() {
         </div>
 
         {!selectedId ? (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
-              <TabsList className="w-full lg:max-w-[620px]">
-                <TabsTrigger value="plu" className="gap-2">Règlement (PLU)</TabsTrigger>
-                <TabsTrigger value="finance" className="gap-2"><Zap className="w-3.5 h-3.5" /> Fiscalité</TabsTrigger>
-                <TabsTrigger value="config" className="gap-2"><Settings className="w-3.5 h-3.5" /> Règles IA</TabsTrigger>
-              </TabsList>
+          <Tabs value={activeTab} className="space-y-6">
+            <div className="flex flex-col items-start justify-between gap-4 rounded-2xl border border-primary/10 bg-white p-4 shadow-sm lg:flex-row lg:items-center">
+              <div>
+                <h2 className="text-lg font-semibold text-primary">
+                  {activeTab === "finance" ? "Fiscalité communale" : activeTab === "config" ? "Réglages IA" : "Règlement (PLU)"}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {activeTab === "finance"
+                    ? "Taux, valeurs forfaitaires et paramètres financiers de la commune."
+                    : activeTab === "config"
+                      ? "Paramètres d'onboarding, directives locales et prompts d'administration."
+                      : "Consultation réglementaire opérationnelle par adresse, zone et documents sources."}
+                </p>
+              </div>
 
               {communes.length > 0 && (activeTab === "plu" || activeTab === "config" || activeTab === "finance") && (
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">

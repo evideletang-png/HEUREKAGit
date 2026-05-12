@@ -74,7 +74,6 @@ export const professionalNavigation: Record<ProfessionalPortalType, Professional
         { label: "Contrôles réglementaires", href: "/portail-mairie/controles-reglementaires", description: "Hauteur, implantation, emprise, stationnement, aspect extérieur", icon: FileCheck2, permission: "dossier.instruct" },
         { label: "Services consultés", href: "/portail-mairie/services-consultes", description: "ABF, SDIS, DDT, métropole, consultations externes", icon: Siren, permission: "dossier.consult_services" },
         { label: "Fiscalité", href: "/portail-mairie/fiscalite", description: "Taxes, coûts, simulations", icon: Zap, permission: "fiscalite.read" },
-        { label: "Règles IA", href: "/portail-mairie/regles-ia", description: "Prompts, corrections humaines, apprentissage local", icon: FileCog, permission: "plu.write" },
       ],
     },
     {
@@ -88,6 +87,7 @@ export const professionalNavigation: Record<ProfessionalPortalType, Professional
       title: "Paramètres",
       items: [
         { label: "Paramètres mairie", href: "/dashboard-mairie/parametres", icon: Settings, permission: "settings.read" },
+        { label: "Réglages IA", href: "/portail-mairie/regles-ia", description: "Prompts, onboarding et apprentissage local", icon: FileCog, permission: "plu.write" },
       ],
     },
   ],
