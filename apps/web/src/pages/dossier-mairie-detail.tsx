@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Clock3, XCircle } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -174,7 +174,7 @@ export default function DossierMairieDetailPage() {
   return (
     <MairieDetailShell>
       {/* Lien de retour */}
-      <div className="mb-8 px-4 py-9 sm:px-6 lg:px-8">
+      <div className="mb-8 py-9">
         <Link href="/dashboard-mairie" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-950">
           <ArrowLeft className="h-4 w-4" />
           Retour au tableau de bord
@@ -196,8 +196,7 @@ export default function DossierMairieDetailPage() {
       <DossierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* Contenu principal */}
-      <div className="px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-6xl">
+      <div className="py-8">
           {/* Contenu des onglets */}
           {activeTab === "recapitulatif" && (
             <DossierSummaryTab
@@ -238,7 +237,6 @@ export default function DossierMairieDetailPage() {
               signatureResult={signatureResult}
             />
           )}
-        </div>
       </div>
 
       {/* Dialog de décision */}

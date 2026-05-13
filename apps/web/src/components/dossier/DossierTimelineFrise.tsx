@@ -78,7 +78,7 @@ export function DossierTimelineFrise({ instruction, pendingConsultations = [] }:
 
   return (
     <div className="border-b border-slate-200 bg-white">
-      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+      <div className="py-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           {/* Frise chronologique */}
           <div className="flex-1">
