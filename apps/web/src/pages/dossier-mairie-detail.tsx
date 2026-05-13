@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
@@ -34,6 +34,9 @@ import { useDossierActions, type RequestedPieceState } from "@/hooks/dossier/use
 import { OFFICIAL_PIECES } from "@/lib/urbanisme/cerfa/officialPieces.registry";
 import { normalizeOfficialDossierType } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
 import type { OfficialPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
+
+// Service de calcul des délais
+import { computeTimeline } from "@/lib/urbanisme/timeline/delayEngine";
 
 function parseFirstCommune(raw: unknown) {
   if (!raw) return null;
@@ -111,6 +114,9 @@ export default function DossierMairieDetailPage() {
   // Hooks métier
   const { dossier, instruction, instructionTimeline, isLoading: isDossierLoading } = useDossierData(id || "");
   const conformityAnalysis = useDossierConformity(dossier);
+
+  // Chronologie des délais calculée dynamiquement
+  const timelineResult = useMemo(() => computeTimeline(dossier), [dossier]);
   
   // Settings pour les lettres
   const selectedCommuneForSettings = parseFirstCommune((user as any)?.authorizedCommunes) || parseFirstCommune((user as any)?.communes) || "all";
@@ -185,11 +191,14 @@ export default function DossierMairieDetailPage() {
       <DossierFixedHeader dossier={dossier} />
 
       {/* Frise chronologique des délais */}
-      <DossierTimelineFrise 
-        instruction={instruction}
-        pendingConsultations={[
-          { service: "ABF", reason: "Périmètre de protection monument historique" }
-        ]}
+      <DossierTimelineFrise
+        steps={timelineResult.timelineSteps}
+        alerts={timelineResult.alerts}
+        remainingDays={timelineResult.remainingDays}
+        hasDeadline={timelineResult.hasDeadline}
+        adjustedDelayMonths={timelineResult.adjustedDelayMonths}
+        baseDelayMonths={timelineResult.baseDelayMonths}
+        isSuspended={timelineResult.isSuspended}
       />
 
       {/* Navigation par onglets */}
