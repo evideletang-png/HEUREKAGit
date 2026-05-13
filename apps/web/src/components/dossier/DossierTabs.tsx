@@ -51,7 +51,7 @@ export interface DossierTabsProps {
 export function DossierTabs({ activeTab, onTabChange, className }: DossierTabsProps) {
   return (
     <div className={`bg-white border-b border-slate-200 ${className || ""}`}>
-      <nav className="flex space-x-8 overflow-x-auto">
+      <nav className="flex space-x-8 overflow-x-auto px-4 sm:px-6 lg:px-8">
           {TAB_DEFINITIONS.map(({ key, label, icon: Icon }) => {
             const isActive = activeTab === key;
             return (

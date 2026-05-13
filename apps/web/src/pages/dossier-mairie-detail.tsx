@@ -174,7 +174,7 @@ export default function DossierMairieDetailPage() {
   return (
     <MairieDetailShell>
       {/* Lien de retour */}
-      <div className="mb-8 py-9">
+      <div className="mb-8 px-4 py-9 sm:px-6 lg:px-8">
         <Link href="/dashboard-mairie" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-950">
           <ArrowLeft className="h-4 w-4" />
           Retour au tableau de bord
@@ -196,7 +196,7 @@ export default function DossierMairieDetailPage() {
       <DossierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* Contenu principal */}
-      <div className="py-8">
+      <div className="px-4 py-8 sm:px-6 lg:px-8">
           {/* Contenu des onglets */}
           {activeTab === "recapitulatif" && (
             <DossierSummaryTab

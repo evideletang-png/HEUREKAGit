@@ -43,7 +43,7 @@ export function DossierFixedHeader({ dossier }: DossierFixedHeaderProps) {
 
   return (
     <div className="sticky top-0 z-40 border-b border-slate-200 bg-white shadow-sm">
-      <div className="py-4">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
             {/* Ligne 1 : N° + Type de demande */}
