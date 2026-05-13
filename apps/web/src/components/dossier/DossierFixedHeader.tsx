@@ -47,7 +47,7 @@ export function DossierFixedHeader({ dossier }: DossierFixedHeaderProps) {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
             {/* Ligne 1 : N° + Type de demande */}
-            <div className="flex items-center gap-2 text-base font-semibold text-slate-900">
+            <div className="flex items-center gap-2 font-display text-base font-semibold text-slate-900">
               <span>N° {dossier.dossierNumber || dossier.id}</span>
               <span className="text-slate-400">•</span>
               <span>{dossier.typeProcedure || "Dossier d'urbanisme"}</span>
@@ -55,13 +55,13 @@ export function DossierFixedHeader({ dossier }: DossierFixedHeaderProps) {
 
             {/* Ligne 2 : Demandeur */}
             {dossier.userName && (
-              <div className="text-sm font-medium text-slate-700">
+              <div className="font-display text-sm font-medium text-slate-700">
                 {dossier.userName}
               </div>
             )}
 
             {/* Ligne 3 : Adresse + Parcelle + Zone PLU */}
-            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+            <div className="flex flex-wrap items-center gap-2 font-display text-sm text-slate-600">
               <span className="font-medium">
                 {dossier.address || "Adresse non renseignée"}
               </span>
@@ -91,7 +91,7 @@ export function DossierFixedHeader({ dossier }: DossierFixedHeaderProps) {
 
             {/* Ligne 4 : Date de dépôt */}
             {dateDepot && (
-              <div className="text-sm text-slate-500">
+              <div className="font-display text-sm text-slate-500">
                 Déposé le {formatDate(dateDepot)}
               </div>
             )}

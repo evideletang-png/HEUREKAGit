@@ -196,7 +196,7 @@ export default function DossierMairieDetailPage() {
       <DossierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* Contenu principal */}
-      <div className="px-4 py-8 sm:px-6 lg:px-8">
+      <div className="py-8">
           {/* Contenu des onglets */}
           {activeTab === "recapitulatif" && (
             <DossierSummaryTab
