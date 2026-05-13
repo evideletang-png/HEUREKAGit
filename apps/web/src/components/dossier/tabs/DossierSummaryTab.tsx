@@ -69,158 +69,148 @@ export function DossierSummaryTab({
   const zoneLabel = parcelAnalysis.zoneLabel || parcelAnalysis.zoningLabel || dossier.metadata?.pluAnalysis?.zone?.label;
   const surface = dossier.metadata?.surfacePlancher || dossier.metadata?.surface_plancher || dossier.metadata?.requested_surface_m2 || 120;
 
-  const projectFacts = useMemo(() => [
-    ["Type de demande", dossier.typeProcedure || "Permis de Construire"],
-    ["Date de dépôt", formatDate(dossier.createdAt)],
-    ["Surface de plancher", `${surface} m²`],
-    ["Zonage PLU", zone === "Non renseignée" ? "Zone non renseignée" : `Zone ${zone}${zoneLabel ? ` — ${zoneLabel}` : ""}`],
-  ], [dossier, surface, zone, zoneLabel]);
+  // Génération du résumé IA structuré
+  const generateIASummary = () => {
+    const surfaceDescription = surface ? `${surface} m² SP` : "Surface non déclarée";
+    const zoneDescription = zone !== "Non renseignée" ? `Zone ${zone}${zoneLabel ? ` (${zoneLabel})` : ""}` : "Zone PLU non identifiée";
+    
+    const constraintsText = orientationConstraints.length > 0 
+      ? orientationConstraints.map(c => c.label).slice(0, 3).join(", ")
+      : "Aucune contrainte majeure identifiée";
+
+    const piecesStatus = `${conformityAnalysis.cards.pieces.detected} pièces détectées, ${conformityAnalysis.cards.pieces.missing} manquante(s)`;
+    
+    const vigliancesText = conformityAnalysis.cards.vigilances.length > 0
+      ? conformityAnalysis.cards.vigilances.slice(0, 2).map(v => v.label).join(", ")
+      : "Aucune vigilance particulière";
+
+    return {
+      natureProjet: `${dossier.typeProcedure || "Dossier d'urbanisme"} déposé par ${dossier.userName || "demandeur non identifié"}`,
+      travauxDeclares: `Projet déclaré sur ${surfaceDescription}${dossier.metadata?.description ? ` - ${dossier.metadata.description}` : ""}`,
+      elementsUrbanistiques: `Localisation en ${zoneDescription}. CES/COS et hauteur à vérifier selon règlement de zone.`,
+      contraintesConnues: constraintsText,
+      pointsVigilance: vigliancesText,
+      incoherences: conformityAnalysis.cards.pieces.incoherent > 0 
+        ? `${conformityAnalysis.cards.pieces.incoherent} incohérence(s) détectée(s) entre documents`
+        : "Cohérence documentaire satisfaisante",
+      prochainesVerifications: [
+        piecesStatus,
+        zone !== "Non renseignée" ? "Vérifier conformité au règlement de zone" : "Identifier zone PLU applicable",
+        orientationConstraints.some(c => /abf/i.test(c.label)) ? "Solliciter avis ABF requis" : null,
+        conformityAnalysis.cards.pieces.missing > 0 ? "Compléter pièces manquantes" : null
+      ].filter(Boolean)
+    };
+  };
+
+  const iaSummary = generateIASummary();
 
   return (
     <div className="space-y-6">
-      {/* Synthèse globale du dossier */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <InfoCard title="Délais d'instruction">
-          <DeadlineWidget deadline={instruction.dateLimiteInstruction} isTacite={instruction.isTacite} />
-          <div className="mt-4 space-y-2 text-sm text-slate-600">
-            <div className="flex justify-between">
-              <span>Dépôt :</span>
-              <span>{formatDate(instruction.dateDepot)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Complétude :</span>
-              <span>{formatDate(instruction.dateCompletude)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Limite :</span>
-              <span>{formatDate(instruction.dateLimiteInstruction)}</span>
+      {/* Résumé IA du dossier */}
+      <InfoCard title="Résumé IA du dossier">
+        <div className="space-y-6">
+          {/* Nature du projet */}
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
+              📋 Nature du projet
+            </h4>
+            <div className="space-y-2 text-sm text-slate-600">
+              <p><span className="font-medium">Type:</span> {iaSummary.natureProjet}</p>
+              <p><span className="font-medium">Travaux:</span> {iaSummary.travauxDeclares}</p>
             </div>
           </div>
-        </InfoCard>
 
-        <InfoCard title="Informations projet">
-          <div className="space-y-3">
-            {projectFacts.map(([label, value]) => (
-              <div key={label} className="flex justify-between text-sm">
-                <span className="font-medium text-slate-500">{label} :</span>
-                <span className="text-slate-900">{value}</span>
-              </div>
-            ))}
-          </div>
-        </InfoCard>
-
-        <InfoCard title="Statut instruction">
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="font-medium text-slate-500">Statut :</span>
-              <span className="text-slate-900">{instruction.instructionStatus || "depose"}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="font-medium text-slate-500">Tacite :</span>
-              <span className={instruction.isTacite ? "text-red-700" : "text-emerald-700"}>
-                {instruction.isTacite ? "Risque" : "Suivi"}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="font-medium text-slate-500">Documents :</span>
-              <span className="text-slate-900">{dossier.documents?.length || 0} pièce(s)</span>
+          {/* Éléments urbanistiques */}
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
+              🏗️ Éléments urbanistiques
+            </h4>
+            <div className="space-y-2 text-sm text-slate-600">
+              <p>{iaSummary.elementsUrbanistiques}</p>
             </div>
           </div>
-        </InfoCard>
-      </div>
 
-      {/* Timeline du dossier */}
-      <InfoCard title="Timeline du dossier">
-        <InstructionTimeline
-          events={instructionTimeline}
-          dates={[
-            { label: "Dépôt", value: instruction.dateDepot },
-            { label: "Complétude", value: instruction.dateCompletude },
-            { label: "Limite", value: instruction.dateLimiteInstruction },
-          ]}
-        />
-      </InfoCard>
-
-      {/* Analyse IA globale */}
-      <InfoCard title="Première analyse IA globale">
-        <div className="space-y-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-black uppercase tracking-wide text-slate-400">Analyse de conformité</p>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <span className={`rounded-full border px-4 py-2 text-sm font-black ${scoreClass(conformityAnalysis)}`}>
-                  {conformityAnalysis.label}
-                </span>
-                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700">
-                  Score {conformityAnalysis.score}/100
-                </span>
-                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700">
-                  {conformityAnalysis.riskLabel}
-                </span>
-              </div>
-              <div className="mt-4 max-w-3xl space-y-1 text-sm leading-6 text-slate-600">
-                {conformityAnalysis.summary.map((line) => (
-                  <p key={line}>{line}</p>
-                ))}
-              </div>
+          {/* Contraintes identifiées */}
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
+              ⚠️ Contraintes identifiées
+            </h4>
+            <div className="space-y-2 text-sm text-slate-600">
+              <p>{iaSummary.contraintesConnues}</p>
             </div>
-            <Button variant="outline" className="rounded-lg border-slate-300" onClick={onShowConformityDetails}>
-              Voir l'analyse détaillée
+          </div>
+
+          {/* Points de vigilance */}
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
+              🔍 Points de vigilance
+            </h4>
+            <div className="space-y-2 text-sm text-slate-600">
+              <p><span className="font-medium">Vigilances automatiques:</span> {iaSummary.pointsVigilance}</p>
+              <p><span className="font-medium">Cohérence:</span> {iaSummary.incoherences}</p>
+            </div>
+          </div>
+
+          {/* Prochaines vérifications */}
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
+              ➡️ Prochaines vérifications
+            </h4>
+            <ul className="space-y-1 text-sm text-slate-600">
+              {iaSummary.prochainesVerifications.map((item, index) => (
+                <li key={index} className="flex gap-2">
+                  <span>•</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Lien vers analyse détaillée */}
+          <div className="pt-4 border-t border-slate-200">
+            <Button 
+              variant="outline" 
+              className="w-full" 
+              onClick={onShowConformityDetails}
+            >
+              Voir l'analyse détaillée (Score: {conformityAnalysis.score}/100)
             </Button>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-bold text-slate-500">Pièces</p>
-              <p className="mt-2 text-2xl font-black text-slate-950">{conformityAnalysis.cards.pieces.detected} détectées</p>
-              <p className="mt-1 text-sm text-slate-600">{conformityAnalysis.cards.pieces.missing} manquante(s), {conformityAnalysis.cards.pieces.incoherent} incohérence(s)</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-bold text-slate-500">Urbanisme</p>
-              <p className="mt-2 text-lg font-black text-slate-950">Zone {conformityAnalysis.cards.urbanism.zone}</p>
-              <p className="mt-1 text-sm text-slate-600">ABF : {compactBool(conformityAnalysis.cards.urbanism.abf)} · PPRI : {compactBool(conformityAnalysis.cards.urbanism.ppri)} · OAP : {compactBool(conformityAnalysis.cards.urbanism.oap)}</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-bold text-slate-500">Vigilances</p>
-              {conformityAnalysis.cards.vigilances.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {conformityAnalysis.cards.vigilances.slice(0, 5).map((check) => (
-                    <Badge key={check.topic} variant="outline" className="bg-white">{check.label}</Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-slate-600">Aucune vigilance majeure.</p>
-              )}
-            </div>
           </div>
         </div>
       </InfoCard>
 
-      {/* Alertes principales */}
-      {instruction.alerts && instruction.alerts.length > 0 && (
-        <InfoCard title="Alertes principales">
-          <LegalAlerts alerts={instruction.alerts} />
-        </InfoCard>
-      )}
-
-      {/* Contraintes urbanistiques */}
-      {orientationConstraints.length > 0 && (
-        <InfoCard title="Contraintes urbanistiques principales">
-          <div className="space-y-3">
-            {orientationConstraints.slice(0, 3).map((constraint) => (
-              <div key={`${constraint.type}-${constraint.label}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-slate-900">{constraint.label}</p>
-                  <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">{constraint.confidence}</span>
-                </div>
-                <p className="mt-1 text-sm text-slate-600">Source : {constraint.source}</p>
-                {constraint.impact.decisionImpact ? <p className="mt-1 text-sm text-slate-700">{constraint.impact.decisionImpact}</p> : null}
+      {/* Points d'attention principaux */}
+      {((instruction.alerts && instruction.alerts.length > 0) || orientationConstraints.length > 0) && (
+        <InfoCard title="Points d'attention principaux">
+          <div className="space-y-4">
+            {/* Alertes légales */}
+            {instruction.alerts && instruction.alerts.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-2">Alertes légales</h4>
+                <LegalAlerts alerts={instruction.alerts.slice(0, 3)} />
               </div>
-            ))}
-            {orientationConstraints.length > 3 && (
-              <p className="text-sm text-slate-500">
-                +{orientationConstraints.length - 3} autre(s) contrainte(s) - Voir onglet "Instruction"
-              </p>
+            )}
+
+            {/* Contraintes majeures */}
+            {orientationConstraints.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-2">Contraintes territoriales</h4>
+                <div className="space-y-2">
+                  {orientationConstraints.slice(0, 2).map((constraint) => (
+                    <div key={`${constraint.type}-${constraint.label}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="font-medium text-slate-900 text-sm">{constraint.label}</p>
+                      {constraint.impact.decisionImpact && (
+                        <p className="mt-1 text-xs text-slate-600">{constraint.impact.decisionImpact}</p>
+                      )}
+                    </div>
+                  ))}
+                  {orientationConstraints.length > 2 && (
+                    <p className="text-xs text-slate-500">
+                      +{orientationConstraints.length - 2} autre(s) contrainte(s) - Voir onglet "Instruction"
+                    </p>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </InfoCard>

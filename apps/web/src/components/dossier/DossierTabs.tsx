@@ -1,6 +1,6 @@
-import { FileText, Search, Gavel, MessageSquare } from "lucide-react";
+import { FileText, Search, Gavel, MessageSquare, CheckSquare } from "lucide-react";
 
-export type DossierTabType = "recapitulatif" | "analyse" | "instruction" | "historique";
+export type DossierTabType = "recapitulatif" | "analyse" | "instruction" | "historique" | "decision";
 
 interface TabDefinition {
   key: DossierTabType;
@@ -33,6 +33,12 @@ const TAB_DEFINITIONS: TabDefinition[] = [
     label: "Historique & Messages",
     icon: MessageSquare,
     description: "Événements et communications"
+  },
+  {
+    key: "decision",
+    label: "Décision finale",
+    icon: CheckSquare,
+    description: "Actions de décision et validation finale"
   }
 ];
 

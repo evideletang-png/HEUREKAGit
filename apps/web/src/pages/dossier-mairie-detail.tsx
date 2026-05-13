@@ -18,10 +18,12 @@ import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 // Nouveaux composants
 import { DossierFixedHeader } from "@/components/dossier/DossierFixedHeader";
 import { DossierTabs, type DossierTabType } from "@/components/dossier/DossierTabs";
+import { DossierTimelineFrise } from "@/components/dossier/DossierTimelineFrise";
 import { DossierSummaryTab } from "@/components/dossier/tabs/DossierSummaryTab";
 import { DossierAnalysisTab } from "@/components/dossier/tabs/DossierAnalysisTab";
 import { DossierInstructionTab } from "@/components/dossier/tabs/DossierInstructionTab";
 import { DossierHistoryTab } from "@/components/dossier/tabs/DossierHistoryTab";
+import { DossierDecisionTab } from "@/components/dossier/tabs/DossierDecisionTab";
 
 // Hooks métier
 import { useDossierData } from "@/hooks/dossier/useDossierData";
@@ -182,88 +184,60 @@ export default function DossierMairieDetailPage() {
       {/* En-tête fixe du dossier */}
       <DossierFixedHeader dossier={dossier} />
 
+      {/* Frise chronologique des délais */}
+      <DossierTimelineFrise 
+        instruction={instruction}
+        pendingConsultations={[
+          { service: "ABF", reason: "Périmètre de protection monument historique" }
+        ]}
+      />
+
       {/* Navigation par onglets */}
       <DossierTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {/* Contenu principal avec actions */}
+      {/* Contenu principal */}
       <div className="px-4 py-8 sm:px-6 lg:px-8">
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-          {/* Zone de contenu principal */}
-          <div className="space-y-6">
-            {/* Section Actions */}
-            <InfoCard title="Actions principales">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Button onClick={() => setDecisionDialog("accept")} className="h-20 rounded-lg bg-green-600 text-base font-bold text-white hover:bg-green-700">
-                  Accepter le dossier
-                </Button>
-                <Button onClick={() => setDecisionDialog("refuse")} className="h-20 rounded-lg bg-red-600 text-base font-bold text-white hover:bg-red-700">
-                  Refuser le dossier
-                </Button>
-                <Button onClick={() => setPieceDialogOpen(true)} className="h-20 rounded-lg bg-amber-600 text-base font-bold text-white hover:bg-amber-700">
-                  Demander des pièces
-                </Button>
-              </div>
-              {signatureResult && (
-                <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4 text-sm text-violet-950">
-                  <p className="font-bold">Parapheur : {signatureResult.status === "sent" ? "en attente de signature" : signatureResult.status}</p>
-                  <p className="mt-1">Demande {signatureResult.signatureRequestId} préparée via {signatureResult.provider}.</p>
-                  {signatureResult.legalNotice && <p className="mt-1 text-xs">{signatureResult.legalNotice}</p>}
-                </div>
-              )}
-            </InfoCard>
+        <div className="mx-auto max-w-6xl">
+          {/* Contenu des onglets */}
+          {activeTab === "recapitulatif" && (
+            <DossierSummaryTab
+              dossier={dossier}
+              instruction={instruction}
+              instructionTimeline={instructionTimeline}
+              conformityAnalysis={conformityAnalysis}
+              onShowConformityDetails={() => setConformityOpen(true)}
+            />
+          )}
 
-            {/* Contenu des onglets */}
-            {activeTab === "recapitulatif" && (
-              <DossierSummaryTab
-                dossier={dossier}
-                instruction={instruction}
-                instructionTimeline={instructionTimeline}
-                conformityAnalysis={conformityAnalysis}
-                onShowConformityDetails={() => setConformityOpen(true)}
-              />
-            )}
+          {activeTab === "analyse" && (
+            <DossierAnalysisTab
+              dossier={dossier}
+              conformityAnalysis={conformityAnalysis}
+            />
+          )}
 
-            {activeTab === "analyse" && (
-              <DossierAnalysisTab
-                dossier={dossier}
-                conformityAnalysis={conformityAnalysis}
-              />
-            )}
+          {activeTab === "instruction" && (
+            <DossierInstructionTab
+              dossier={dossier}
+              instruction={instruction}
+              instructionTimeline={instructionTimeline}
+            />
+          )}
 
-            {activeTab === "instruction" && (
-              <DossierInstructionTab
-                dossier={dossier}
-                instruction={instruction}
-                instructionTimeline={instructionTimeline}
-              />
-            )}
+          {activeTab === "historique" && (
+            <DossierHistoryTab dossier={dossier} />
+          )}
 
-            {activeTab === "historique" && (
-              <DossierHistoryTab dossier={dossier} />
-            )}
-          </div>
-
-          {/* Barre latérale */}
-          <aside className="space-y-6">
-            <InfoCard title="Délais">
-              <div className="rounded-lg bg-blue-50 p-5 text-blue-900">
-                <p className="text-sm font-medium">Délai restant</p>
-                <p className="mt-2 text-4xl font-bold">42 jours</p>
-              </div>
-              <p className="mt-4 text-sm text-slate-500">Délai d'instruction de 2 mois à compter de la réception du dossier complet.</p>
-            </InfoCard>
-            
-            <InfoCard title="Points d'attention">
-              <div className="space-y-3">
-                <p className="flex gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                  <Clock3 className="h-4 w-4 shrink-0" /> Avis ABF en attente.
-                </p>
-                <p className="flex gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-900">
-                  <XCircle className="h-4 w-4 shrink-0" /> Vérifier les pièces complémentaires si le dossier devient incomplet.
-                </p>
-              </div>
-            </InfoCard>
-          </aside>
+          {activeTab === "decision" && (
+            <DossierDecisionTab
+              dossier={dossier}
+              onAcceptDossier={() => setDecisionDialog("accept")}
+              onRefuseDossier={() => setDecisionDialog("refuse")}
+              onRequestPieces={() => setPieceDialogOpen(true)}
+              isPreparingSignature={isPreparingSignature}
+              signatureResult={signatureResult}
+            />
+          )}
         </div>
       </div>
 
