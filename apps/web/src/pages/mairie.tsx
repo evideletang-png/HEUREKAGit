@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DossierDeposit } from "@/components/dossier/DossierDeposit";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const r = await fetch(path, { credentials: "include", ...opts });
@@ -25,10 +26,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
 }
 
 const DOC_TYPE_LABELS: Record<string, string> = {
-  permis_de_construire: "Permis de construire",
-  declaration_prealable: "Déclaration préalable",
-  permis_amenager: "Permis d'aménager",
-  certificat_urbanisme: "Certificat d'urbanisme",
+  permis_de_construire: "Permis de construire (PC)",
+  declaration_prealable: "Déclaration préalable (DPC)",
+  permis_amenager: "Permis d'aménager (PA)",
+  certificat_urbanisme: "Certificat d'urbanisme (CU)",
   plu_reference: "PLU (Référence)",
   autre: "Autre document",
 };
@@ -94,7 +95,7 @@ function MairieDossierList({ onSelect }: { onSelect: (id: string) => void }) {
                 <span className="truncate">{d.userName} ({d.userEmail})</span>
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline" className="text-[9px] font-bold uppercase py-0 px-1">{d.typeProcedure}</Badge>
+                <Badge variant="outline" className="text-[9px] font-bold uppercase py-0 px-1">{getDossierTypeLabel(d.typeProcedure)}</Badge>
                 <span className="truncate">{d.address || d.commune}</span>
               </div>
             </div>

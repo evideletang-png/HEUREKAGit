@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowRight, BrainCircuit, FileSearch, Gavel, Loader2, Plus, ShieldAlert, Sparkles, Upload, X } from "lucide-react";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -633,7 +634,7 @@ export default function AppealsPage() {
                     <div className="rounded-xl border bg-muted/30 p-3 text-sm">
                       <p className="font-medium">{selectedDossier.title}</p>
                       <p className="text-muted-foreground">{selectedDossier.address || "Adresse indisponible"}</p>
-                      <p className="text-muted-foreground">{selectedDossier.dossierNumber || "Sans numéro"} · {selectedDossier.typeProcedure || "Type non défini"}</p>
+                      <p className="text-muted-foreground">{selectedDossier.dossierNumber || "Sans numéro"} · {getDossierTypeLabel(selectedDossier.typeProcedure)}</p>
                     </div>
                   )}
                   <div className="rounded-2xl border border-dashed bg-primary/5 p-4 space-y-3">
@@ -683,7 +684,7 @@ export default function AppealsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>Type d'autorisation</Label>
-                      <Input value={form.permitType} onChange={(e) => setForm((current) => ({ ...current, permitType: e.target.value }))} placeholder="PC, DP, PA, PD..." />
+                      <Input value={form.permitType} onChange={(e) => setForm((current) => ({ ...current, permitType: e.target.value }))} placeholder="Ex. Permis de construire (PC)" />
                     </div>
                   </div>
                 </TabsContent>

@@ -37,6 +37,7 @@ import {
 import { downloadBlob, generateCerfaPdf, getCerfaFormDescriptor } from "@/lib/urbanisme/cerfa/generateCerfaPdf";
 import { extractCerfaScan, type CerfaExtractionResult } from "@/lib/urbanisme/cerfa/cerfaExtractionService";
 import { importCerfaPdf } from "@/lib/urbanisme/cerfa/importCerfaPdf";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
 import type { DossierType, ProjectContext, ResolvedPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
 import { triggerSourceLabel } from "@/lib/urbanisme/cerfa/pieceTriggers";
@@ -55,12 +56,12 @@ import { ORIENTATION_STORAGE_KEY, type OrientationResultPayload } from "@/module
 import type { ProjectCard } from "@/lib/projects/types";
 
 const DOSSIER_TYPES: { value: DossierType; label: string }[] = [
-  { value: "PCMI", label: "PCMI - Permis de construire maison individuelle" },
-  { value: "PC", label: "PC - Permis de construire" },
-  { value: "DPC", label: "DP - Déclaration préalable constructions/travaux" },
-  { value: "DPA", label: "DP - Déclaration préalable installations/aménagements" },
-  { value: "PA", label: "PA - Permis d'aménager" },
-  { value: "PD", label: "PD - Permis de démolir" },
+  { value: "PCMI", label: "Permis de construire maison individuelle (PCMI)" },
+  { value: "PC", label: "Permis de construire (PC)" },
+  { value: "DPC", label: "Déclaration préalable constructions et travaux (DPC)" },
+  { value: "DPA", label: "Déclaration préalable installations et aménagements (DPA)" },
+  { value: "PA", label: "Permis d'aménager (PA)" },
+  { value: "PD", label: "Permis de démolir (PD)" },
 ];
 
 const CITIZEN_DRAFT_KEY = "heureka.citizenDraft";
@@ -1411,7 +1412,7 @@ export default function CitoyenNewDossierPage() {
           <CardHeader>
             <CardTitle>{scanFile?.name || "Cerfa importé"}</CardTitle>
             <CardDescription>
-              Type détecté : {scanExtraction.dossierType.value} · confiance {Math.round(scanExtraction.dossierType.confidence * 100)}%
+              Type détecté : {getDossierTypeLabel(scanExtraction.dossierType.value)} · confiance {Math.round(scanExtraction.dossierType.confidence * 100)}%
               {scanExtraction.cerfaReference ? ` · Cerfa ${scanExtraction.cerfaReference.value}` : ""}
             </CardDescription>
           </CardHeader>

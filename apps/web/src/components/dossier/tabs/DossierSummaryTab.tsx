@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileText, Info, ListChecks, MapPin, MessageSquare, Search, User, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DeadlineWidget } from "@/components/instruction/DeadlineWidget";
-import { InstructionTimeline } from "@/components/instruction/InstructionTimeline";
-import { LegalAlerts } from "@/components/instruction/LegalAlerts";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import type { DossierDetail, InstructionPayload } from "@/hooks/dossier/useDossierData";
 import type { ConformityAnalysisResult } from "@/lib/urbanisme/conformity/conformityAnalysisService";
+import { LegalAlerts } from "@/components/instruction/LegalAlerts";
 import type { OrientationLocationConstraint } from "@/modules/orientation/orientation.types";
 
 interface DossierSummaryTabProps {
@@ -85,7 +86,7 @@ export function DossierSummaryTab({
       : "Aucune vigilance particulière";
 
     return {
-      natureProjet: `${dossier.typeProcedure || "Dossier d'urbanisme"} déposé par ${dossier.userName || "demandeur non identifié"}`,
+      natureProjet: `${getDossierTypeLabel(dossier.typeProcedure)} déposé par ${dossier.userName || "demandeur non identifié"}`,
       travauxDeclares: `Projet déclaré sur ${surfaceDescription}${dossier.metadata?.description ? ` - ${dossier.metadata.description}` : ""}`,
       elementsUrbanistiques: `Localisation en ${zoneDescription}. CES/COS et hauteur à vérifier selon règlement de zone.`,
       contraintesConnues: constraintsText,

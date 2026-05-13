@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { MockSignatureProvider } from "@/lib/urbanisme/signature/providers/mockSignatureProvider";
 import { startSignatureWorkflow } from "@/lib/urbanisme/signature/signatureWorkflow";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import type { SignatureWorkflowResult } from "@/lib/urbanisme/signature/signatureProvider.interface";
 import type { DossierDetail } from "./useDossierData";
 
@@ -73,7 +74,7 @@ function renderTemplate(template: string, dossier: DossierDetail, settings: Lett
   const signature = { ...fallbackLetterSettings.signature, ...(settings.signature || {}) };
   const values: Record<string, string> = {
     "{{dossier.numero}}": dossier.dossierNumber || dossier.id,
-    "{{dossier.type}}": dossier.typeProcedure || dossier.title || "Dossier d'urbanisme",
+    "{{dossier.type}}": getDossierTypeLabel(dossier.typeProcedure),
     "{{dossier.demandeur}}": dossier.userName || "Demandeur",
     "{{dossier.adresse}}": dossier.address || "Adresse non renseignée",
     "{{dossier.parcelle}}": dossier.parcelRef || dossier.metadata?.parcelRef || "Parcelle non renseignée",

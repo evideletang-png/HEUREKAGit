@@ -37,6 +37,7 @@ import type { OfficialPiece } from "@/lib/urbanisme/cerfa/officialPieces.types";
 
 // Service de calcul des délais
 import { computeTimeline } from "@/lib/urbanisme/timeline/delayEngine";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 function parseFirstCommune(raw: unknown) {
   if (!raw) return null;
@@ -318,7 +319,7 @@ export default function DossierMairieDetailPage() {
           <DialogHeader>
             <DialogTitle>Demander des pièces complémentaires</DialogTitle>
             <DialogDescription>
-              Sélectionnez dans la nomenclature complète du dossier {dossierType}.
+              Sélectionnez dans la nomenclature complète du dossier {getDossierTypeLabel(dossierType)}.
             </DialogDescription>
           </DialogHeader>
 

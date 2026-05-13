@@ -116,7 +116,7 @@ export default function OrientationEntry() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-slate-600">
-                Accédez directement au dépôt classique et choisissez vous-même PCMI, PC, DPC, DPA, PA ou PD.
+                Accédez directement au dépôt classique et choisissez vous-même le type de dossier.
               </p>
               <Button className="mt-5 w-full" variant="outline" onClick={() => setLocation(directDepositRoute(undefined, projectId))}>
                 Aller au dépôt

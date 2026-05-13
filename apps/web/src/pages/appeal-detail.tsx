@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { AlertTriangle, ArrowLeft, CalendarClock, CheckCircle2, FileText, Loader2, MessageSquare, Scale, Send, ShieldCheck, Upload, XCircle } from "lucide-react";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -367,7 +368,7 @@ export default function AppealDetailPage() {
                     <p className="text-muted-foreground leading-relaxed">{appeal.summary}</p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <InfoRow label="Type d'autorisation" value={appeal.permitType || dossier?.typeProcedure || "N/A"} />
+                    <InfoRow label="Type d'autorisation" value={getDossierTypeLabel(appeal.permitType || dossier?.typeProcedure) || "N/A"} />
                     <InfoRow label="Référence décision" value={appeal.decisionReference || dossier?.dossierNumber || "N/A"} />
                     <InfoRow label="Début affichage" value={appeal.postingStartDate ? new Date(appeal.postingStartDate).toLocaleDateString("fr-FR") : "N/A"} />
                     <InfoRow label="Preuve affichage" value={appeal.postingEvidenceStatus || "N/A"} />

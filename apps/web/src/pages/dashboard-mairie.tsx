@@ -27,6 +27,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { ProfessionalShell } from "@/components/layout/ProfessionalShell";
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
+import { getDossierTypeLabel, getCanonicalDossierType } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import { getDemoDossierForStatus } from "@/demo/demoSeedData";
 import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
 
@@ -46,27 +47,6 @@ type MairieDossier = {
   documentCount?: number | null;
   anomalyCount?: number | null;
   criticalityScore?: number | null;
-};
-
-const DOSSIER_TYPE_LABELS: Record<string, string> = {
-  pcmi: "PCMI - Permis de construire maison individuelle",
-  pc: "PC - Permis de construire",
-  dpc: "DP - Déclaration préalable constructions/travaux",
-  dpa: "DP - Déclaration préalable installations/aménagements",
-  dp: "DP - Déclaration préalable",
-  pa: "PA - Permis d'aménager",
-  pd: "PD - Permis de démolir",
-  cu: "CU - Certificat d'urbanisme",
-  declaration_prealable: "DP - Déclaration préalable",
-  déclaration_préalable: "DP - Déclaration préalable",
-  permis_de_construire: "PC - Permis de construire",
-  permis_de_construire_maison_individuelle: "PCMI - Permis de construire maison individuelle",
-  permis_d_amenager: "PA - Permis d'aménager",
-  permis_d_aménager: "PA - Permis d'aménager",
-  permis_de_demolir: "PD - Permis de démolir",
-  permis_de_démolir: "PD - Permis de démolir",
-  certificat_urbanisme: "CU - Certificat d'urbanisme",
-  certificat_d_urbanisme: "CU - Certificat d'urbanisme",
 };
 
 type DashboardStatusConfig = {
@@ -191,29 +171,6 @@ function formatDate(value?: string | null) {
 
 function normalizeText(value?: string | null) {
   return (value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function normalizeDossierTypeKey(value?: string | null) {
-  const normalized = normalizeText(value).replace(/['’]/g, "_").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  if (!normalized) return "pc";
-  if (normalized === "permis_construire" || normalized.includes("permis_de_construire") || normalized.includes("permis_construire")) {
-    return normalized.includes("maison") || normalized.includes("individuelle") ? "pcmi" : "pc";
-  }
-  if (normalized.includes("declaration_prealable") || normalized.includes("declaration")) {
-    if (normalized.includes("amenagement") || normalized.includes("installation")) return "dpa";
-    if (normalized.includes("construction") || normalized.includes("travaux")) return "dpc";
-    return "dp";
-  }
-  if (normalized.includes("amenager") || normalized.includes("amenagement")) return "pa";
-  if (normalized.includes("demolir") || normalized.includes("demolition")) return "pd";
-  if (normalized.includes("certificat") || normalized === "cu") return "cu";
-  if (normalized === "pcmi" || normalized === "pc" || normalized === "dpc" || normalized === "dpa" || normalized === "dp" || normalized === "pa" || normalized === "pd") return normalized;
-  return normalized;
-}
-
-function getDossierTypeLabel(value?: string | null) {
-  const key = normalizeDossierTypeKey(value);
-  return DOSSIER_TYPE_LABELS[key] || value || "PC - Permis de construire";
 }
 
 function parseCommunes(raw: unknown) {
@@ -445,7 +402,7 @@ function DashboardView() {
   const types = useMemo(() => {
     const byKey = new Map<string, string>();
     rows.forEach((row) => {
-      const key = normalizeDossierTypeKey(row.typeProcedure);
+      const key = getCanonicalDossierType(row.typeProcedure);
       if (!byKey.has(key)) byKey.set(key, getDossierTypeLabel(row.typeProcedure));
     });
     return Array.from(byKey.entries()).sort((a, b) => a[1].localeCompare(b[1], "fr"));
@@ -458,7 +415,7 @@ function DashboardView() {
     if (activeMetric === "processed" && !processedRows.includes(row)) return false;
     if (activeMetric === "delay" && !deadlineInfo(row, index).label.includes("+") && !deadlineInfo(row, index).label.includes("J-0")) return false;
     if (statusFilter !== "all" && normalizeText(row.status) !== normalizeText(statusFilter)) return false;
-    if (typeFilter !== "all" && normalizeDossierTypeKey(row.typeProcedure) !== typeFilter) return false;
+    if (typeFilter !== "all" && getCanonicalDossierType(row.typeProcedure) !== typeFilter) return false;
     const agent = index % 2 ? "S. Leroy" : "J. Dubois";
     if (agentFilter !== "all" && agent !== agentFilter) return false;
 

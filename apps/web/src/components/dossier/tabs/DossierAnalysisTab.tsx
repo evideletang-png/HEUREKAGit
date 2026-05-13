@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { DocumentAnalysisCard, type DocumentAnalysisData } from "../pieces/DocumentAnalysisCard";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import type { DossierDetail } from "@/hooks/dossier/useDossierData";
 import type { ConformityAnalysisResult } from "@/lib/urbanisme/conformity/conformityAnalysisService";
 import { OFFICIAL_PIECES } from "@/lib/urbanisme/cerfa/officialPieces.registry";
@@ -173,9 +174,9 @@ export function DossierAnalysisTab({ dossier, conformityAnalysis }: DossierAnaly
       </InfoCard>
 
       {/* Nomenclature de référence */}
-      <InfoCard title={`Nomenclature ${dossierType}`}>
+      <InfoCard title={`Nomenclature ${getDossierTypeLabel(dossierType)}`}>
         <div className="mb-4 text-sm text-slate-600">
-          Cette nomenclature liste les pièces officielles requises pour un dossier {dossierType}.
+          Cette nomenclature liste les pièces officielles requises pour un dossier {getDossierTypeLabel(dossierType)}.
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {officialPieces.slice(0, 9).map((piece) => (

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { DossierStatusBadge } from "./DossierStatusBadge";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 interface PieceStatus {
   code: string;
@@ -192,8 +193,7 @@ export function DossierDeposit({ dossierId: initialDossierId }: { dossierId?: st
           <div className="flex gap-3 flex-wrap justify-center">
             {Object.entries(PROCEDURES).map(([code, proc]) => (
               <Button key={code} variant="outline" className="h-auto py-3 px-6 flex flex-col items-start gap-1 text-left" onClick={() => createDossier.mutate(code)}>
-                <span className="font-bold text-primary">{code}</span>
-                <span className="text-[10px] opacity-70 whitespace-nowrap">{proc.label}</span>
+                <span className="text-left text-xs font-semibold text-primary leading-tight">{getDossierTypeLabel(code)}</span>
               </Button>
             ))}
           </div>
@@ -220,7 +220,7 @@ export function DossierDeposit({ dossierId: initialDossierId }: { dossierId?: st
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[10px] font-black font-mono bg-muted px-1.5 py-0.5 rounded border">{dossier?.dossierNumber || "SANS NUMÉRO"}</span>
-                <Badge className="bg-primary/10 text-primary border-none px-2 py-0.5">{dossier?.typeProcedure}</Badge>
+                <Badge className="bg-primary/10 text-primary border-none px-2 py-0.5">{getDossierTypeLabel(dossier?.typeProcedure)}</Badge>
                 <span className="text-xs text-muted-foreground">Déposé le {new Date(dossier?.createdAt).toLocaleDateString()}</span>
               </div>
               <CardTitle className="text-2xl font-black tracking-tight">{dossier?.title}</CardTitle>

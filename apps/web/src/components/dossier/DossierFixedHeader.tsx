@@ -1,4 +1,5 @@
 import { DossierStatusBadge } from "./DossierStatusBadge";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 export interface DossierFixedHeaderProps {
   dossier: {
@@ -50,7 +51,7 @@ export function DossierFixedHeader({ dossier }: DossierFixedHeaderProps) {
             <div className="flex items-center gap-2 font-display text-base font-semibold text-slate-900">
               <span>N° {dossier.dossierNumber || dossier.id}</span>
               <span className="text-slate-400">•</span>
-              <span>{dossier.typeProcedure || "Dossier d'urbanisme"}</span>
+              <span>{getDossierTypeLabel(dossier.typeProcedure)}</span>
             </div>
 
             {/* Ligne 2 : Demandeur */}

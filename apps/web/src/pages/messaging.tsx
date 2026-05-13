@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Gavel, Loader2, MessageSquare, ShieldCheck } from "lucide-react";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -161,7 +162,7 @@ export default function MessagingPage() {
                         <p className="text-sm text-muted-foreground">{dossier.address || "Adresse non renseignée"}</p>
                         <div className="flex flex-wrap gap-2 pt-1">
                           {dossier.commune && <Badge variant="outline">{dossier.commune}</Badge>}
-                          {dossier.typeProcedure && <Badge variant="outline">{dossier.typeProcedure}</Badge>}
+                          {dossier.typeProcedure && <Badge variant="outline">{getDossierTypeLabel(dossier.typeProcedure)}</Badge>}
                           {dossier.status && <Badge variant="outline">{dossier.status}</Badge>}
                         </div>
                       </div>

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import { analyzeLocationContext } from "@/lib/locationContextAnalyzer";
 import { CERFA_DYNAMIC_QUESTIONS, triggerSourceLabel } from "@/lib/urbanisme/cerfa/pieceTriggers";
 import { normalizeOfficialDossierType, resolveOfficialPieces } from "@/lib/urbanisme/cerfa/resolveOfficialPieces";
@@ -191,7 +192,7 @@ export function OfficialPiecesChecklist({
             Contexte utilisé pour la checklist
           </p>
           <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-5">
-            <span>Type : <strong className="text-slate-900">{dossierTypeNormalized}</strong></span>
+            <span>Type : <strong className="text-slate-900">{getDossierTypeLabel(dossierTypeNormalized)}</strong></span>
             <span>Commune : <strong className="text-slate-900">{projectContext.locationContext.commune || "à confirmer"}</strong></span>
             <span>Parcelle : <strong className="text-slate-900">{projectContext.locationContext.parcel || "en recherche"}</strong></span>
             <span>Zone PLU : <strong className="text-slate-900">{projectContext.locationContext.pluZone || "en cours"}</strong></span>

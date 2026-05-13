@@ -1,20 +1,10 @@
 import { AlertTriangle, CheckCircle2, Clock3, RotateCcw, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import type { DossierType } from "@/lib/urbanisme/cerfa/officialPieces.types";
 import { ORIENTATION_STORAGE_KEY, type OrientationResultPayload } from "./orientation.types";
 import { getProjectActionLabel } from "./projectActions";
-
-const DOSSIER_LABELS: Record<string, string> = {
-  PCMI: "Permis de construire maison individuelle",
-  PC: "Permis de construire",
-  DPC: "Déclaration préalable — constructions et travaux",
-  DPA: "Déclaration préalable — installations et aménagements",
-  PA: "Permis d'aménager",
-  PD: "Permis de démolir",
-  NO_FORMALITY: "Aucune formalité identifiée",
-  UNKNOWN: "Démarche à confirmer",
-};
 
 function canCreateRecommended(type: string): type is DossierType {
   return type === "PCMI" || type === "PC" || type === "DPC" || type === "DPA" || type === "PA" || type === "PD";
@@ -40,7 +30,7 @@ export function OrientationResult(props: {
     <div className="space-y-6">
       <div className="rounded-xl border border-primary/20 bg-primary/5 p-6">
         <Badge className="mb-3">Démarche recommandée</Badge>
-        <h2 className="text-3xl font-semibold text-slate-950">{DOSSIER_LABELS[result.recommendedDossierType]}</h2>
+        <h2 className="text-3xl font-semibold text-slate-950">{getDossierTypeLabel(result.recommendedDossierType)}</h2>
         <p className="mt-2 text-sm text-slate-600">Confiance : {result.confidence === "high" ? "élevée" : result.confidence === "medium" ? "moyenne" : "faible"}</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {result.selectedActions.map((action) => (

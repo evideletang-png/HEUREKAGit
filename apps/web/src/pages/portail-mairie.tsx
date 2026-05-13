@@ -22,6 +22,7 @@ import { ZoneFirstCalibrationModule } from "@/components/mairie/ZoneFirstCalibra
 import { DossierStatusBadge } from "@/components/dossier/DossierStatusBadge";
 import { DEMO_DOSSIER_ID, getDemoDossierForStatus } from "@/demo/demoSeedData";
 import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 
 type Dossier = {
   id: string;
@@ -362,13 +363,7 @@ type DossierMsg = {
   createdAt: string;
 };
 
-const DOC_TYPE_LABELS: Record<string, string> = {
-  permis_de_construire: "Permis de construire",
-  declaration_prealable: "Déclaration préalable",
-  permis_amenager: "Permis d'aménager",
-  certificat_urbanisme: "Certificat d'urbanisme",
-  autre: "Autre document",
-};
+
 
 function AICorrectionModal({ 
   commune, 
@@ -3085,7 +3080,7 @@ export default function PortailMairiePage() {
     queryFn: () => {
       if (isDemoSessionActive() && selectedId === DEMO_DOSSIER_ID) {
         return Promise.resolve({
-          summary: "Dossier PCMI complet, contraintes patrimoniales identifiees, avis ABF favorable avec prescription.",
+          summary: "Dossier complet (permis de construire maison individuelle), contraintes patrimoniales identifiées, avis ABF favorable avec prescription.",
           global_status: "FAVORABLE_AVEC_PRESCRIPTIONS",
           recommendations: ["Preparer l'accord avec prescriptions", "Envoyer au parapheur mock demo"],
         });
@@ -3375,7 +3370,7 @@ export default function PortailMairiePage() {
                         </div>
                         <div className="flex items-center gap-4 text-xs text-muted-foreground mt-2 pt-2 border-t border-dashed">
                           <Badge variant="outline" className="bg-primary/5 text-primary border-primary/10 text-[9px] h-4">
-                            {DOC_TYPE_LABELS[d.documentType] ?? d.documentType}
+                            {getDossierTypeLabel(d.documentType)}
                           </Badge>
                           {(d.address || d.analysisAddress) && (
                             <div className="flex items-center gap-1 min-w-0">
@@ -3960,7 +3955,7 @@ export default function PortailMairiePage() {
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="text-[10px] font-black font-mono bg-white/80 px-1.5 py-0.5 rounded border">{(detail as any).dossierNumber || "SANS NUMÉRO"}</span>
                                 <Badge variant="outline" className="bg-white/50 text-[10px] h-5 uppercase tracking-tighter">
-                                  {DOC_TYPE_LABELS[detail.documentType] || detail.documentType}
+                                  {getDossierTypeLabel(detail.documentType)}
                                 </Badge>
                               </div>
                               <CardTitle className="text-2xl font-bold">Synthèse du Dossier</CardTitle>
@@ -4071,7 +4066,7 @@ export default function PortailMairiePage() {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-2">
                                   <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
-                                    {DOC_TYPE_LABELS[doc.documentType || ""] ?? doc.documentType}
+                                    {getDossierTypeLabel(doc.documentType)}
                                   </Badge>
                                   {doc.documentNature && (
                                     <Badge variant="secondary" className="bg-indigo-100 text-indigo-800 border-indigo-200">

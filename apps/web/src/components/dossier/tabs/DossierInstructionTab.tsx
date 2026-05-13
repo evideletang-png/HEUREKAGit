@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DeadlineWidget } from "@/components/instruction/DeadlineWidget";
 import { InstructionTimeline } from "@/components/instruction/InstructionTimeline";
 import { LegalAlerts } from "@/components/instruction/LegalAlerts";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import type { DossierDetail, InstructionPayload } from "@/hooks/dossier/useDossierData";
 import type {
   OrientationLocationConstraint,
@@ -61,7 +62,7 @@ export function DossierInstructionTab({ dossier, instruction, instructionTimelin
   const surface = dossier.metadata?.surfacePlancher || dossier.metadata?.surface_plancher || dossier.metadata?.requested_surface_m2 || 120;
 
   const projectFacts = useMemo(() => [
-    ["Type de demande", dossier.typeProcedure || "Permis de Construire"],
+    ["Type de demande", getDossierTypeLabel(dossier.typeProcedure)],
     ["Date de dépôt", formatDate(dossier.createdAt)],
     ["Surface de plancher", `${surface} m²`],
     ["Zonage PLU", zone === "Non renseignée" ? "Zone non renseignée" : `Zone ${zone}${zoneLabel ? ` — ${zoneLabel}` : ""}`],

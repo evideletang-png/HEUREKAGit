@@ -20,6 +20,7 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { AppShell } from "@/components/layout/AppShell";
+import { getDossierTypeLabel } from "@/lib/urbanisme/dossier/dossierTypeLabels";
 import { DEMO_DOSSIER_ID, getDemoDossierForStatus } from "@/demo/demoSeedData";
 import { getDemoSeedMessages } from "@/demo/demoOrchestrator";
 import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
@@ -79,7 +80,7 @@ const PieceChecklist = ({ checklist, dossierId, onUpload }: { checklist: any, do
         <div className="flex items-center justify-between">
           <CardTitle className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
             <ClipboardCheck className="w-4 h-4 text-primary" />
-            Checklist des Pièces Justificatives (Dossier {checklist.dossier_type || 'PCMI'})
+            Checklist des Pièces Justificatives ({getDossierTypeLabel(checklist.dossier_type)})
           </CardTitle>
           <Badge className={niveau_completude === 'OK' ? 'bg-green-600' : 'bg-amber-600'}>
             {niveau_completude === 'OK' ? 'DOSSIER COMPLET' : 'PIÈCES MANQUANTES'}
@@ -226,10 +227,10 @@ const SEVERITE_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const DOC_TYPE_LABELS: Record<string, string> = {
-  permis_de_construire: "Permis de construire",
-  declaration_prealable: "Déclaration préalable",
-  permis_amenager: "Permis d'aménager",
-  certificat_urbanisme: "Certificat d'urbanisme",
+  permis_de_construire: "Permis de construire (PC)",
+  declaration_prealable: "Déclaration préalable (DPC)",
+  permis_amenager: "Permis d'aménager (PA)",
+  certificat_urbanisme: "Certificat d'urbanisme (CU)",
   autre: "Autre document",
 };
 
