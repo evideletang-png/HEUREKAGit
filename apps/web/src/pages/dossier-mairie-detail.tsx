@@ -113,11 +113,19 @@ export default function DossierMairieDetailPage() {
   const [pieceRequestNote, setPieceRequestNote] = useState("");
 
   // Hooks métier
-  const { dossier, instruction, instructionTimeline, isLoading: isDossierLoading } = useDossierData(id || "");
+  const { dossier, instruction, instructionTimeline, isLoading: isDossierLoading, error: dossierError } = useDossierData(id || "");
   const conformityAnalysis = useDossierConformity(dossier);
 
   // Chronologie des délais calculée dynamiquement
-  const timelineResult = useMemo(() => computeTimeline(dossier), [dossier]);
+  const timelineResult = useMemo(() => dossier ? computeTimeline(dossier) : {
+    timelineSteps: [],
+    alerts: [],
+    remainingDays: 0,
+    hasDeadline: false,
+    adjustedDelayMonths: 0,
+    baseDelayMonths: 0,
+    isSuspended: false,
+  }, [dossier]);
   
   // Settings pour les lettres
   const selectedCommuneForSettings = parseFirstCommune((user as any)?.authorizedCommunes) || parseFirstCommune((user as any)?.communes) || "all";
@@ -130,8 +138,8 @@ export default function DossierMairieDetailPage() {
   const letterSettings = settingsQuery.data?.settings?.formulas?.letterSettings;
   const { acceptDossier, refuseDossier, requestPieces, isPreparingSignature, signatureResult } = useDossierActions(dossier, user, letterSettings);
 
-  // Gestion des pièces
-  const dossierType = normalizeOfficialDossierType(dossier.typeProcedure || dossier.title || dossier.dossierNumber || "DPC");
+  // Gestion des pièces — protégée contre dossier null
+  const dossierType = dossier ? normalizeOfficialDossierType(dossier.typeProcedure || dossier.title || dossier.dossierNumber || "DPC") : "DPC";
   const allProcedurePieces = getOfficialPiecesForProcedure(dossierType);
   const selectedPieces = allProcedurePieces.filter((piece) => pieceStates[piece.code]);
   const pieceTemplate = findTemplate(letterSettings, "pieces");
@@ -173,8 +181,33 @@ export default function DossierMairieDetailPage() {
   if (isLoading || isDossierLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f7f7f6] text-slate-500">
-        Chargement du dossier...
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
+          <p className="text-sm font-medium">Chargement du dossier...</p>
+        </div>
       </div>
+    );
+  }
+
+  if (!dossier) {
+    return (
+      <MairieDetailShell>
+        <div className="mb-8 px-4 py-9 sm:px-6 lg:px-8">
+          <Link href="/dashboard-mairie" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-950">
+            <ArrowLeft className="h-4 w-4" />
+            Retour au tableau de bord
+          </Link>
+        </div>
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <div className="text-center">
+            <p className="text-lg font-bold text-slate-700">Dossier introuvable</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {dossierError ? "Erreur lors du chargement du dossier." : "Le dossier demandé n'existe pas ou a été supprimé."}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">ID : {id}</p>
+          </div>
+        </div>
+      </MairieDetailShell>
     );
   }
 
@@ -211,9 +244,9 @@ export default function DossierMairieDetailPage() {
           {activeTab === "recapitulatif" && (
             <DossierSummaryTab
               dossier={dossier}
-              instruction={instruction}
-              instructionTimeline={instructionTimeline}
-              conformityAnalysis={conformityAnalysis}
+              instruction={instruction!}
+              instructionTimeline={instructionTimeline!}
+              conformityAnalysis={conformityAnalysis!}
               onShowConformityDetails={() => setConformityOpen(true)}
             />
           )}
@@ -221,15 +254,15 @@ export default function DossierMairieDetailPage() {
           {activeTab === "analyse" && (
             <DossierAnalysisTab
               dossier={dossier}
-              conformityAnalysis={conformityAnalysis}
+              conformityAnalysis={conformityAnalysis!}
             />
           )}
 
           {activeTab === "instruction" && (
             <DossierInstructionTab
               dossier={dossier}
-              instruction={instruction}
-              instructionTimeline={instructionTimeline}
+              instruction={instruction!}
+              instructionTimeline={instructionTimeline!}
             />
           )}
 

@@ -203,7 +203,7 @@ function statusMatches(rowStatus: string | null | undefined, configuredStatus: D
 }
 
 function getDossierUrl(row: MairieDossier) {
-  return row.id.startsWith("demo-") ? "/dossier/d2" : `/dossier/${encodeURIComponent(row.id)}`;
+  return `/dossier/${encodeURIComponent(row.id)}`;
 }
 
 function buildDefaultLetterSettings(user: any, selectedCommune: string, settings?: MairieSettings | null): LetterSettingsConfig {
@@ -365,7 +365,7 @@ function DashboardView() {
   const [agentFilter, setAgentFilter] = useState("all");
   const [previewDossier, setPreviewDossier] = useState<MairieDossier | null>(null);
 
-  const { data, isLoading } = useQuery<{ dossiers: MairieDossier[] }>({
+  const { data, isLoading, isError } = useQuery<{ dossiers: MairieDossier[] }>({
     queryKey: ["mairie-dashboard-dossiers", selectedCommune],
     queryFn: () => apiFetch(`/api/mairie/dossiers${selectedCommune !== "all" ? `?commune=${encodeURIComponent(selectedCommune)}` : ""}`),
   });
@@ -383,8 +383,8 @@ function DashboardView() {
     status: demoState.dossierStatus,
   };
   const rows = demoActive
-    ? [demoDashboardRow, ...(data?.dossiers?.length ? data.dossiers : demoRows)]
-    : data?.dossiers?.length ? data.dossiers : demoRows;
+    ? [demoDashboardRow, ...(data?.dossiers || [])]
+    : (data?.dossiers || []);
   const activeStatuses = useMemo(() => {
     const configured = settingsData?.settings?.formulas?.dashboardStatuses;
     const base = configured?.length ? configured : defaultDashboardStatuses;
@@ -490,6 +490,19 @@ function DashboardView() {
           <span>1-{filteredRows.length} sur {rows.length}</span>
         </div>
         <div className="overflow-x-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="flex flex-col items-center gap-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
+                <p className="text-sm font-medium text-slate-500">Chargement des dossiers...</p>
+              </div>
+            </div>
+          ) : isError ? (
+            <div className="py-12 text-center">
+              <p className="text-sm font-medium text-red-600">Erreur de chargement des dossiers.</p>
+              <p className="mt-1 text-xs text-slate-500">Veuillez réessayer.</p>
+            </div>
+          ) : (
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -531,7 +544,8 @@ function DashboardView() {
               })}
             </tbody>
           </table>
-          {filteredRows.length === 0 && (
+          )}
+          {!isLoading && !isError && filteredRows.length === 0 && (
             <div className="py-12 text-center text-sm font-medium text-slate-500">
               Aucun dossier ne correspond aux critères.
             </div>

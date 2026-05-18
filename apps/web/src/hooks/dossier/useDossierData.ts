@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDemoDossierForStatus } from "@/demo/demoSeedData";
 import { isDemoSessionActive, readDemoState } from "@/demo/demoModeStore";
+import { getDemoDossierForStatus } from "@/demo/demoSeedData";
 
 export type DossierDetail = {
   id: string;
@@ -64,72 +64,48 @@ async function apiFetch(path: string) {
   return response.json();
 }
 
-const demoDossier: DossierDetail = {
-  id: "d2",
-  dossierNumber: "PC-13120-26-00123",
-  typeProcedure: "Permis de Construire",
-  status: "En instruction",
-  userName: "Jean Dupont",
-  address: "12 avenue de la République, 13120 Gardanne",
-  commune: "Gardanne",
-  parcelRef: "CD-0118",
-  createdAt: "2026-03-15",
-  updatedAt: "2026-03-18",
-  metadata: {
-    zoneCode: "UB",
-    surfacePlancher: 120,
-    pluAnalysis: { zone: "UB" },
-  },
-  instructionStatus: "complet",
-  dateDepot: "2026-03-15",
-  dateCompletude: "2026-03-18",
-  dateLimiteInstruction: "2026-05-18",
-  isTacite: false,
-  documents: [
-    { id: "cerfa", title: "Formulaire CERFA", documentType: "cerfa" },
-    { id: "plan", title: "Plan de masse", documentType: "plan" },
-    { id: "notice", title: "Notice descriptive", documentType: "notice" },
-  ],
-};
-
 export function useDossierData(id: string) {
   const demoActive = isDemoSessionActive();
-  
+
   const query = useQuery<DossierDetail>({
     queryKey: ["mairie-full-dossier", id],
     queryFn: () => apiFetch(`/api/mairie/dossiers/${encodeURIComponent(id)}`),
-    enabled: !!id && !id.startsWith("demo-") && id !== "d2",
+    enabled: !!id && !demoActive,
   });
 
   const instructionQuery = useQuery<InstructionPayload>({
     queryKey: ["mairie-dossier-instruction", id],
     queryFn: () => apiFetch(`/api/mairie/dossiers/${encodeURIComponent(id)}/instruction`),
-    enabled: !!id && !id.startsWith("demo-") && id !== "d2",
+    enabled: !!id && !demoActive && !!query.data,
   });
 
-  // Données démo ou fallback
-  const seededDemoDossier = getDemoDossierForStatus(readDemoState().dossierStatus) as any as DossierDetail;
-  const dossier = query.data || (demoActive ? seededDemoDossier : demoDossier);
-  
-  const instruction = instructionQuery.data?.instruction || {
-    instructionStatus: dossier.instructionStatus || demoDossier.instructionStatus,
-    dateDepot: dossier.dateDepot || dossier.createdAt || demoDossier.dateDepot,
-    dateCompletude: dossier.dateCompletude || demoDossier.dateCompletude,
-    dateLimiteInstruction: dossier.dateLimiteInstruction || demoDossier.dateLimiteInstruction,
+  const demoDossier = demoActive ? getDemoDossierForStatus(readDemoState().dossierStatus) as unknown as DossierDetail : null;
+
+  const dossier = demoActive ? demoDossier : (query.data ?? null);
+
+  const instruction = dossier ? {
+    instructionStatus: dossier.instructionStatus || null,
+    dateDepot: dossier.dateDepot || dossier.createdAt || null,
+    dateCompletude: dossier.dateCompletude || null,
+    dateLimiteInstruction: dossier.dateLimiteInstruction || null,
     isTacite: !!dossier.isTacite,
     alerts: [],
-  };
+  } : null;
 
-  const instructionTimeline = instructionQuery.data?.timeline || [
-    { id: "depot", type: "depot", description: "Dossier déposé", createdAt: instruction.dateDepot || demoDossier.dateDepot },
-    { id: "completude", type: "piece_recue", description: "Dossier complet", createdAt: instruction.dateCompletude || demoDossier.dateCompletude },
-  ];
+  const fallbackTimeline: InstructionPayload["timeline"] = [];
+  if (instruction?.dateDepot) {
+    fallbackTimeline.push({ id: "depot", type: "depot", description: "Dossier déposé", createdAt: instruction.dateDepot });
+  }
+  if (instruction?.dateCompletude) {
+    fallbackTimeline.push({ id: "completude", type: "piece_recue", description: "Dossier complet", createdAt: instruction.dateCompletude });
+  }
+  const instructionTimeline = instructionQuery.data?.timeline || fallbackTimeline;
 
   return {
     dossier,
     instruction,
     instructionTimeline,
-    isLoading: query.isLoading,
+    isLoading: !demoActive && query.isLoading,
     error: query.error,
     refetch: query.refetch
   };

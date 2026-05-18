@@ -87,10 +87,14 @@ function renderTemplate(template: string, dossier: DossierDetail, settings: Lett
   return Object.entries(values).reduce((body, [token, value]) => body.replaceAll(token, value), template);
 }
 
-export function useDossierActions(dossier: DossierDetail, user: any, letterSettings: LetterSettingsConfig = fallbackLetterSettings) {
+export function useDossierActions(dossier: DossierDetail | null, user: any, letterSettings: LetterSettingsConfig = fallbackLetterSettings) {
   const { toast } = useToast();
   const [isPreparingSignature, setIsPreparingSignature] = useState(false);
   const [signatureResult, setSignatureResult] = useState<SignatureWorkflowResult | null>(null);
+
+  if (!dossier) {
+    return { acceptDossier: async () => {}, refuseDossier: async () => {}, requestPieces: async () => {}, isPreparingSignature: false, signatureResult: null, setSignatureResult };
+  }
 
   const sendToParapheur = async (kind: "accept" | "refuse" | "pieces", body: string) => {
     setIsPreparingSignature(true);
@@ -140,6 +144,7 @@ export function useDossierActions(dossier: DossierDetail, user: any, letterSetti
   };
 
   const acceptDossier = async (reason?: string) => {
+    if (!dossier) return;
     const template = findTemplate(letterSettings, "acceptation");
     if (!template) return;
     
@@ -150,6 +155,7 @@ export function useDossierActions(dossier: DossierDetail, user: any, letterSetti
   };
 
   const refuseDossier = async (reason?: string) => {
+    if (!dossier) return;
     const template = findTemplate(letterSettings, "refus");
     if (!template) return;
     
@@ -160,6 +166,7 @@ export function useDossierActions(dossier: DossierDetail, user: any, letterSetti
   };
 
   const requestPieces = async (piecesList: string, note?: string) => {
+    if (!dossier) return;
     const template = findTemplate(letterSettings, "pieces");
     if (!template) return;
     

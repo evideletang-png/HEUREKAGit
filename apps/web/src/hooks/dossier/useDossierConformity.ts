@@ -15,8 +15,9 @@ function flagFromConstraints(constraints: OrientationLocationConstraint[], patte
   return constraints.some((constraint) => pattern.test(`${constraint.type} ${constraint.label}`));
 }
 
-export function useDossierConformity(dossier: DossierDetail) {
+export function useDossierConformity(dossier: DossierDetail | null) {
   const conformityAnalysis = useMemo(() => {
+    if (!dossier) return null;
     const parcelAnalysis = dossier.metadata?.parcelAnalysis || {};
     const orientationContext = dossier.metadata?.orientationContext as {
       locationConstraints?: OrientationLocationConstraint[];
