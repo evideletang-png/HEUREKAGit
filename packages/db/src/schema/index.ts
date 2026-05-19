@@ -39,3 +39,9 @@ export * from "./regulatoryRuleConflicts";
 export * from "./regulatoryCalibrationPermissions";
 export * from "./zoneThematicSegments";
 export * from "./messaging";
+
+// ── Phase 1 zone-centric refactor (parallel to legacy regulatory_units / urban_rules / indexed_regulatory_rules) ──
+export * from "./regulatoryZones";
+export * from "./zoneRegulatoryRules";
+export * from "./regulatoryControls";
+export * from "./reglementAnalysis";
